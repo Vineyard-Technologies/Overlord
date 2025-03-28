@@ -6,7 +6,7 @@
         xmlns:local="clr-namespace:Overlord"
         mc:Ignorable="d"
         Title="Overlord" Height="450" Width="800">
-    <Grid>
-
-    </Grid>
+    <StackPanel x:Name="MainContainer">
+        <!-- Other UI elements can go here -->
+    </StackPanel>
 </Window>
