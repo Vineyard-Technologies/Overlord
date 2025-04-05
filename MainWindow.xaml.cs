@@ -7,14 +7,16 @@ namespace Overlord;
 
 public partial class MainWindow : Window
 {
-    private bool noPrompt = true;
-    string logSize = "500000000";
+
     private string scriptDirectory = System.IO.Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         "OneDrive",
         "repositories",
         "DAZScripts"
     );
+    private bool noPrompt = true;
+    string logSize = "500000000";
+    Dictionary<string, string> argumentData = new Dictionary<string, string>{};
 
     public MainWindow()
     {
@@ -32,28 +34,31 @@ public partial class MainWindow : Window
 
     private void AddFormElements()
     {
+        Canvas canvas = new Canvas();
+
         // Checkbox for noPrompt
         CheckBox noPromptCheckBox = new CheckBox
         {
             Content = "No Prompt",
-            Margin = new Thickness(10),
             IsChecked = noPrompt
         };
         noPromptCheckBox.Checked += (s, e) => noPrompt = true;
         noPromptCheckBox.Unchecked += (s, e) => noPrompt = false;
+        Canvas.SetLeft(noPromptCheckBox, 10);
+        Canvas.SetTop(noPromptCheckBox, 10);
 
         // Label for log size
         TextBlock logSizeLabel = new TextBlock
         {
-            Text = "Log file size (megabytes):",
-            Margin = new Thickness(10)
+            Text = "Log file size (megabytes):"
         };
+        Canvas.SetLeft(logSizeLabel, 10);
+        Canvas.SetTop(logSizeLabel, 50);
 
         // Textbox for log size
         TextBox logSizeTextBox = new TextBox
         {
             Text = "500", // Default value
-            Margin = new Thickness(10),
             Width = 100
         };
         logSizeTextBox.TextChanged += (s, e) =>
@@ -63,19 +68,26 @@ public partial class MainWindow : Window
                 logSize = (sizeInMb * 1000000).ToString(); // Convert MB to bytes
             }
         };
+        Canvas.SetLeft(logSizeTextBox, 200);
+        Canvas.SetTop(logSizeTextBox, 50);
 
         // Execute button
         Button executeButton = new Button
         {
-            Content = "Start Rendering",
-            Margin = new Thickness(10)
+            Content = "Start Rendering"
         };
         executeButton.Click += ExecuteButton_Click;
+        Canvas.SetLeft(executeButton, 10);
+        Canvas.SetTop(executeButton, 100);
 
-        MainContainer.Children.Add(noPromptCheckBox);
-        MainContainer.Children.Add(logSizeLabel);
-        MainContainer.Children.Add(logSizeTextBox);
-        MainContainer.Children.Add(executeButton);
+        // Add elements to canvas
+        canvas.Children.Add(noPromptCheckBox);
+        canvas.Children.Add(logSizeLabel);
+        canvas.Children.Add(logSizeTextBox);
+        canvas.Children.Add(executeButton);
+
+        // Add canvas to the main container
+        MainContainer.Children.Add(canvas);
     }
 
     private void ExecuteButton_Click(object sender, RoutedEventArgs e)
@@ -85,7 +97,13 @@ public partial class MainWindow : Window
 
         string masterRendererPath = System.IO.Path.Combine(scriptDirectory, "masterRenderer.dsa");
 
-        process.StartInfo.Arguments = $"-scriptArg 1 -instanceName # -logSize {logSize} " + (noPrompt ? "-noPrompt " : "") + $"\"{masterRendererPath}\"";
+        process.StartInfo.Arguments = 
+            $"-scriptArg {argumentData} " + // JSON of all the custom arguments
+            "-instanceName # " + // Incrementally name each instance
+            $"-logSize {logSize} " + // The size of the log file, in bytes
+            (noPrompt ? "-noPrompt " : "") + // Whether or not prompts should be supressed
+            $"\"{masterRendererPath}\""; // The path to the script
+
         process.StartInfo.UseShellExecute = false;
         process.StartInfo.RedirectStandardOutput = true;
         process.StartInfo.RedirectStandardError = true;
