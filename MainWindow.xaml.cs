@@ -2,6 +2,8 @@
 using System.Windows.Controls;
 using System.Diagnostics;
 using System.Reflection;
+using System.Windows.Media.Imaging;
+using System.Windows.Media;
 
 namespace Overlord;
 
@@ -16,7 +18,7 @@ public partial class MainWindow : Window
     );
     private bool noPrompt = true;
     string logSize = "500000000";
-    Dictionary<string, string> argumentData = new Dictionary<string, string>{};
+    Dictionary<string, string> argumentData = new() { };
 
     public MainWindow()
     {
@@ -34,10 +36,20 @@ public partial class MainWindow : Window
 
     private void AddFormElements()
     {
-        Canvas canvas = new Canvas();
+        Canvas canvas = new();
+
+        Image logo = new()
+        {
+            Source = new BitmapImage(new Uri("pack://application:,,,/Overlord;component/logo.png")),
+            Width = 300,
+            Height = 117
+        };
+        Canvas.SetLeft(logo, 10);
+        Canvas.SetTop(logo, 10);
+        canvas.Children.Add(logo);
 
         // Checkbox for noPrompt
-        CheckBox noPromptCheckBox = new CheckBox
+        CheckBox noPromptCheckBox = new()
         {
             Content = "No Prompt",
             IsChecked = noPrompt
@@ -45,18 +57,17 @@ public partial class MainWindow : Window
         noPromptCheckBox.Checked += (s, e) => noPrompt = true;
         noPromptCheckBox.Unchecked += (s, e) => noPrompt = false;
         Canvas.SetLeft(noPromptCheckBox, 10);
-        Canvas.SetTop(noPromptCheckBox, 10);
+        Canvas.SetTop(noPromptCheckBox, 140);
 
         // Label for log size
-        TextBlock logSizeLabel = new TextBlock
+        TextBlock logSizeLabel = new()
         {
             Text = "Log file size (megabytes):"
         };
         Canvas.SetLeft(logSizeLabel, 10);
-        Canvas.SetTop(logSizeLabel, 50);
-
+        Canvas.SetTop(logSizeLabel, 160);
         // Textbox for log size
-        TextBox logSizeTextBox = new TextBox
+        TextBox logSizeTextBox = new()
         {
             Text = "500", // Default value
             Width = 100
@@ -69,16 +80,16 @@ public partial class MainWindow : Window
             }
         };
         Canvas.SetLeft(logSizeTextBox, 200);
-        Canvas.SetTop(logSizeTextBox, 50);
+        Canvas.SetTop(logSizeTextBox, 160);
 
         // Execute button
-        Button executeButton = new Button
+        Button executeButton = new()
         {
             Content = "Start Rendering"
         };
         executeButton.Click += ExecuteButton_Click;
         Canvas.SetLeft(executeButton, 10);
-        Canvas.SetTop(executeButton, 100);
+        Canvas.SetTop(executeButton, 210);
 
         // Add elements to canvas
         canvas.Children.Add(noPromptCheckBox);
@@ -93,7 +104,7 @@ public partial class MainWindow : Window
 
     private void ExecuteButton_Click(object sender, RoutedEventArgs e)
     {
-        Process process = new Process();
+        Process process = new();
         process.StartInfo.FileName = "\"C:\\Program Files\\DAZ 3D\\DAZStudio4\\DAZStudio.exe\"";
 
         string masterRendererPath = System.IO.Path.Combine(scriptDirectory, "masterRenderer.dsa");

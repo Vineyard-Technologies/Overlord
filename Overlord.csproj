@@ -6,7 +6,13 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
+    <ApplicationIcon>favicon.ico</ApplicationIcon>
     <AssemblyVersion>1.0.0.0</AssemblyVersion>
   </PropertyGroup>
+
+    <ItemGroup>
+    <Resource Include="logo.png">
+    </Resource>
+  </ItemGroup>
 
 </Project>
