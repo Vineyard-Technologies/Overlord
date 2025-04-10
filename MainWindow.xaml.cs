@@ -86,7 +86,8 @@ public partial class MainWindow : Window
         canvas.Children.Add(logSizeTextBox);
         canvas.Children.Add(executeButton);
 
-        // Add canvas to the main container
+        // Fixed "The name 'MainContainer' does exist in the current context" error with this:
+        // https://github.com/dotnet/vscode-csharp/issues/5958#issuecomment-2283458200
         MainContainer.Children.Add(canvas);
     }
 
