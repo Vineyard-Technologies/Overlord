@@ -1,2 +1,0 @@
-# Overlord
- This tool is a centralized admin dashboard to execute [Daz Scripts](https://github.com/Laserwolve-Games/DAZScripts). It launches, manages, tracks and terminates [Daz Studio](https://www.daz3d.com/) instances. It also generates spritesheets using [PowerShell](https://en.wikipedia.org/wiki/PowerShell) and [TexturePacker](https://www.codeandweb.com/texturepacker), for use in [DaggerQuest](https://github.com/Laserwolve-Games/DaggerQuest) and [Plains of Shinar](https://github.com/Laserwolve-Games/PlainsOfShinar).
