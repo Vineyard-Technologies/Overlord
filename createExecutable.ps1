@@ -1,0 +1,1 @@
+C:\Users\Andrew\AppData\Roaming\Python\Python313\Scripts\pyinstaller.exe --onefile --windowed --icon favicon.ico --add-data 'favicon.ico:.' --add-data 'logo.png:.' overlord.py

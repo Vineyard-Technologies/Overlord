@@ -2,12 +2,21 @@ import tkinter as tk
 from tkinter import filedialog
 import os
 import subprocess
+import sys
+
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        base_path = sys._MEIPASS
+    except AttributeError:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
 
 def main():
     # Create the main window
     root = tk.Tk()
     root.title("Overlord")
-    root.iconbitmap("favicon.ico")  # Set the application icon
+    root.iconbitmap(resource_path("favicon.ico"))  # Set the application icon
 
     # Disable window resizing
     root.resizable(False, False)
@@ -16,7 +25,7 @@ def main():
     root.geometry("800x800")
 
     # Load and display the logo image
-    logo = tk.PhotoImage(file="logo.png")
+    logo = tk.PhotoImage(file=resource_path("logo.png"))
     logo_label = tk.Label(root, image=logo)
     logo_label.image = logo  # Keep a reference to avoid garbage collection
     logo_label.pack(pady=10)
