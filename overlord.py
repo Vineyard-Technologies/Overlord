@@ -4,6 +4,13 @@ import os
 import subprocess
 import sys
 import webbrowser
+import json
+from PIL import Image, ImageTk
+import psutil
+try:
+    import GPUtil
+except ImportError:
+    GPUtil = None
 
 def resource_path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """
@@ -16,7 +23,7 @@ def resource_path(relative_path):
 def main():
     # Create the main window
     root = tk.Tk()
-    root.title("Overlord")
+    root.title("Overlord 1.0.0")
     root.iconbitmap(resource_path("favicon.ico"))  # Set the application icon
 
     # Maximize the application window
@@ -27,6 +34,16 @@ def main():
     logo_label = tk.Label(root, image=logo, cursor="hand2")
     logo_label.image = logo  # Keep a reference to avoid garbage collection
     logo_label.pack(pady=10)
+
+    # Add Laserwolve Games logo to upper right corner
+    lwg_logo = tk.PhotoImage(file=resource_path("laserwolveGamesLogo.png"))
+    lwg_logo_label = tk.Label(root, image=lwg_logo, cursor="hand2")
+    lwg_logo_label.image = lwg_logo  # Keep a reference to avoid garbage collection
+    # Place in upper right using place geometry manager
+    lwg_logo_label.place(relx=1.0, x=-20, y=10, anchor="ne")
+    def open_lwg_link(event):
+        webbrowser.open("https://www.laserwolvegames.com/")
+    lwg_logo_label.bind("<Button-1>", open_lwg_link)
 
     # Make the logo clickable
     def open_github_link(event):
@@ -51,22 +68,18 @@ def main():
     param_params = [
         "Number of Instances",
         "Instance Naming Format",
+        "Frame Rate",
         "Log File Size (MBs)",
         "Do not Display Prompts"
     ]
     value_entries = {}
 
-    # File table header
-    header_param = tk.Label(file_table_frame, text="Parameter Name", font=("Arial", 12, "bold"))
-    header_param.grid(row=0, column=0, padx=10, pady=5)
-    header_value = tk.Label(file_table_frame, text="Value", font=("Arial", 12, "bold"))
-    header_value.grid(row=0, column=1, padx=10, pady=5)
-
-    # Param table header
-    header_param2 = tk.Label(param_table_frame, text="Parameter Name", font=("Arial", 12, "bold"))
-    header_param2.grid(row=0, column=0, padx=10, pady=5)
-    header_value2 = tk.Label(param_table_frame, text="Value", font=("Arial", 12, "bold"))
-    header_value2.grid(row=0, column=1, padx=10, pady=5)
+    # Replace file_table_frame headers with a centered "Options" header
+    options_header = tk.Label(file_table_frame, text="Options", font=("Arial", 14, "bold"))
+    options_header.grid(row=0, column=0, columnspan=3, padx=10, pady=5, sticky="ew")
+    file_table_frame.grid_columnconfigure(0, weight=1)
+    file_table_frame.grid_columnconfigure(1, weight=1)
+    file_table_frame.grid_columnconfigure(2, weight=1)
 
     def make_browse_file(entry, initialdir=None, filetypes=None, title="Select file"):
         def browse_file():
@@ -147,22 +160,41 @@ def main():
         elif param == "Source Files":
             text_widget = tk.Text(file_table_frame, width=100, height=15, font=("Consolas", 10))
             text_widget.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
+            def browse_files_append():
+                filenames = filedialog.askopenfilenames(
+                    initialdir=".",
+                    title="Select Source Files",
+                    filetypes=(("All files", "*.*"),)
+                )
+                if filenames:
+                    current = text_widget.get("1.0", tk.END).strip()
+                    current_files = set(current.split("\n")) if current else set()
+                    new_files = [f for f in filenames if f not in current_files]
+                    if new_files:
+                        if current:
+                            text_widget.insert(tk.END, "\n" + "\n".join(new_files))
+                        else:
+                            text_widget.insert(tk.END, "\n".join(new_files))
             browse_button = tk.Button(
                 file_table_frame,
                 text="Browse",
-                command=make_browse_files(
-                    text_widget,
-                    initialdir=".",
-                    filetypes=(("All files", "*.*"),),
-                    title="Select Source Files"
-                )
+                command=browse_files_append
             )
             browse_button.grid(row=i+1, column=2, padx=5, pady=5)
+            # Add Clear button below Browse button
+            def clear_source_files():
+                text_widget.delete("1.0", tk.END)
+            clear_button = tk.Button(
+                file_table_frame,
+                text="Clear",
+                command=clear_source_files
+            )
+            clear_button.grid(row=i+1, column=2, padx=5, pady=(100, 5))
             value_entries[param] = text_widget
 
         elif param == "Output Directory":
             value_entry = tk.Entry(file_table_frame, width=100, font=("Consolas", 10))
-            value_entry.insert(0, r"C:/Users/Andrew/Documents/GitHub/PlainsOfShinar/spritesheets")
+            value_entry.insert(0, r"C:\Users\Andrew\Documents\GitHub\PlainsOfShinar\spritesheets")
             value_entry.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
 
             browse_button = tk.Button(
@@ -170,7 +202,7 @@ def main():
                 text="Browse",
                 command=make_browse_folder(
                     value_entry,
-                    initialdir=r"C:/Users/Andrew/Documents/GitHub/PlainsOfShinar/spritesheets",
+                    initialdir=r"C:\Users\Andrew\Documents\GitHub\PlainsOfShinar\spritesheets",
                     title="Select Output Directory"
                 )
             )
@@ -200,13 +232,117 @@ def main():
                 value_entry.insert(0, "1")
             elif param == "Log File Size (MBs)":
                 value_entry.insert(0, "500")
+            elif param == "Frame Rate":
+                value_entry.insert(0, "30")
             value_entry.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
             value_entries[param] = value_entry
 
+    # --- Last Rendered Image Section ---
+    right_frame = tk.Frame(root)
+    right_frame.place(relx=0.55, rely=0.15, width=600, height=600)  # 512 + ~title height + padding
+
+    last_img_title = tk.Label(right_frame, text="Last Rendered Image", font=("Arial", 16, "bold"))
+    last_img_title.pack(pady=(0, 10))
+
+    # Place img_label directly in right_frame
+    img_label = tk.Label(right_frame)
+    img_label.pack(padx=0, pady=2, side="left")
+
+    # --- Image Details Column ---
+    # Place details_frame at the right edge of the main window
+    details_frame = tk.Frame(root, width=350)
+    details_frame.place(relx=1.0, rely=0.15, anchor="ne", width=350, height=600)
+    details_frame.pack_propagate(False)
+
+    details_title = tk.Label(details_frame, text="Image Details", font=("Arial", 14, "bold"))
+    details_title.pack(anchor="nw", pady=(0, 10))
+
+    # Show only the path (no "Path: " prefix)
+    details_path = tk.Label(details_frame, text="", font=("Consolas", 9), wraplength=330, justify="left")
+    details_path.pack(anchor="nw", pady=(0, 5))
+
+    # Add a button to copy the path to clipboard
+    def copy_path_to_clipboard():
+        path = details_path.cget("text")
+        if path:
+            root.clipboard_clear()
+            root.clipboard_append(path)
+            root.update()  # Keeps clipboard after window closes
+
+    copy_btn = tk.Button(details_frame, text="Copy Path", command=copy_path_to_clipboard, font=("Arial", 9))
+    copy_btn.pack(anchor="nw", pady=(0, 8))
+
+    details_size = tk.Label(details_frame, text="Size: ", font=("Arial", 10))
+    details_size.pack(anchor="nw", pady=(0, 5))
+    details_dim = tk.Label(details_frame, text="Dimensions: ", font=("Arial", 10))
+    details_dim.pack(anchor="nw", pady=(0, 5))
+
+    no_img_label = tk.Label(right_frame, text="No images found in output directory", font=("Arial", 12))
+    no_img_label.place(relx=0.5, rely=0.5, anchor="center")
+    no_img_label.lower()  # Hide initially
+
+    def find_newest_image(directory):
+        image_exts = ('.png', '.jpg', '.jpeg', '.bmp', '.gif', '.tiff', '.webp')
+        newest_file = None
+        newest_time = None
+        for rootdir, _, files in os.walk(directory):
+            for fname in files:
+                if fname.lower().endswith(image_exts):
+                    fpath = os.path.join(rootdir, fname)
+                    mtime = os.path.getmtime(fpath)
+                    if newest_time is None or mtime > newest_time:
+                        newest_time = mtime
+                        newest_file = fpath
+        return newest_file
+
+    def show_last_rendered_image():
+        output_dir = value_entries["Output Directory"].get()
+        newest_img_path = find_newest_image(output_dir)
+        if newest_img_path and os.path.exists(newest_img_path):
+            try:
+                img = Image.open(newest_img_path)
+                img = img.resize((512, 512), Image.LANCZOS)
+                # Update image details
+                orig_img = Image.open(newest_img_path)
+                width, height = orig_img.size
+                file_size = os.path.getsize(newest_img_path)
+                details_path.config(text=f"{newest_img_path}")  # No "Path: " prefix
+                details_dim.config(text=f"Dimensions: {width} x {height}")
+                details_size.config(text=f"Size: {file_size/1024:.1f} KB")
+                tk_img = ImageTk.PhotoImage(img)
+                img_label.config(image=tk_img)
+                img_label.image = tk_img
+                no_img_label.lower()
+            except Exception:
+                img_label.config(image="")
+                img_label.image = None
+                details_path.config(text="")
+                details_dim.config(text="Dimensions: ")
+                details_size.config(text="Size: ")
+                no_img_label.lift()
+        else:
+            img_label.config(image="")
+            img_label.image = None
+            details_path.config(text="")
+            details_dim.config(text="Dimensions: ")
+            details_size.config(text="Size: ")
+            no_img_label.lift()
+        # Schedule to check again in 1 second
+        root.after(1000, show_last_rendered_image)
+
+    # Update image when output directory changes or after render
+    def on_output_dir_change(*args):
+        root.after(200, show_last_rendered_image)
+    value_entries["Output Directory"].bind("<FocusOut>", lambda e: on_output_dir_change())
+    value_entries["Output Directory"].bind("<Return>", lambda e: on_output_dir_change())
+
+    # Also update after render
     def start_render():
         daz_executable_path = value_entries["Daz Studio Executable Path"].get()
         render_script_path = value_entries["Render Script Path"].get().replace("\\", "/")
-        source_files = value_entries["Source Files"].get("1.0", tk.END).strip().replace("\\", "/")
+        source_files = value_entries["Source Files"].get("1.0", tk.END).strip().replace("\\", "/").split("\n")
+        source_files = [file for file in source_files if file]  # Remove empty lines
+        source_files = json.dumps(source_files)
         output_dir = value_entries["Output Directory"].get().replace("\\", "/")
         num_instances = value_entries["Number of Instances"].get()
         instance_name = value_entries["Instance Naming Format"].get()
@@ -214,11 +350,11 @@ def main():
         log_size = int(log_size) * 1000000  # Convert MBs to bytes
         prompt_var = value_entries["Do not Display Prompts"].get()
 
+        json_map = f'{{"num_instances": "{num_instances}", "output_dir": "{output_dir}", "source_files": {source_files}}}'
+
         command = [
             daz_executable_path,
-            "-scriptArg", str(num_instances),
-            "-scriptArg", str(output_dir),
-            "-scriptArg", str(source_files),
+            "-scriptArg", json_map,
             "-instanceName", str(instance_name),
             "-logSize", str(log_size),
         ]
@@ -227,9 +363,126 @@ def main():
         command.append(render_script_path)
 
         subprocess.Popen(command)
+        root.after(1000, show_last_rendered_image)  # Update image after render
 
-    button = tk.Button(root, text="Start Render", command=start_render)
-    button.pack(side="bottom", pady=20)
+    # Initial display
+    root.after(500, show_last_rendered_image)
+
+    def end_all_daz_studio():
+        # Use PowerShell to kill all DAZStudio processes
+        subprocess.Popen([
+            "powershell",
+            "-Command",
+            'Get-Process -Name "DAZStudio" -ErrorAction SilentlyContinue | ForEach-Object { $_.Kill() }'
+        ])
+
+    button = tk.Button(root, text="Start Render", command=start_render, font=("Arial", 16, "bold"), width=20, height=2)
+    button.pack(side="left", anchor="sw", padx=(30,10), pady=20)
+
+    end_button = tk.Button(
+        root,
+        text="End all Daz Studio Instances",
+        command=end_all_daz_studio,
+        font=("Arial", 16, "bold"),
+        width=26,
+        height=2
+    )
+    end_button.pack(side="left", anchor="sw", padx=0, pady=20)
+
+    # --- System Details Bar ---
+    sys_bar_frame = tk.Frame(root, bd=1, relief="sunken", bg="#f0f0f0")
+    sys_bar_frame.place(relx=1.0, rely=1.0, anchor="se", width=900, height=32)
+    sys_bar_label = tk.Label(sys_bar_frame, text="System details loading...", anchor="e", font=("Arial", 12), bg="#f0f0f0")
+    sys_bar_label.pack(fill="both", expand=True)
+
+    def get_drive_free_gb(path):
+        try:
+            drive = os.path.splitdrive(path)[0] or os.path.splitdrive(os.path.abspath(path))[0]
+            if not drive:
+                drive = os.path.abspath(path)[:2]  # fallback
+            usage = psutil.disk_usage(drive)
+            return usage.free / (1024 ** 3)
+        except Exception:
+            return None
+
+    def get_cpu_temp():
+        try:
+            temps = psutil.sensors_temperatures()
+            for name in temps:
+                for entry in temps[name]:
+                    if "cpu" in entry.label.lower() or "package" in entry.label.lower() or name.lower().startswith("core"):
+                        return entry.current
+            # fallback: just take first available
+            for name in temps:
+                if temps[name]:
+                    return temps[name][0].current
+        except Exception:
+            pass
+        return None
+
+    def get_gpu_info():
+        if GPUtil is None:
+            return None
+        try:
+            gpus = GPUtil.getGPUs()
+            if not gpus:
+                return None
+            gpu = gpus[0]
+            return {
+                "temp": gpu.temperature,
+                "util": gpu.load * 100,
+                "mem_util": gpu.memoryUtil * 100,
+                "mem_total": gpu.memoryTotal,
+                "mem_free": gpu.memoryFree,
+                "mem_used": gpu.memoryUsed,
+                "name": gpu.name
+            }
+        except Exception:
+            return None
+
+    def update_sys_bar():
+        # CPU
+        cpu_util = psutil.cpu_percent(interval=None)
+        cpu_temp = get_cpu_temp()
+        # RAM
+        ram = psutil.virtual_memory()
+        ram_util = ram.percent
+        # GPU
+        gpu_info = get_gpu_info()
+        if gpu_info:
+            gpu_temp = gpu_info["temp"]
+            gpu_util = gpu_info["util"]
+            gpu_mem_util = gpu_info["mem_util"]
+        else:
+            gpu_temp = gpu_util = gpu_mem_util = None
+        # Storage
+        output_dir = value_entries["Output Directory"].get()
+        free_gb = get_drive_free_gb(output_dir)
+        # Format
+        parts = []
+        parts.append(f"CPU: {cpu_util:.0f}%")
+        parts.append(f"CPU Temp: {cpu_temp:.0f}°C" if cpu_temp is not None else "CPU Temp: N/A")
+        if gpu_util is not None:
+            parts.append(f"GPU: {gpu_util:.0f}%")
+        else:
+            parts.append("GPU: N/A")
+        if gpu_temp is not None:
+            parts.append(f"GPU Temp: {gpu_temp:.0f}°C")
+        else:
+            parts.append("GPU Temp: N/A")
+        parts.append(f"RAM: {ram_util:.0f}%")
+        if gpu_mem_util is not None:
+            parts.append(f"GPU Mem: {gpu_mem_util:.0f}%")
+        else:
+            parts.append("GPU Mem: N/A")
+        if free_gb is not None:
+            parts.append(f"Storage Free: {free_gb:.1f} GB")
+        else:
+            parts.append("Storage Free: N/A")
+        sys_bar_label.config(text="   ".join(parts))
+        root.after(2000, update_sys_bar)
+
+    root.after(1000, update_sys_bar)
 
     # Run the application
     root.mainloop()
