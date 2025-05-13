@@ -6,11 +6,6 @@ import sys
 import webbrowser
 import json
 from PIL import Image, ImageTk
-import psutil
-try:
-    import GPUtil
-except ImportError:
-    GPUtil = None
 
 def resource_path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """
@@ -33,14 +28,14 @@ def main():
     logo = tk.PhotoImage(file=resource_path("logo.png"))
     logo_label = tk.Label(root, image=logo, cursor="hand2")
     logo_label.image = logo  # Keep a reference to avoid garbage collection
-    logo_label.pack(pady=10)
+    logo_label.place(anchor="nw")  # Place in upper left corner
 
     # Add Laserwolve Games logo to upper right corner
     lwg_logo = tk.PhotoImage(file=resource_path("laserwolveGamesLogo.png"))
     lwg_logo_label = tk.Label(root, image=lwg_logo, cursor="hand2")
     lwg_logo_label.image = lwg_logo  # Keep a reference to avoid garbage collection
     # Place in upper right using place geometry manager
-    lwg_logo_label.place(relx=1.0, x=-20, y=10, anchor="ne")
+    lwg_logo_label.place(anchor="nw", x=700)
     def open_lwg_link(event):
         webbrowser.open("https://www.laserwolvegames.com/")
     lwg_logo_label.bind("<Button-1>", open_lwg_link)
@@ -53,7 +48,7 @@ def main():
 
     # Create frames for the two tables
     file_table_frame = tk.Frame(root)
-    file_table_frame.pack(pady=10, anchor="nw", side="top")  # Align left, top
+    file_table_frame.pack(pady=(150, 10), anchor="nw", side="top")  # Add top padding to move down
     param_table_frame = tk.Frame(root)
     param_table_frame.pack(pady=10, anchor="nw", side="top")  # Directly below file_table_frame
 
@@ -122,7 +117,7 @@ def main():
         param_label.grid(row=i+1, column=0, padx=10, pady=5, sticky="w")
 
         if param == "Daz Studio Executable Path":
-            value_entry = tk.Entry(file_table_frame, width=100, font=("Consolas", 10))
+            value_entry = tk.Entry(file_table_frame, width=80, font=("Consolas", 10))
             value_entry.insert(0, r"C:\Program Files\DAZ 3D\DAZStudio4\DAZStudio.exe")
             value_entry.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
 
@@ -140,7 +135,7 @@ def main():
             value_entries[param] = value_entry
 
         elif param == "Render Script Path":
-            value_entry = tk.Entry(file_table_frame, width=100, font=("Consolas", 10))
+            value_entry = tk.Entry(file_table_frame, width=80, font=("Consolas", 10))
             value_entry.insert(0, r"C:\Users\Andrew\Documents\GitHub\DAZScripts\masterRenderer.dsa")
             value_entry.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
 
@@ -158,7 +153,7 @@ def main():
             value_entries[param] = value_entry
 
         elif param == "Source Files":
-            text_widget = tk.Text(file_table_frame, width=100, height=15, font=("Consolas", 10))
+            text_widget = tk.Text(file_table_frame, width=80, height=15, font=("Consolas", 10))
             text_widget.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
             def browse_files_append():
                 filenames = filedialog.askopenfilenames(
@@ -193,7 +188,7 @@ def main():
             value_entries[param] = text_widget
 
         elif param == "Output Directory":
-            value_entry = tk.Entry(file_table_frame, width=100, font=("Consolas", 10))
+            value_entry = tk.Entry(file_table_frame, width=80, font=("Consolas", 10))
             value_entry.insert(0, r"C:\Users\Andrew\Documents\GitHub\PlainsOfShinar\spritesheets")
             value_entry.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
 
@@ -239,22 +234,21 @@ def main():
 
     # --- Last Rendered Image Section ---
     right_frame = tk.Frame(root)
-    right_frame.place(relx=0.55, rely=0.15, width=600, height=600)  # 512 + ~title height + padding
+    right_frame.place(relx=0.73, rely=0.0, anchor="n", width=1024, height=1024)
 
-    last_img_title = tk.Label(right_frame, text="Last Rendered Image", font=("Arial", 16, "bold"))
-    last_img_title.pack(pady=(0, 10))
+    right_frame.config(highlightbackground="black", highlightthickness=1)
 
     # Place img_label directly in right_frame
     img_label = tk.Label(right_frame)
-    img_label.pack(padx=0, pady=2, side="left")
+    img_label.place(relx=0.5, rely=0.5, anchor="center", relwidth=1.0, relheight=1.0)
 
     # --- Image Details Column ---
-    # Place details_frame at the right edge of the main window
+    # Place details_frame to the right of param_table_frame
     details_frame = tk.Frame(root, width=350)
-    details_frame.place(relx=1.0, rely=0.15, anchor="ne", width=350, height=600)
+    details_frame.place(relx=0.25, rely=0.55, anchor="nw", width=350, height=200)
     details_frame.pack_propagate(False)
 
-    details_title = tk.Label(details_frame, text="Image Details", font=("Arial", 14, "bold"))
+    details_title = tk.Label(details_frame, text="Last Rendered Image Details", font=("Arial", 14, "bold"))
     details_title.pack(anchor="nw", pady=(0, 10))
 
     # Show only the path (no "Path: " prefix)
@@ -300,8 +294,11 @@ def main():
         newest_img_path = find_newest_image(output_dir)
         if newest_img_path and os.path.exists(newest_img_path):
             try:
-                img = Image.open(newest_img_path)
-                img = img.resize((512, 512), Image.LANCZOS)
+                img = Image.open(newest_img_path).convert("RGBA")  # Ensure image is in RGBA mode
+                # Handle transparency by adding a white background
+                bg = Image.new("RGBA", img.size, (255, 255, 255, 255))
+                img = Image.alpha_composite(bg, img)
+
                 # Update image details
                 orig_img = Image.open(newest_img_path)
                 width, height = orig_img.size
@@ -388,101 +385,6 @@ def main():
         height=2
     )
     end_button.pack(side="left", anchor="sw", padx=0, pady=20)
-
-    # --- System Details Bar ---
-    sys_bar_frame = tk.Frame(root, bd=1, relief="sunken", bg="#f0f0f0")
-    sys_bar_frame.place(relx=1.0, rely=1.0, anchor="se", width=900, height=32)
-    sys_bar_label = tk.Label(sys_bar_frame, text="System details loading...", anchor="e", font=("Arial", 12), bg="#f0f0f0")
-    sys_bar_label.pack(fill="both", expand=True)
-
-    def get_drive_free_gb(path):
-        try:
-            drive = os.path.splitdrive(path)[0] or os.path.splitdrive(os.path.abspath(path))[0]
-            if not drive:
-                drive = os.path.abspath(path)[:2]  # fallback
-            usage = psutil.disk_usage(drive)
-            return usage.free / (1024 ** 3)
-        except Exception:
-            return None
-
-    def get_cpu_temp():
-        try:
-            temps = psutil.sensors_temperatures()
-            for name in temps:
-                for entry in temps[name]:
-                    if "cpu" in entry.label.lower() or "package" in entry.label.lower() or name.lower().startswith("core"):
-                        return entry.current
-            # fallback: just take first available
-            for name in temps:
-                if temps[name]:
-                    return temps[name][0].current
-        except Exception:
-            pass
-        return None
-
-    def get_gpu_info():
-        if GPUtil is None:
-            return None
-        try:
-            gpus = GPUtil.getGPUs()
-            if not gpus:
-                return None
-            gpu = gpus[0]
-            return {
-                "temp": gpu.temperature,
-                "util": gpu.load * 100,
-                "mem_util": gpu.memoryUtil * 100,
-                "mem_total": gpu.memoryTotal,
-                "mem_free": gpu.memoryFree,
-                "mem_used": gpu.memoryUsed,
-                "name": gpu.name
-            }
-        except Exception:
-            return None
-
-    def update_sys_bar():
-        # CPU
-        cpu_util = psutil.cpu_percent(interval=None)
-        cpu_temp = get_cpu_temp()
-        # RAM
-        ram = psutil.virtual_memory()
-        ram_util = ram.percent
-        # GPU
-        gpu_info = get_gpu_info()
-        if gpu_info:
-            gpu_temp = gpu_info["temp"]
-            gpu_util = gpu_info["util"]
-            gpu_mem_util = gpu_info["mem_util"]
-        else:
-            gpu_temp = gpu_util = gpu_mem_util = None
-        # Storage
-        output_dir = value_entries["Output Directory"].get()
-        free_gb = get_drive_free_gb(output_dir)
-        # Format
-        parts = []
-        parts.append(f"CPU: {cpu_util:.0f}%")
-        parts.append(f"CPU Temp: {cpu_temp:.0f}°C" if cpu_temp is not None else "CPU Temp: N/A")
-        if gpu_util is not None:
-            parts.append(f"GPU: {gpu_util:.0f}%")
-        else:
-            parts.append("GPU: N/A")
-        if gpu_temp is not None:
-            parts.append(f"GPU Temp: {gpu_temp:.0f}°C")
-        else:
-            parts.append("GPU Temp: N/A")
-        parts.append(f"RAM: {ram_util:.0f}%")
-        if gpu_mem_util is not None:
-            parts.append(f"GPU Mem: {gpu_mem_util:.0f}%")
-        else:
-            parts.append("GPU Mem: N/A")
-        if free_gb is not None:
-            parts.append(f"Storage Free: {free_gb:.1f} GB")
-        else:
-            parts.append("Storage Free: N/A")
-        sys_bar_label.config(text="   ".join(parts))
-        root.after(2000, update_sys_bar)
-
-    root.after(1000, update_sys_bar)
 
     # Run the application
     root.mainloop()
