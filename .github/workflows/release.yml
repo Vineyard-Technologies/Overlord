@@ -27,6 +27,9 @@ jobs:
       - name: Install PyInstaller
         run: pip install pyinstaller
 
+      - name: Install Pillow
+        run: pip install pillow
+
       - name: Build overlord.exe
         shell: pwsh
         run: ./createExecutable.ps1
