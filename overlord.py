@@ -28,7 +28,7 @@ def main():
     logo = tk.PhotoImage(file=resource_path("logo.png"))
     logo_label = tk.Label(root, image=logo, cursor="hand2")
     logo_label.image = logo  # Keep a reference to avoid garbage collection
-    logo_label.place(anchor="nw")  # Place in upper left corner
+    logo_label.place(anchor="nw", x=10, y=10)  # Place in upper left corner, 10px down and right
 
     # Add Laserwolve Games logo to upper right corner
     lwg_logo = tk.PhotoImage(file=resource_path("laserwolveGamesLogo.png"))
@@ -50,14 +50,15 @@ def main():
     file_table_frame = tk.Frame(root)
     file_table_frame.pack(pady=(150, 10), anchor="nw", side="top")  # Add top padding to move down
     param_table_frame = tk.Frame(root)
-    param_table_frame.pack(pady=10, anchor="nw", side="top")  # Directly below file_table_frame
+    param_table_frame.pack(pady=(20, 10), anchor="nw", side="top")  # 20px down from file_table_frame
 
     # File/folder path parameters
     file_params = [
         "Daz Studio Executable Path",
         "Render Script Path",
-        "Source Files",
-        "Output Directory"
+        "Source Sets",
+        "Image Output Directory",
+        "Spritesheet Output Directory"
     ]
     # Short/simple parameters
     param_params = [
@@ -152,42 +153,58 @@ def main():
             browse_button.grid(row=i+1, column=2, padx=5, pady=5)
             value_entries[param] = value_entry
 
-        elif param == "Source Files":
+        elif param == "Source Sets":
             text_widget = tk.Text(file_table_frame, width=80, height=15, font=("Consolas", 10))
             text_widget.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
-            def browse_files_append():
-                filenames = filedialog.askopenfilenames(
+            def browse_folders_append():
+                foldernames = filedialog.askdirectory(
                     initialdir=".",
-                    title="Select Source Files",
-                    filetypes=(("All files", "*.*"),)
+                    title="Select Source Set Folder"
                 )
-                if filenames:
+                # askdirectory only allows one folder at a time, so allow multiple by repeated selection
+                if foldernames:
                     current = text_widget.get("1.0", tk.END).strip()
-                    current_files = set(current.split("\n")) if current else set()
-                    new_files = [f for f in filenames if f not in current_files]
-                    if new_files:
+                    current_folders = set(current.split("\n")) if current else set()
+                    if foldernames not in current_folders:
                         if current:
-                            text_widget.insert(tk.END, "\n" + "\n".join(new_files))
+                            text_widget.insert(tk.END, "\n" + foldernames)
                         else:
-                            text_widget.insert(tk.END, "\n".join(new_files))
+                            text_widget.insert(tk.END, foldernames)
             browse_button = tk.Button(
                 file_table_frame,
                 text="Browse",
-                command=browse_files_append
+                command=browse_folders_append
             )
             browse_button.grid(row=i+1, column=2, padx=5, pady=5)
             # Add Clear button below Browse button
-            def clear_source_files():
+            def clear_source_sets():
                 text_widget.delete("1.0", tk.END)
             clear_button = tk.Button(
                 file_table_frame,
                 text="Clear",
-                command=clear_source_files
+                command=clear_source_sets
             )
             clear_button.grid(row=i+1, column=2, padx=5, pady=(100, 5))
             value_entries[param] = text_widget
 
-        elif param == "Output Directory":
+        elif param == "Image Output Directory":
+            value_entry = tk.Entry(file_table_frame, width=80, font=("Consolas", 10))
+            value_entry.insert(0, r"C:\Users\Andrew\Documents\GitHub\PlainsOfShinar\individual_images")
+            value_entry.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
+
+            browse_button = tk.Button(
+                file_table_frame,
+                text="Browse",
+                command=make_browse_folder(
+                    value_entry,
+                    initialdir=r"C:\Users\Andrew\Documents\GitHub\PlainsOfShinar\individual_images",
+                    title="Select Image Output Directory"
+                )
+            )
+            browse_button.grid(row=i+1, column=2, padx=5, pady=5)
+            value_entries[param] = value_entry
+
+        elif param == "Spritesheet Output Directory":
             value_entry = tk.Entry(file_table_frame, width=80, font=("Consolas", 10))
             value_entry.insert(0, r"C:\Users\Andrew\Documents\GitHub\PlainsOfShinar\spritesheets")
             value_entry.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
@@ -198,7 +215,7 @@ def main():
                 command=make_browse_folder(
                     value_entry,
                     initialdir=r"C:\Users\Andrew\Documents\GitHub\PlainsOfShinar\spritesheets",
-                    title="Select Output Directory"
+                    title="Select Spritesheet Output Directory"
                 )
             )
             browse_button.grid(row=i+1, column=2, padx=5, pady=5)
@@ -245,7 +262,7 @@ def main():
     # --- Image Details Column ---
     # Place details_frame to the right of param_table_frame
     details_frame = tk.Frame(root, width=350)
-    details_frame.place(relx=0.25, rely=0.55, anchor="nw", width=350, height=200)
+    details_frame.place(relx=0.25, rely=0.6, anchor="nw", width=350, height=200)
     details_frame.pack_propagate(False)
 
     details_title = tk.Label(details_frame, text="Last Rendered Image Details", font=("Arial", 14, "bold"))
@@ -290,7 +307,7 @@ def main():
         return newest_file
 
     def show_last_rendered_image():
-        output_dir = value_entries["Output Directory"].get()
+        output_dir = value_entries["Image Output Directory"].get()
         newest_img_path = find_newest_image(output_dir)
         if newest_img_path and os.path.exists(newest_img_path):
             try:
@@ -330,24 +347,33 @@ def main():
     # Update image when output directory changes or after render
     def on_output_dir_change(*args):
         root.after(200, show_last_rendered_image)
-    value_entries["Output Directory"].bind("<FocusOut>", lambda e: on_output_dir_change())
-    value_entries["Output Directory"].bind("<Return>", lambda e: on_output_dir_change())
+    value_entries["Image Output Directory"].bind("<FocusOut>", lambda e: on_output_dir_change())
+    value_entries["Image Output Directory"].bind("<Return>", lambda e: on_output_dir_change())
 
     # Also update after render
     def start_render():
         daz_executable_path = value_entries["Daz Studio Executable Path"].get()
         render_script_path = value_entries["Render Script Path"].get().replace("\\", "/")
-        source_files = value_entries["Source Files"].get("1.0", tk.END).strip().replace("\\", "/").split("\n")
-        source_files = [file for file in source_files if file]  # Remove empty lines
-        source_files = json.dumps(source_files)
-        output_dir = value_entries["Output Directory"].get().replace("\\", "/")
+        # Use "Source Sets" and treat as folders
+        source_sets = value_entries["Source Sets"].get("1.0", tk.END).strip().replace("\\", "/").split("\n")
+        source_sets = [folder for folder in source_sets if folder]  # Remove empty lines
+        source_sets = json.dumps(source_sets)
+        image_output_dir = value_entries["Image Output Directory"].get().replace("\\", "/")
+        spritesheet_output_dir = value_entries["Spritesheet Output Directory"].get().replace("\\", "/")
         num_instances = value_entries["Number of Instances"].get()
         instance_name = value_entries["Instance Naming Format"].get()
         log_size = value_entries["Log File Size (MBs)"].get()
         log_size = int(log_size) * 1000000  # Convert MBs to bytes
         prompt_var = value_entries["Do not Display Prompts"].get()
 
-        json_map = f'{{"num_instances": "{num_instances}", "output_dir": "{output_dir}", "source_files": {source_files}}}'
+        json_map = (
+            f'{{'
+            f'"num_instances": "{num_instances}", '
+            f'"image_output_dir": "{image_output_dir}", '
+            f'"spritesheet_output_dir": "{spritesheet_output_dir}", '
+            f'"source_sets": {source_sets}'
+            f'}}'
+        )
 
         command = [
             daz_executable_path,
