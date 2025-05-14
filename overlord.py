@@ -364,6 +364,7 @@ def main():
         instance_name = value_entries["Instance Naming Format"].get()
         log_size = value_entries["Log File Size (MBs)"].get()
         log_size = int(log_size) * 1000000  # Convert MBs to bytes
+        frame_rate = value_entries["Frame Rate"].get()
         prompt_var = value_entries["Do not Display Prompts"].get()
 
         json_map = (
@@ -371,6 +372,7 @@ def main():
             f'"num_instances": "{num_instances}", '
             f'"image_output_dir": "{image_output_dir}", '
             f'"spritesheet_output_dir": "{spritesheet_output_dir}", '
+            f'"frame_rate": "{frame_rate}", '
             f'"source_sets": {source_sets}'
             f'}}'
         )
