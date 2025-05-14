@@ -21,6 +21,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip
 
+      - name: Install PyInstaller
+        run: pip install pyinstaller
+
       - name: Build overlord.exe
         shell: pwsh
         run: ./createExecutable.ps1
