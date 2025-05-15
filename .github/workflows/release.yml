@@ -32,7 +32,7 @@ jobs:
 
       - name: Build overlord.exe
         shell: pwsh
-        run: ./createExecutable.ps1
+        run: ./scripts/createExecutable.ps1
 
       - name: Upload Release Asset
         uses: softprops/action-gh-release@v2
