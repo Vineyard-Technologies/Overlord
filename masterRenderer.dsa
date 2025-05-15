@@ -1,0 +1,264 @@
+var oContentMgr = App.getContentMgr();
+var oScriptArgs = JSON.parse(App.scriptArgs[0]);
+var nTotalNumberOfInstances = oScriptArgs['num_instances'];
+var sAssetPath = 'C:/Users/Andrew/Documents/assets/LaserwolveGames/';
+var sMasterTemplatePath = sAssetPath + 'templates/masterTemplate.duf';
+
+oContentMgr.openFile(sMasterTemplatePath, false);
+
+var oScriptFileInfo = new DzFileInfo(getScriptFileName());
+var sScriptPath = oScriptFileInfo.path();
+var nInstanceNumber = App.instanceName();
+
+// Might use these later
+// var oExistingOutputDirectories = new DzDir(sAssetPath + 'output');
+// var aExistingOutputDirectories = oExistingOutputDirectories.entryList(['*'], DzDir.Dirs | DzDir.NoDotAndDotDot);
+// var sOutputDirectory = sAssetPath + 'output/Automated Render #' + (aExistingOutputDirectories.length + 1);
+
+var sOutputDirectory = oScriptArgs['image_output_dir'];
+var oOutputDirectory = new DzDir(sOutputDirectory);
+var sSpritesheetOutputDirectory = oScriptArgs['spritesheet_output_dir'];
+var aSets = oScriptArgs['source_sets'].toString().split(',');
+var oRenderMgr = App.getRenderMgr();
+var oIrayOptions = oRenderMgr.getRenderElementObjects()[1];
+var oEnvironmentOptionsPropertyGroups = oRenderMgr.getRenderElementObjects()[3].getPropertyGroups();
+var oRenderOptions = oRenderMgr.getRenderOptions();
+var oViewport = MainWindow.getViewportMgr().getActiveViewport().get3DViewport();
+var oActiveCanvasProperty = oIrayOptions.getPropertyGroups().findProperty('Active Canvas');
+var oDrawGroundProperty = oEnvironmentOptionsPropertyGroups.findProperty('Draw Ground');
+var oEnvironmentModeProperty = oEnvironmentOptionsPropertyGroups.findProperty('Environment Mode');
+var oSceneHelper = new DzSceneHelper();
+var nDEGREES_IN_CIRCLE = 360;
+var nFrameRate = oScriptArgs['frame_rate'];
+var nDAZ_TICKS = 4800;
+var nTicksPerFrame = nDAZ_TICKS / nFrameRate;
+var oRoot = Scene.findNodeByLabel('root');
+var oShadowPlane = Scene.findNodeByLabel('shadowPlane');
+var bOverwriteExistingImages = false;
+
+function getName(sFileName) // Obtain the desired name out of a filepath or filename.
+{
+	return sFileName.split('/').pop().split('_')[0];
+}
+function setMatte(bBool) // Set the Matte Parameter of a subject and its children.
+{
+	if (oSubjectMatteParameter) oSubjectMatteParameter.setValue(bBool);
+
+	for (var i = 0; i != aSubjectChildren.length; i++) {
+		var oChildMatteParameter = aSubjectChildren[i].findPropertyByLabel('Enable Iray Matte');
+		if (oChildMatteParameter) oChildMatteParameter.setValue(bBool);
+	}
+}
+function renderCore(sSet, sName, nDegrees, sAnimationName, bIsGear, bIsShadow) {
+	if (aChildPropertyControllers) for (var i = 0; i != aChildPropertyControllers.length; i++) // then for each of the child property controllers...
+	{
+
+		// TODO: I think this is broken
+		/* 
+		Use the name of the property in the "Custom" category to find the property to which to link it.
+		e.g.,
+		BowOnnaStick-StikkbowDrawn
+		Default Bolt-Opacity Strength-shaft
+		The the first value is the node label. The second value is the property label. The third value is the material name, and is optional.
+		The owner of a property usually is a DzNode, but it might be a DzMorph. The DzNode method "findPropertyByLabel" won't work for properties owned by a DzMorph.
+		The "findPropertyOnNodeByLabel" method in the DzSceneHelper convenience object must be used to accommodate this scenario.
+		*/
+		var oChildPropertyController = aChildPropertyControllers[i];
+		var aTargetPropertyParameters = oChildPropertyController.name.split('-');
+		var oTargetNode = Scene.findNodeByLabel(aTargetPropertyParameters[0]);
+		var sTargetPropertyName = aTargetPropertyParameters[1];
+		var sTargetMaterial = aTargetPropertyParameters[2];
+		var oTarget;
+		if (sTargetMaterial) oTarget = oSceneHelper.findPropertyOnMaterialByLabel(sTargetPropertyName, oTargetNode.getObject().getCurrentShape().findMaterial(sTargetMaterial));
+		else oTarget = oSceneHelper.findPropertyOnNodeByLabel(sTargetPropertyName, oTargetNode);
+
+		oTarget.linkTo(oChildPropertyController);
+	}
+
+	// variables that have to be determined when we start rendering
+	var nFramesTotal = Scene.getPlayRange().end / nTicksPerFrame;
+
+	for (var nAngle = 0; nAngle != nDEGREES_IN_CIRCLE; nAngle = nAngle + nDegrees) // Loop through each angle...
+	{
+		var nOutputAngle = 90 - nAngle;
+		if (nOutputAngle <= -180) nOutputAngle += 360;
+
+		for (var nFrame = 0; nFrame <= nFramesTotal; nFrame++) // Loop through each frame...
+		{
+			// subtract 1 from the instance number to make it 0 based.
+			// if we subtract the 0-based instanced number from the frame,
+			// then check if that number is divisible by the total number of instances,
+			// we'll find out if the current instance should render the current frame.
+			if ((nFrame - (nInstanceNumber - 1)) % nTotalNumberOfInstances != 0) continue;
+
+			// (bIsShadow ? 'shadow' : 'model')
+			
+			// Everything in a set will always be loaded together. No subsection of a set will ever be loaded separately from the rest of the set.
+
+			// Example: C:\Users\Andrew\Documents\assets\LaserwolveGames\output\broadword(man)_block_shadow/-22.5_012.png
+			var sFinalFilePath = sOutputDirectory + '/' + sName + '_' + sAnimationName
+			+ '_' + (bIsShadow ? 'shadow' : 'model') + '/' + nOutputAngle + '_' + ('000' + nFrame).slice(-3) + '.png';
+
+			// If the image we're going to make already exists and isn't 0 bytes, skip it if we have flagged as such.
+			if (oOutputDirectory.exists(sFinalFilePath) && DzFileInfo(sFinalFilePath).size != 0 && !bOverwriteExistingImages) continue;
+			oRenderOptions.renderImgFilename = sFinalFilePath; // Set the filepath.
+
+			Scene.setFrame(nFrame);
+			oRoot.getYRotControl().setValue(nAngle); // Do this every frame, or else it will interpolate.
+
+			if (bIsShadow) {
+				oEnvironmentModeProperty.setValue(3); // Scene Only
+				oDrawGroundProperty.setValue(true);
+				oShadowPlane.setVisible(true);
+				oActiveCanvasProperty.setValue(0);
+				if (bIsGear) setMatte(true);
+			}
+			else {
+				oEnvironmentModeProperty.setValue(2); // Sun-Sky Only
+				oDrawGroundProperty.setValue(false);
+				oShadowPlane.setVisible(false);
+				setMatte(false);
+				if (bIsGear) oActiveCanvasProperty.setValue(1);
+			}
+			while (backgroundProgressIsActive()) processEvents();		// Wait for everything else to finish first, specifically the mesh smoother, then render.
+			oRenderMgr.doRender();
+
+			// TODO: Why aren't we using 'new' here?
+			var oCanvasDirectory = DzDir(sFinalFilePath.replace('.png', '_canvases'));
+
+			if (oCanvasDirectory.exists())  // If canvases were made, delete all of them, then delete the canvas folder.
+			{
+				var aCanvases = oCanvasDirectory.getFilesFromDir(['*.exr'], true);
+				// TODO: Look into replacing this with removeRecursively() (new in 4.23.1.23)
+				for (var i = 0; i != aCanvases.length; i++) oCanvasDirectory.remove(aCanvases[i]);
+				oCanvasDirectory.rmdir();
+			}
+			// Looping through all pixels of the output image would be much slower than checking the file size.
+			if (DzFileInfo(sFinalFilePath).size() == 4181) App.warning(sFinalFilePath + ' is 4181 bytes. It is likely a blank image.');
+		}
+	}
+	// TODO: Would it be faster to change environment settings every frame to render the shadow,
+	// instead of reloading all animations?
+	if (!bIsShadow) renderCore(sSet, sName, nDegrees, sAnimationName, bIsGear, true);
+}
+if (nTotalNumberOfInstances) {
+
+	if (nTotalNumberOfInstances > nInstanceNumber) {
+
+		// TODO: Can we use App.isStarting() instead?
+		sleep(5000); // This prevents a postgre database error when opening multiple instances of Daz quickly
+
+		// TODO: is App.isSlave() true for these instances?
+		App.showURL('file:///' + sScriptPath + '/masterRenderer.ps1');
+	}
+
+	for (var s = 0; s != aSets.length; s++) {
+
+		var sSet = aSets[s];
+		var oSetDirectory = new DzDir(sSet);
+
+		var aSubjects = oSetDirectory.getFilesFromDir(['*_subject.duf'], false);
+		var aAnimations = oSetDirectory.getFilesFromDir(['*_animation.duf'], false);
+		var aGear = oSetDirectory.getFilesFromDir(['*_gear.duf'], false);
+
+		for (var nSubjectCounter = 0; nSubjectCounter != aSubjects.length; nSubjectCounter++) // For each subject...
+		{
+			oContentMgr.openFile(aSubjects[nSubjectCounter], true);		// Merge in a subject, and get its name.
+	
+			var sSubjectName = getName(aSubjects[nSubjectCounter]);
+			var oSubjectFile = new DzFile(aSubjects[nSubjectCounter]);
+	
+			// read the subject's JSON to see how many angles of it we want to render
+			oSubjectFile.open(DzFile.ReadOnly);
+			var nAnglesFromJson = JSON.parse(oSubjectFile.read()).asset_info.angles;
+			oSubjectFile.close();
+
+			var nAngles = 16;
+
+			if (nAnglesFromJson) nAngles = nAnglesFromJson;
+			else App.warning('Number of angles not found in the JSON for ' + aSubjects[nSubjectCounter] +
+				'. Using default of value of ' + nAngles + ' angles.');
+	
+			var nDegrees = nDEGREES_IN_CIRCLE / nAngles;
+			var oSubject = Scene.findNodeByLabel('subject');		// Set up the subject.
+			var aSubjectChildren = oSubject.getNodeChildren(true);
+			var oSubjectMatteParameter = oSubject.findPropertyByLabel('Enable Iray Matte');
+			var oCustomPropertyGroup = oSubject.getPropertyGroups().findChild('Custom');
+			var aChildPropertyControllers;
+			if (oCustomPropertyGroup) aChildPropertyControllers = oCustomPropertyGroup.getAllProperties();
+	
+			oRoot.addNodeChild(oSubject, true);
+	
+			if (!aAnimations.length) renderCore(sSet, sSubjectName, nDegrees, 'default', false, false);
+	
+			else for (var j = 0; j != aAnimations.length; j++) // For each animation...
+			{
+				// Expand play range using animation JSON data: https://github.com/Laserwolve-Games/Overlord/discussions/4
+				var oAnimationFile = new DzFile(aAnimations[j]);
+	
+				oAnimationFile.open(DzFile.ReadOnly);
+				var oAnimationsJson = JSON.parse(oAnimationFile.read()).scene.animations;
+				oAnimationFile.close();
+	
+				for (var i = 0; i < oAnimationsJson.length; i++) {
+	
+					var nNumberOfFrames = oAnimationsJson[i].keys.length;
+	
+					if (nNumberOfFrames > 1) {
+	
+						// Subtract 1 here to make it 0-based
+						Scene.setAnimRange(DzTimeRange(0, (nNumberOfFrames - 1) * nTicksPerFrame));
+	
+						break;
+					}
+				}
+				oContentMgr.openFile(aAnimations[j], true); // only the subject can be selected when we merge in an animation
+	
+				var sAnimationName = getName(aAnimations[j]);
+	
+				if (!aGear.length) renderCore(sSet, sSubjectName, nDegrees, sAnimationName, false, false);
+	
+				else for (var k = 0; k != aGear.length; k++) // If there are gears, for each gear...
+				{
+					oContentMgr.openFile(aGear[k], true);
+					var sGearName = getName(aGear[k]);
+					var oGear = Scene.findNodeByLabel('gear');
+	
+					var aGearChildren = oGear.getNodeChildren(false);
+	
+					oIrayOptions.addNodeToNodeList('visibleNodes', oGear); // Add the gear to the canvas.
+	
+					// Add all gear children to the canvas as well.
+					for (var ii = 0; ii != aGearChildren.length; ii++) oIrayOptions.addNodeToNodeList('visibleNodes', aGearChildren[ii]);
+	
+					// TODO: This is probably wrong now that we are using parentheses?
+					renderCore(sSet, sSubjectName + '_' + sGearName, nDegrees, sAnimationName, true, false);
+	
+					Scene.removeNode(oGear);
+				}
+				// Custom parameter keys don't always exist. They have to be manually cleared after each animation
+				if (aChildPropertyControllers) for (var i = 0; i != aChildPropertyControllers.length; i++) aChildPropertyControllers[i].deleteAllKeys();
+	
+				Scene.setAnimRange(DzTimeRange(0, 0));
+			}
+			if (oSubject) Scene.removeNode(oSubject);
+		}
+	}
+	// Tasks that only one instance should perform
+	if (nInstanceNumber == 1) {
+
+		// Execute a PowerShell script with arguments: https://github.com/Laserwolve-Games/Overlord/discussions/6
+		var sTempPath = App.getTempPath();
+		var oSpritesheetExecutor = new DzFile(sTempPath + '/spriteSheetExecutor.cmd');
+		var sSpritesheetExecutorCode = 'powershell -NoProfile -ExecutionPolicy Bypass -File '
+		+ sScriptPath + '/makeSpritesheets.ps1 -sourceDirectory "' + sOutputDirectory + '" -outputDirectory "' + sSpritesheetOutputDirectory + '"';
+
+		oSpritesheetExecutor.open(DzFile.WriteOnly);
+		oSpritesheetExecutor.write(sSpritesheetExecutorCode);
+		oSpritesheetExecutor.close();
+
+		// Let's see how our new folder structure works out first
+		// App.showURL('file:///' + sTempPath + '/spriteSheetExecutor.cmd');
+	}
+	App.delayedExit();
+}
