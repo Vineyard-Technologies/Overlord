@@ -1,0 +1,1 @@
+pyinstaller --onefile --windowed --noconsole --icon assets/favicon.ico --add-data 'assets/favicon.ico:assets' --add-data 'assets/overlordLogo.png:assets' --add-data 'assets/laserwolveGamesLogo.png:assets' src/overlord.py

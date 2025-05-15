@@ -19,19 +19,19 @@ def main():
     # Create the main window
     root = tk.Tk()
     root.title("Overlord 1.0.0")
-    root.iconbitmap(resource_path("favicon.ico"))  # Set the application icon
+    root.iconbitmap(resource_path(os.path.join("assets", "favicon.ico")))  # Set the application icon
 
     # Maximize the application window
     root.state("zoomed")
 
     # Load and display the logo image
-    logo = tk.PhotoImage(file=resource_path("logo.png"))
+    logo = tk.PhotoImage(resource_path(os.path.join("assets", "overlordLogo.png")))
     logo_label = tk.Label(root, image=logo, cursor="hand2")
     logo_label.image = logo  # Keep a reference to avoid garbage collection
     logo_label.place(anchor="nw", x=10, y=10)  # Place in upper left corner, 10px down and right
 
     # Add Laserwolve Games logo to upper right corner
-    lwg_logo = tk.PhotoImage(file=resource_path("laserwolveGamesLogo.png"))
+    lwg_logo = tk.PhotoImage(resource_path(os.path.join("assets", "laserwolveGamesLogo.png")))
     lwg_logo_label = tk.Label(root, image=lwg_logo, cursor="hand2")
     lwg_logo_label.image = lwg_logo  # Keep a reference to avoid garbage collection
     # Place in upper right using place geometry manager
