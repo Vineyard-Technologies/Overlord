@@ -1,6 +1,6 @@
-# Overlord
-### An Asset Creation Pipeline Management Tool
-![Overlord Screenshot](https://github.com/user-attachments/assets/05e5b165-c77f-44b9-b779-49da7737b1f9)
+![Overlord Logo](assets/readmelogo.png)
+## An Asset Creation Pipeline Management Tool
+![Overlord Screenshot](assets/screenshot.png)
 
 
-This is a tool to simplify the utilization of the [Daz Scripts](https://github.com/Laserwolve-Games/DAZScripts) made by [Laserwolve Games](https://www.laserwolvegames.com/)  that create assets for ARPGs, like [DaggerQuest](https://www.DaggerQuest.com/) and [Plains of Shinar](https://PlainsOfShinar.com).
+Overlord is a desktop application written in [Python](https://www.Python.org/) using [Tkinter](https://docs.python.org/3/library/tkinter.html) and [Pillow](https://pypi.org/project/pillow/). It creates assets for the ARPGs made by [Laserwolve Games](https://www.LaserwolveGames.com/), like [DaggerQuest](https://www.DaggerQuest.com/) and [Plains of Shinar](https://www.PlainsOfShinar.com/). It executes scripts written in [Daz Script 2](http://docs.daz3d.com/doku.php/public/software/dazstudio/4/referenceguide/scripting/start) and [PowerShell](https://en.wikipedia.org/wiki/PowerShell) that manage instances of [Daz Studio](https://www.daz3d.com/) and [TexturePacker](https://www.codeandweb.com/texturepacker).
