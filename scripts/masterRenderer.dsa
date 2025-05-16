@@ -141,124 +141,113 @@ function renderCore(sSet, sName, nDegrees, sAnimationName, bIsGear, bIsShadow) {
 	// instead of reloading all animations?
 	if (!bIsShadow) renderCore(sSet, sName, nDegrees, sAnimationName, bIsGear, true);
 }
-if (nTotalNumberOfInstances) {
+for (var s = 0; s != aSets.length; s++) {
 
-	if (nTotalNumberOfInstances > nInstanceNumber) {
+	var sSet = aSets[s];
+	var oSetDirectory = new DzDir(sSet);
 
-		// TODO: Can we use App.isStarting() instead?
-		sleep(5000); // This prevents a postgre database error when opening multiple instances of Daz quickly
+	var aSubjects = oSetDirectory.getFilesFromDir(['*_subject.duf'], false);
+	var aAnimations = oSetDirectory.getFilesFromDir(['*_animation.duf'], false);
+	var aGear = oSetDirectory.getFilesFromDir(['*_gear.duf'], false);
 
-		// TODO: is App.isSlave() true for these instances?
-		App.showURL('file:///' + sScriptPath + '/masterRenderer.ps1');
-	}
+	for (var nSubjectCounter = 0; nSubjectCounter != aSubjects.length; nSubjectCounter++) // For each subject...
+	{
+		oContentMgr.openFile(aSubjects[nSubjectCounter], true);		// Merge in a subject, and get its name.
 
-	for (var s = 0; s != aSets.length; s++) {
+		var sSubjectName = getName(aSubjects[nSubjectCounter]);
+		var oSubjectFile = new DzFile(aSubjects[nSubjectCounter]);
 
-		var sSet = aSets[s];
-		var oSetDirectory = new DzDir(sSet);
+		// read the subject's JSON to see how many angles of it we want to render
+		oSubjectFile.open(DzFile.ReadOnly);
+		var nAnglesFromJson = JSON.parse(oSubjectFile.read()).asset_info.angles;
+		oSubjectFile.close();
 
-		var aSubjects = oSetDirectory.getFilesFromDir(['*_subject.duf'], false);
-		var aAnimations = oSetDirectory.getFilesFromDir(['*_animation.duf'], false);
-		var aGear = oSetDirectory.getFilesFromDir(['*_gear.duf'], false);
+		var nAngles = 16;
 
-		for (var nSubjectCounter = 0; nSubjectCounter != aSubjects.length; nSubjectCounter++) // For each subject...
+		if (nAnglesFromJson) nAngles = nAnglesFromJson;
+		else App.warning('Number of angles not found in the JSON for ' + aSubjects[nSubjectCounter] +
+			'. Using default of value of ' + nAngles + ' angles.');
+
+		var nDegrees = nDEGREES_IN_CIRCLE / nAngles;
+		var oSubject = Scene.findNodeByLabel('subject');		// Set up the subject.
+		var aSubjectChildren = oSubject.getNodeChildren(true);
+		var oSubjectMatteParameter = oSubject.findPropertyByLabel('Enable Iray Matte');
+		var oCustomPropertyGroup = oSubject.getPropertyGroups().findChild('Custom');
+		var aChildPropertyControllers;
+		if (oCustomPropertyGroup) aChildPropertyControllers = oCustomPropertyGroup.getAllProperties();
+
+		oRoot.addNodeChild(oSubject, true);
+
+		if (!aAnimations.length) renderCore(sSet, sSubjectName, nDegrees, 'default', false, false);
+
+		else for (var j = 0; j != aAnimations.length; j++) // For each animation...
 		{
-			oContentMgr.openFile(aSubjects[nSubjectCounter], true);		// Merge in a subject, and get its name.
-	
-			var sSubjectName = getName(aSubjects[nSubjectCounter]);
-			var oSubjectFile = new DzFile(aSubjects[nSubjectCounter]);
-	
-			// read the subject's JSON to see how many angles of it we want to render
-			oSubjectFile.open(DzFile.ReadOnly);
-			var nAnglesFromJson = JSON.parse(oSubjectFile.read()).asset_info.angles;
-			oSubjectFile.close();
+			// Expand play range using animation JSON data: https://github.com/Laserwolve-Games/Overlord/discussions/4
+			var oAnimationFile = new DzFile(aAnimations[j]);
 
-			var nAngles = 16;
+			oAnimationFile.open(DzFile.ReadOnly);
+			var oAnimationsJson = JSON.parse(oAnimationFile.read()).scene.animations;
+			oAnimationFile.close();
 
-			if (nAnglesFromJson) nAngles = nAnglesFromJson;
-			else App.warning('Number of angles not found in the JSON for ' + aSubjects[nSubjectCounter] +
-				'. Using default of value of ' + nAngles + ' angles.');
-	
-			var nDegrees = nDEGREES_IN_CIRCLE / nAngles;
-			var oSubject = Scene.findNodeByLabel('subject');		// Set up the subject.
-			var aSubjectChildren = oSubject.getNodeChildren(true);
-			var oSubjectMatteParameter = oSubject.findPropertyByLabel('Enable Iray Matte');
-			var oCustomPropertyGroup = oSubject.getPropertyGroups().findChild('Custom');
-			var aChildPropertyControllers;
-			if (oCustomPropertyGroup) aChildPropertyControllers = oCustomPropertyGroup.getAllProperties();
-	
-			oRoot.addNodeChild(oSubject, true);
-	
-			if (!aAnimations.length) renderCore(sSet, sSubjectName, nDegrees, 'default', false, false);
-	
-			else for (var j = 0; j != aAnimations.length; j++) // For each animation...
-			{
-				// Expand play range using animation JSON data: https://github.com/Laserwolve-Games/Overlord/discussions/4
-				var oAnimationFile = new DzFile(aAnimations[j]);
-	
-				oAnimationFile.open(DzFile.ReadOnly);
-				var oAnimationsJson = JSON.parse(oAnimationFile.read()).scene.animations;
-				oAnimationFile.close();
-	
-				for (var i = 0; i < oAnimationsJson.length; i++) {
-	
-					var nNumberOfFrames = oAnimationsJson[i].keys.length;
-	
-					if (nNumberOfFrames > 1) {
-	
-						// Subtract 1 here to make it 0-based
-						Scene.setAnimRange(DzTimeRange(0, (nNumberOfFrames - 1) * nTicksPerFrame));
-	
-						break;
-					}
+			for (var i = 0; i < oAnimationsJson.length; i++) {
+
+				var nNumberOfFrames = oAnimationsJson[i].keys.length;
+
+				if (nNumberOfFrames > 1) {
+
+					// Subtract 1 here to make it 0-based
+					Scene.setAnimRange(DzTimeRange(0, (nNumberOfFrames - 1) * nTicksPerFrame));
+
+					break;
 				}
-				oContentMgr.openFile(aAnimations[j], true); // only the subject can be selected when we merge in an animation
-	
-				var sAnimationName = getName(aAnimations[j]);
-	
-				if (!aGear.length) renderCore(sSet, sSubjectName, nDegrees, sAnimationName, false, false);
-	
-				else for (var k = 0; k != aGear.length; k++) // If there are gears, for each gear...
-				{
-					oContentMgr.openFile(aGear[k], true);
-					var sGearName = getName(aGear[k]);
-					var oGear = Scene.findNodeByLabel('gear');
-	
-					var aGearChildren = oGear.getNodeChildren(false);
-	
-					oIrayOptions.addNodeToNodeList('visibleNodes', oGear); // Add the gear to the canvas.
-	
-					// Add all gear children to the canvas as well.
-					for (var ii = 0; ii != aGearChildren.length; ii++) oIrayOptions.addNodeToNodeList('visibleNodes', aGearChildren[ii]);
-	
-					// TODO: This is probably wrong now that we are using parentheses?
-					renderCore(sSet, sSubjectName + '_' + sGearName, nDegrees, sAnimationName, true, false);
-	
-					Scene.removeNode(oGear);
-				}
-				// Custom parameter keys don't always exist. They have to be manually cleared after each animation
-				if (aChildPropertyControllers) for (var i = 0; i != aChildPropertyControllers.length; i++) aChildPropertyControllers[i].deleteAllKeys();
-	
-				Scene.setAnimRange(DzTimeRange(0, 0));
 			}
-			if (oSubject) Scene.removeNode(oSubject);
+			oContentMgr.openFile(aAnimations[j], true); // only the subject can be selected when we merge in an animation
+
+			var sAnimationName = getName(aAnimations[j]);
+
+			if (!aGear.length) renderCore(sSet, sSubjectName, nDegrees, sAnimationName, false, false);
+
+			else for (var k = 0; k != aGear.length; k++) // If there are gears, for each gear...
+			{
+				oContentMgr.openFile(aGear[k], true);
+				var sGearName = getName(aGear[k]);
+				var oGear = Scene.findNodeByLabel('gear');
+
+				var aGearChildren = oGear.getNodeChildren(false);
+
+				oIrayOptions.addNodeToNodeList('visibleNodes', oGear); // Add the gear to the canvas.
+
+				// Add all gear children to the canvas as well.
+				for (var ii = 0; ii != aGearChildren.length; ii++) oIrayOptions.addNodeToNodeList('visibleNodes', aGearChildren[ii]);
+
+				// TODO: This is probably wrong now that we are using parentheses?
+				renderCore(sSet, sSubjectName + '_' + sGearName, nDegrees, sAnimationName, true, false);
+
+				Scene.removeNode(oGear);
+			}
+			// Custom parameter keys don't always exist. They have to be manually cleared after each animation
+			if (aChildPropertyControllers) for (var i = 0; i != aChildPropertyControllers.length; i++) aChildPropertyControllers[i].deleteAllKeys();
+
+			Scene.setAnimRange(DzTimeRange(0, 0));
 		}
+		if (oSubject) Scene.removeNode(oSubject);
 	}
-	// Tasks that only one instance should perform
-	if (nInstanceNumber == 1) {
-
-		// Execute a PowerShell script with arguments: https://github.com/Laserwolve-Games/Overlord/discussions/6
-		var sTempPath = App.getTempPath();
-		var oSpritesheetExecutor = new DzFile(sTempPath + '/spriteSheetExecutor.cmd');
-		var sSpritesheetExecutorCode = 'powershell -NoProfile -ExecutionPolicy Bypass -File '
-		+ sScriptPath + '/makeSpritesheets.ps1 -sourceDirectory "' + sOutputDirectory + '" -outputDirectory "' + sSpritesheetOutputDirectory + '"';
-
-		oSpritesheetExecutor.open(DzFile.WriteOnly);
-		oSpritesheetExecutor.write(sSpritesheetExecutorCode);
-		oSpritesheetExecutor.close();
-
-		// Let's see how our new folder structure works out first
-		// App.showURL('file:///' + sTempPath + '/spriteSheetExecutor.cmd');
-	}
-	App.delayedExit();
 }
+// Tasks that only one instance should perform
+if (nInstanceNumber == 1) {
+
+	// TODO: https://github.com/Laserwolve-Games/Overlord/issues/7
+
+	// Execute a PowerShell script with arguments: https://github.com/Laserwolve-Games/Overlord/discussions/6
+	var sTempPath = App.getTempPath();
+	var oSpritesheetExecutor = new DzFile(sTempPath + '/spriteSheetExecutor.cmd');
+	var sSpritesheetExecutorCode = 'powershell -NoProfile -ExecutionPolicy Bypass -File '
+	+ sScriptPath + '/makeSpritesheets.ps1 -sourceDirectory "' + sOutputDirectory + '" -outputDirectory "' + sSpritesheetOutputDirectory + '"';
+
+	oSpritesheetExecutor.open(DzFile.WriteOnly);
+	oSpritesheetExecutor.write(sSpritesheetExecutorCode);
+	oSpritesheetExecutor.close();
+
+	App.showURL('file:///' + sTempPath + '/spriteSheetExecutor.cmd');
+}
+App.delayedExit();

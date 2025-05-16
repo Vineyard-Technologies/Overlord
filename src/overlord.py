@@ -6,6 +6,7 @@ import sys
 import webbrowser
 import json
 from PIL import Image, ImageTk
+import time
 
 def resource_path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """
@@ -54,7 +55,6 @@ def main():
 
     # File/folder path parameters
     file_params = [
-        "Daz Studio Executable Path",
         "Render Script Path",
         "Source Sets",
         "Image Output Directory",
@@ -63,10 +63,8 @@ def main():
     # Short/simple parameters
     param_params = [
         "Number of Instances",
-        "Instance Naming Format",
         "Frame Rate",
-        "Log File Size (MBs)",
-        "Do not Display Prompts"
+        "Log File Size (MBs)"
     ]
     value_entries = {}
 
@@ -117,27 +115,13 @@ def main():
         param_label = tk.Label(file_table_frame, text=param, font=("Arial", 10), anchor="w")
         param_label.grid(row=i+1, column=0, padx=10, pady=5, sticky="w")
 
-        if param == "Daz Studio Executable Path":
+        if param == "Render Script Path":
             value_entry = tk.Entry(file_table_frame, width=80, font=("Consolas", 10))
-            value_entry.insert(0, r"C:\Program Files\DAZ 3D\DAZStudio4\DAZStudio.exe")
-            value_entry.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
-
-            browse_button = tk.Button(
-                file_table_frame,
-                text="Browse",
-                command=make_browse_file(
-                    value_entry,
-                    initialdir=r"C:\Program Files\DAZ 3D\DAZStudio4",
-                    filetypes=(("Executable files", "*.exe"), ("All files", "*.*")),
-                    title="Select DAZStudio.exe"
-                )
+            default_script_path = os.path.join(
+                os.path.expanduser("~"),
+                "Documents", "GitHub", "Overlord", "scripts", "masterRenderer.dsa"
             )
-            browse_button.grid(row=i+1, column=2, padx=5, pady=5)
-            value_entries[param] = value_entry
-
-        elif param == "Render Script Path":
-            value_entry = tk.Entry(file_table_frame, width=80, font=("Consolas", 10))
-            value_entry.insert(0, r"C:\Users\Andrew\Documents\GitHub\DAZScripts\masterRenderer.dsa")
+            value_entry.insert(0, default_script_path)
             value_entry.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
 
             browse_button = tk.Button(
@@ -145,7 +129,10 @@ def main():
                 text="Browse",
                 command=make_browse_file(
                     value_entry,
-                    initialdir=r"C:\Users\Andrew\Documents\GitHub\DAZScripts",
+                    initialdir=os.path.join(
+                        os.path.expanduser("~"),
+                        "Documents", "GitHub", "Overlord"
+                    ),
                     filetypes=(("DAZ Script files", "*.dsa"), ("All files", "*.*")),
                     title="Select Render Script"
                 )
@@ -154,22 +141,24 @@ def main():
             value_entries[param] = value_entry
 
         elif param == "Source Sets":
-            text_widget = tk.Text(file_table_frame, width=80, height=15, font=("Consolas", 10))
+            text_widget = tk.Text(file_table_frame, width=80, height=5, font=("Consolas", 10))  # Changed height to 5
             text_widget.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
             def browse_folders_append():
-                foldernames = filedialog.askdirectory(
-                    initialdir=".",
+                # Start in user's Documents directory
+                documents_dir = os.path.join(os.path.expanduser("~"), "Documents")
+                foldername = filedialog.askdirectory(
+                    initialdir=documents_dir,
                     title="Select Source Set Folder"
                 )
                 # askdirectory only allows one folder at a time, so allow multiple by repeated selection
-                if foldernames:
+                if foldername:
                     current = text_widget.get("1.0", tk.END).strip()
                     current_folders = set(current.split("\n")) if current else set()
-                    if foldernames not in current_folders:
+                    if foldername not in current_folders:
                         if current:
-                            text_widget.insert(tk.END, "\n" + foldernames)
+                            text_widget.insert(tk.END, "\n" + foldername)
                         else:
-                            text_widget.insert(tk.END, foldernames)
+                            text_widget.insert(tk.END, foldername)
             browse_button = tk.Button(
                 file_table_frame,
                 text="Browse",
@@ -189,7 +178,11 @@ def main():
 
         elif param == "Image Output Directory":
             value_entry = tk.Entry(file_table_frame, width=80, font=("Consolas", 10))
-            value_entry.insert(0, r"C:\Users\Andrew\Documents\GitHub\PlainsOfShinar\individual_images")
+            default_img_dir = os.path.join(
+                os.path.expanduser("~"),
+                "Documents", "GitHub", "PlainsOfShinar", "individual_images"
+            )
+            value_entry.insert(0, default_img_dir)
             value_entry.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
 
             browse_button = tk.Button(
@@ -197,7 +190,7 @@ def main():
                 text="Browse",
                 command=make_browse_folder(
                     value_entry,
-                    initialdir=r"C:\Users\Andrew\Documents\GitHub\PlainsOfShinar\individual_images",
+                    initialdir=default_img_dir,
                     title="Select Image Output Directory"
                 )
             )
@@ -206,7 +199,11 @@ def main():
 
         elif param == "Spritesheet Output Directory":
             value_entry = tk.Entry(file_table_frame, width=80, font=("Consolas", 10))
-            value_entry.insert(0, r"C:\Users\Andrew\Documents\GitHub\PlainsOfShinar\spritesheets")
+            default_sheet_dir = os.path.join(
+                os.path.expanduser("~"),
+                "Documents", "GitHub", "PlainsOfShinar", "spritesheets"
+            )
+            value_entry.insert(0, default_sheet_dir)
             value_entry.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
 
             browse_button = tk.Button(
@@ -214,7 +211,7 @@ def main():
                 text="Browse",
                 command=make_browse_folder(
                     value_entry,
-                    initialdir=r"C:\Users\Andrew\Documents\GitHub\PlainsOfShinar\spritesheets",
+                    initialdir=default_sheet_dir,
                     title="Select Spritesheet Output Directory"
                 )
             )
@@ -226,28 +223,15 @@ def main():
         param_label = tk.Label(param_table_frame, text=param, font=("Arial", 10), anchor="w")
         param_label.grid(row=i+1, column=0, padx=10, pady=5, sticky="w")
 
-        if param == "Instance Naming Format":
-            param_label.config(font=("Arial", 10, "underline"), fg="blue", cursor="hand2")
-            param_label.bind("<Button-1>", lambda e: os.startfile("http://docs.daz3d.com/doku.php/public/software/dazstudio/4/referenceguide/tech_articles/command_line_options/application_instancing/start"))
-            value_entry = tk.Entry(param_table_frame, width=5, font=("Consolas", 10))
-            value_entry.insert(0, "#")
-            value_entry.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
-            value_entries[param] = value_entry
-        elif param == "Do not Display Prompts":
-            var = tk.BooleanVar(value=True)
-            value_checkbutton = tk.Checkbutton(param_table_frame, variable=var)
-            value_checkbutton.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
-            value_entries[param] = var
-        else:
-            value_entry = tk.Entry(param_table_frame, width=5, font=("Consolas", 10))
-            if param == "Number of Instances":
-                value_entry.insert(0, "1")
-            elif param == "Log File Size (MBs)":
-                value_entry.insert(0, "500")
-            elif param == "Frame Rate":
-                value_entry.insert(0, "30")
-            value_entry.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
-            value_entries[param] = value_entry
+        value_entry = tk.Entry(param_table_frame, width=5, font=("Consolas", 10))
+        if param == "Number of Instances":
+            value_entry.insert(0, "1")
+        elif param == "Log File Size (MBs)":
+            value_entry.insert(0, "500")
+        elif param == "Frame Rate":
+            value_entry.insert(0, "30")
+        value_entry.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
+        value_entries[param] = value_entry
 
     # --- Last Rendered Image Section ---
     right_frame = tk.Frame(root)
@@ -352,7 +336,11 @@ def main():
 
     # Also update after render
     def start_render():
-        daz_executable_path = value_entries["Daz Studio Executable Path"].get()
+        # Hardcoded Daz Studio Executable Path
+        daz_executable_path = os.path.join(
+            os.environ.get("ProgramFiles", "C:\\Program Files"),
+            "DAZ 3D", "DAZStudio4", "DAZStudio.exe"
+        )
         render_script_path = value_entries["Render Script Path"].get().replace("\\", "/")
         # Use "Source Sets" and treat as folders
         source_sets = value_entries["Source Sets"].get("1.0", tk.END).strip().replace("\\", "/").split("\n")
@@ -361,11 +349,14 @@ def main():
         image_output_dir = value_entries["Image Output Directory"].get().replace("\\", "/")
         spritesheet_output_dir = value_entries["Spritesheet Output Directory"].get().replace("\\", "/")
         num_instances = value_entries["Number of Instances"].get()
-        instance_name = value_entries["Instance Naming Format"].get()
         log_size = value_entries["Log File Size (MBs)"].get()
         log_size = int(log_size) * 1000000  # Convert MBs to bytes
         frame_rate = value_entries["Frame Rate"].get()
-        prompt_var = value_entries["Do not Display Prompts"].get()
+
+        try:
+            num_instances_int = int(num_instances)
+        except Exception:
+            num_instances_int = 1
 
         json_map = (
             f'{{'
@@ -377,18 +368,25 @@ def main():
             f'}}'
         )
 
-        command = [
-            daz_executable_path,
-            "-scriptArg", json_map,
-            "-instanceName", str(instance_name),
-            "-logSize", str(log_size),
-        ]
-        if prompt_var:
-            command.append("-noPrompt")
-        command.append(render_script_path)
+        def run_instance():
+            command = [
+                daz_executable_path,
+                "-scriptArg", json_map,
+                "-instanceName", "#",  # Hardcoded value
+                "-logSize", str(log_size),
+                "-noPrompt",           # Always add -noPrompt
+                render_script_path
+            ]
+            subprocess.Popen(command)
 
-        subprocess.Popen(command)
-        root.after(1000, show_last_rendered_image)  # Update image after render
+        def run_all_instances(i=0):
+            if i < num_instances_int:
+                run_instance()
+                root.after(5000, lambda: run_all_instances(i + 1))
+            else:
+                root.after(1000, show_last_rendered_image)  # Update image after render
+
+        run_all_instances()
 
     # Initial display
     root.after(500, show_last_rendered_image)
