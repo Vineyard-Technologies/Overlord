@@ -123,13 +123,11 @@ function renderCore(sSet, sName, nDegrees, sAnimationName, bIsGear, bIsShadow) {
 			while (backgroundProgressIsActive()) processEvents();		// Wait for everything else to finish first, specifically the mesh smoother, then render.
 			oRenderMgr.doRender();
 
-			// TODO: Why aren't we using 'new' here?
 			var oCanvasDirectory = DzDir(sFinalFilePath.replace('.png', '_canvases'));
 
 			if (oCanvasDirectory.exists())  // If canvases were made, delete all of them, then delete the canvas folder.
 			{
 				var aCanvases = oCanvasDirectory.getFilesFromDir(['*.exr'], true);
-				// TODO: Look into replacing this with removeRecursively() (new in 4.23.1.23)
 				for (var i = 0; i != aCanvases.length; i++) oCanvasDirectory.remove(aCanvases[i]);
 				oCanvasDirectory.rmdir();
 			}
@@ -137,8 +135,6 @@ function renderCore(sSet, sName, nDegrees, sAnimationName, bIsGear, bIsShadow) {
 			if (DzFileInfo(sFinalFilePath).size() == 4181) App.warning(sFinalFilePath + ' is 4181 bytes. It is likely a blank image.');
 		}
 	}
-	// TODO: Would it be faster to change environment settings every frame to render the shadow,
-	// instead of reloading all animations?
 	if (!bIsShadow) renderCore(sSet, sName, nDegrees, sAnimationName, bIsGear, true);
 }
 for (var s = 0; s != aSets.length; s++) {

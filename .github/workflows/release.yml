@@ -30,13 +30,22 @@ jobs:
       - name: Install Pillow
         run: pip install pillow
 
+      - name: Install Inno Setup
+        run: |
+          choco install innosetup -y
+
       - name: Build overlord.exe
         shell: pwsh
         run: ./scripts/createExecutable.ps1
 
+      - name: Build Installer
+        run: |
+          iscc installer.iss
+        working-directory: ${{ github.workspace }}
+
       - name: Upload Release Asset
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/overlord.exe
+          files: dist/overlord-setup.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
