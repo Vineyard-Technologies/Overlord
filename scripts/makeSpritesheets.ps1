@@ -40,7 +40,7 @@ foreach ($item in $items) {
         }
 
         # Make the path relative to the spritesheets directory
-        $relativePath = $item.FullName -replace [regex]::Escape($targetDirectory.substring(0,$targetDirectory.IndexOf('\spritesheets'))), "."
+        $relativePath = $item.FullName -replace [regex]::Escape($outputDirectory), "."
         # Replace the escaped backslashes with forward slashes
         $relativePath = $relativePath -replace "\\", "/"
         $folderData[$folderName] += $relativePath
