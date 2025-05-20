@@ -1,6 +1,6 @@
 param (
-    [string]$sourceDirectory,
-    [string]$outputDirectory,
+    [string]$sourceDirectory = "C:\Users\Andrew\Documents\GitHub\PlainsOfShinar\individual_images",
+    [string]$outputDirectory = "C:\Users\Andrew\Documents\GitHub\PlainsOfShinar\spritesheets",
     [string]$manifestFileName = "manifest.json"
 )
 
@@ -24,7 +24,7 @@ foreach ($dir in $subDirs) {
 
     Write-Output "Processing folder: $folderName"
 
-    TexturePacker "settings.tps" --sheet "$outputDirectory\$folderName\$folderName-{n}.webp" --data "$outputDirectory\$folderName\$folderName-{n}.json" $fullName
+    TexturePacker "C:\Users\Andrew\Documents\GitHub\Overlord\scripts\settings.tps" --sheet "$outputDirectory\$folderName\$folderName-{n}.webp" --data "$outputDirectory\$folderName\$folderName-{n}.json" $fullName
 }
 
 # Create the manifest
