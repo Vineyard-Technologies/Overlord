@@ -10,11 +10,6 @@ var oScriptFileInfo = new DzFileInfo(getScriptFileName());
 var sScriptPath = oScriptFileInfo.path();
 var nInstanceNumber = App.instanceName();
 
-// Might use these later
-// var oExistingOutputDirectories = new DzDir(sAssetPath + 'output');
-// var aExistingOutputDirectories = oExistingOutputDirectories.entryList(['*'], DzDir.Dirs | DzDir.NoDotAndDotDot);
-// var sOutputDirectory = sAssetPath + 'output/Automated Render #' + (aExistingOutputDirectories.length + 1);
-
 var sOutputDirectory = oScriptArgs['image_output_dir'];
 var oOutputDirectory = new DzDir(sOutputDirectory);
 var sSpritesheetOutputDirectory = oScriptArgs['spritesheet_output_dir'];
@@ -50,31 +45,6 @@ function setMatte(bBool) // Set the Matte Parameter of a subject and its childre
 	}
 }
 function renderCore(sSet, sName, nDegrees, sAnimationName, bIsGear, bIsShadow) {
-	if (aChildPropertyControllers) for (var i = 0; i != aChildPropertyControllers.length; i++) // then for each of the child property controllers...
-	{
-
-		// TODO: I think this is broken
-		/* 
-		Use the name of the property in the "Custom" category to find the property to which to link it.
-		e.g.,
-		BowOnnaStick-StikkbowDrawn
-		Default Bolt-Opacity Strength-shaft
-		The the first value is the node label. The second value is the property label. The third value is the material name, and is optional.
-		The owner of a property usually is a DzNode, but it might be a DzMorph. The DzNode method "findPropertyByLabel" won't work for properties owned by a DzMorph.
-		The "findPropertyOnNodeByLabel" method in the DzSceneHelper convenience object must be used to accommodate this scenario.
-		*/
-		var oChildPropertyController = aChildPropertyControllers[i];
-		var aTargetPropertyParameters = oChildPropertyController.name.split('-');
-		var oTargetNode = Scene.findNodeByLabel(aTargetPropertyParameters[0]);
-		var sTargetPropertyName = aTargetPropertyParameters[1];
-		var sTargetMaterial = aTargetPropertyParameters[2];
-		var oTarget;
-		if (sTargetMaterial) oTarget = oSceneHelper.findPropertyOnMaterialByLabel(sTargetPropertyName, oTargetNode.getObject().getCurrentShape().findMaterial(sTargetMaterial));
-		else oTarget = oSceneHelper.findPropertyOnNodeByLabel(sTargetPropertyName, oTargetNode);
-
-		oTarget.linkTo(oChildPropertyController);
-	}
-
 	// variables that have to be determined when we start rendering
 	var nFramesTotal = Scene.getPlayRange().end / nTicksPerFrame;
 
@@ -144,6 +114,7 @@ for (var s = 0; s != aSets.length; s++) {
 
 	var aSubjects = oSetDirectory.getFilesFromDir(['*_subject.duf'], false);
 	var aAnimations = oSetDirectory.getFilesFromDir(['*_animation.duf'], false);
+	var aPropAnimations = oSetDirectory.getFilesFromDir(['*_propAnimation.duf'], false);
 	var aGear = oSetDirectory.getFilesFromDir(['*_gear.duf'], false);
 
 	for (var nSubjectCounter = 0; nSubjectCounter != aSubjects.length; nSubjectCounter++) // For each subject...
@@ -168,9 +139,6 @@ for (var s = 0; s != aSets.length; s++) {
 		var oSubject = Scene.findNodeByLabel('subject');		// Set up the subject.
 		var aSubjectChildren = oSubject.getNodeChildren(true);
 		var oSubjectMatteParameter = oSubject.findPropertyByLabel('Enable Iray Matte');
-		var oCustomPropertyGroup = oSubject.getPropertyGroups().findChild('Custom');
-		var aChildPropertyControllers;
-		if (oCustomPropertyGroup) aChildPropertyControllers = oCustomPropertyGroup.getAllProperties();
 
 		oRoot.addNodeChild(oSubject, true);
 
@@ -199,6 +167,29 @@ for (var s = 0; s != aSets.length; s++) {
 			}
 			oContentMgr.openFile(aAnimations[j], true); // only the subject can be selected when we merge in an animation
 
+			if (aPropAnimations)
+			for (var nPropAnimationCounter = 0; nPropAnimationCounter != aPropAnimations.length; nPropAnimationCounter++)
+			{
+				var sPropAnimationFileName = getName(aPropAnimations[nPropAnimationCounter]); // walk-LightningOrb
+				var sAnimationName = getName(aAnimations[j]); // walk
+
+				if (sPropAnimationFileName.indexOf(sAnimationName) !== -1) {
+
+					var sNameOfPropToAnimate = sPropAnimationFileName.split('-').pop(); //LightningOrb
+					var oProp = Scene.findNodeByLabel(sNameOfPropToAnimate);
+
+					oSubject.select(false);
+					oProp.select(true);
+
+					oContentMgr.openFile(aPropAnimations[nPropAnimationCounter], true);
+
+					oProp.select(false);
+					oSubject.select(true);
+
+				} else continue;
+
+			}
+
 			var sAnimationName = getName(aAnimations[j]);
 
 			if (!aGear.length) renderCore(sSet, sSubjectName, nDegrees, sAnimationName, false, false);
@@ -221,9 +212,6 @@ for (var s = 0; s != aSets.length; s++) {
 
 				Scene.removeNode(oGear);
 			}
-			// Custom parameter keys don't always exist. They have to be manually cleared after each animation
-			if (aChildPropertyControllers) for (var i = 0; i != aChildPropertyControllers.length; i++) aChildPropertyControllers[i].deleteAllKeys();
-
 			Scene.setAnimRange(DzTimeRange(0, 0));
 		}
 		if (oSubject) Scene.removeNode(oSubject);

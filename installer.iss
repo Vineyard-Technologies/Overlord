@@ -9,6 +9,8 @@ OutputBaseFilename=overlord-setup
 Compression=lzma
 SolidCompression=yes
 
+SetupIconFile=assets\favicon.ico
+
 [Files]
 Source: "dist\overlord.exe"; DestDir: "{app}"; Flags: ignoreversion
 

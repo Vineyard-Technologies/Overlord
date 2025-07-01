@@ -19,7 +19,7 @@ def resource_path(relative_path):
 def main():
     # Create the main window
     root = tk.Tk()
-    root.title("Overlord 1.0.0")
+    root.title("Overlord 1.2.3")
     root.iconbitmap(resource_path(os.path.join("assets", "favicon.ico")))  # Set the application icon
 
     # Maximize the application window
