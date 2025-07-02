@@ -25,6 +25,13 @@ jobs:
         run: |
           $tag = $env:GITHUB_REF -replace 'refs/tags/', ''
           Set-Content -Path src/version.py -Value "__version__ = '$tag'"
+          # Update installer.iss with the version for AppVersion, VersionInfoVersion, and OutputBaseFilename
+          $dashed = $tag -replace '\.', '-'
+          (Get-Content installer.iss) \
+            -replace 'AppVersion=__APP_VERSION__', "AppVersion=$tag" \
+            | ForEach-Object { $_ -replace 'VersionInfoVersion=__APP_VERSION__', "VersionInfoVersion=$tag" } \
+            | ForEach-Object { $_ -replace 'OutputBaseFilename=OverlordInstaller__APP_VERSION_DASHED__', "OutputBaseFilename=OverlordInstaller$dashed" } \
+            | Set-Content installer.iss
 
       - name: Install dependencies
         run: |
@@ -52,6 +59,6 @@ jobs:
       - name: Upload Release Asset
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/overlord-setup.exe
+          files: dist/OverlordInstaller*.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
