@@ -317,14 +317,26 @@ def main():
             os.environ.get("ProgramFiles", "C:\\Program Files"),
             "DAZ 3D", "DAZStudio4", "DAZStudio.exe"
         )
-        # Always use the installed scripts directory (next to the EXE)
+        # Use user-writable scripts directory in %APPDATA%\Overlord\scripts
+        appdata = os.environ.get('APPDATA') or os.path.expanduser('~')
+        user_scripts_dir = os.path.join(appdata, 'Overlord', 'scripts')
+        os.makedirs(user_scripts_dir, exist_ok=True)
+        render_script_path = os.path.join(user_scripts_dir, "masterRenderer.dsa").replace("\\", "/")
+
+        # On first run or update, copy the script from the install dir if not present or outdated
         if getattr(sys, 'frozen', False):
-            # Running as PyInstaller EXE
-            base_dir = os.path.dirname(sys.executable)
+            install_dir = os.path.dirname(sys.executable)
         else:
-            # Running as script
-            base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-        render_script_path = os.path.join(base_dir, "scripts", "masterRenderer.dsa").replace("\\", "/")
+            install_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        install_script_path = os.path.join(install_dir, "scripts", "masterRenderer.dsa")
+        try:
+            if (not os.path.exists(render_script_path)) or (
+                os.path.getmtime(install_script_path) > os.path.getmtime(render_script_path)):
+                import shutil
+                shutil.copy2(install_script_path, render_script_path)
+                logging.info(f'Copied masterRenderer.dsa to user scripts dir: {render_script_path}')
+        except Exception as e:
+            logging.error(f'Could not copy masterRenderer.dsa to user scripts dir: {e}')
         # Use "Source Sets" and treat as folders
         source_sets = value_entries["Source Sets"].get("1.0", tk.END).strip().replace("\\", "/").split("\n")
         source_sets = [folder for folder in source_sets if folder]  # Remove empty lines
