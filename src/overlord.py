@@ -7,6 +7,8 @@ import webbrowser
 import json
 from PIL import Image, ImageTk
 import time
+import logging
+from version import __version__ as overlord_version
 
 def resource_path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """
@@ -16,10 +18,21 @@ def resource_path(relative_path):
         base_path = os.path.abspath(".")
     return os.path.join(base_path, relative_path)
 
+def setup_logger():
+    log_path = os.path.join(os.path.dirname(sys.executable if getattr(sys, 'frozen', False) else __file__), 'log.txt')
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s %(levelname)s: %(message)s',
+        handlers=[logging.FileHandler(log_path, encoding='utf-8'), logging.StreamHandler()]
+    )
+    logging.info('--- Overlord started ---')
+
 def main():
+    setup_logger()
+    logging.info('Application launched')
     # Create the main window
     root = tk.Tk()
-    root.title("Overlord 1.2.3")
+    root.title(f"Overlord {overlord_version}")
     root.iconbitmap(resource_path(os.path.join("assets", "favicon.ico")))  # Set the application icon
 
     # Maximize the application window
@@ -38,13 +51,13 @@ def main():
     # Place in upper right using place geometry manager
     lwg_logo_label.place(anchor="nw", x=700)
     def open_lwg_link(event):
+        logging.info('Laserwolve Games logo clicked')
         webbrowser.open("https://www.laserwolvegames.com/")
     lwg_logo_label.bind("<Button-1>", open_lwg_link)
 
-    # Make the logo clickable
     def open_github_link(event):
+        logging.info('Overlord GitHub logo clicked')
         webbrowser.open("https://github.com/Laserwolve-Games/Overlord")
-
     logo_label.bind("<Button-1>", open_github_link)
 
     # Create frames for the two tables
@@ -252,8 +265,6 @@ def main():
                 # Handle transparency by adding a white background
                 bg = Image.new("RGBA", img.size, (255, 255, 255, 255))
                 img = Image.alpha_composite(bg, img)
-
-                # Update image details
                 orig_img = Image.open(newest_img_path)
                 width, height = orig_img.size
                 file_size = os.path.getsize(newest_img_path)
@@ -264,13 +275,15 @@ def main():
                 img_label.config(image=tk_img)
                 img_label.image = tk_img
                 no_img_label.lower()
-            except Exception:
+                logging.info(f'Displaying image: {newest_img_path}')
+            except Exception as e:
                 img_label.config(image="")
                 img_label.image = None
                 details_path.config(text="")
                 details_dim.config(text="Dimensions: ")
                 details_size.config(text="Size: ")
                 no_img_label.lift()
+                logging.error(f'Error displaying image: {e}')
         else:
             img_label.config(image="")
             img_label.image = None
@@ -278,17 +291,19 @@ def main():
             details_dim.config(text="Dimensions: ")
             details_size.config(text="Size: ")
             no_img_label.lift()
+            logging.info('No images found in output directory')
         # Schedule to check again in 1 second
         root.after(1000, show_last_rendered_image)
 
     # Update image when output directory changes or after render
     def on_output_dir_change(*args):
+        logging.info(f'Output Directory changed to: {value_entries["Output Directory"].get()}')
         root.after(200, show_last_rendered_image)
     value_entries["Output Directory"].bind("<FocusOut>", lambda e: on_output_dir_change())
     value_entries["Output Directory"].bind("<Return>", lambda e: on_output_dir_change())
 
-    # Also update after render
     def start_render():
+        logging.info('Start Render button clicked')
         # Hardcoded Daz Studio Executable Path
         daz_executable_path = os.path.join(
             os.environ.get("ProgramFiles", "C:\\Program Files"),
@@ -321,6 +336,7 @@ def main():
         )
 
         def run_instance():
+            logging.info('Launching Daz Studio render instance')
             command = [
                 daz_executable_path,
                 "-scriptArg", json_map,
@@ -329,27 +345,35 @@ def main():
                 "-noPrompt",           # Always add -noPrompt
                 render_script_path
             ]
-            subprocess.Popen(command)
-
+            logging.info(f'Command executed: {command}')
+            try:
+                subprocess.Popen(command)
+                logging.info('Daz Studio instance started successfully')
+            except Exception as e:
+                logging.error(f'Failed to start Daz Studio instance: {e}')
         def run_all_instances(i=0):
             if i < num_instances_int:
                 run_instance()
                 root.after(5000, lambda: run_all_instances(i + 1))
             else:
+                logging.info('All render instances launched')
                 root.after(1000, show_last_rendered_image)  # Update image after render
-
         run_all_instances()
+
+    def end_all_daz_studio():
+        logging.info('End all Daz Studio Instances button clicked')
+        try:
+            subprocess.Popen([
+                "powershell",
+                "-Command",
+                'Get-Process -Name "DAZStudio" -ErrorAction SilentlyContinue | ForEach-Object { $_.Kill() }'
+            ])
+            logging.info('Kill command sent to all DAZStudio processes')
+        except Exception as e:
+            logging.error(f'Failed to kill DAZStudio processes: {e}')
 
     # Initial display
     root.after(500, show_last_rendered_image)
-
-    def end_all_daz_studio():
-        # Use PowerShell to kill all DAZStudio processes
-        subprocess.Popen([
-            "powershell",
-            "-Command",
-            'Get-Process -Name "DAZStudio" -ErrorAction SilentlyContinue | ForEach-Object { $_.Kill() }'
-        ])
 
     button = tk.Button(root, text="Start Render", command=start_render, font=("Arial", 16, "bold"), width=20, height=2)
     button.pack(side="left", anchor="sw", padx=(30,10), pady=20)
