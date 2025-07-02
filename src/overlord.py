@@ -19,13 +19,21 @@ def resource_path(relative_path):
     return os.path.join(base_path, relative_path)
 
 def setup_logger():
-    log_path = os.path.join(os.path.dirname(sys.executable if getattr(sys, 'frozen', False) else __file__), 'log.txt')
+    # Try to write log to %APPDATA%/Overlord/log.txt (user-writable)
+    appdata = os.environ.get('APPDATA')
+    if appdata:
+        log_dir = os.path.join(appdata, 'Overlord')
+    else:
+        # Fallback to user's home directory
+        log_dir = os.path.join(os.path.expanduser('~'), 'Overlord')
+    os.makedirs(log_dir, exist_ok=True)
+    log_path = os.path.join(log_dir, 'log.txt')
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s %(levelname)s: %(message)s',
         handlers=[logging.FileHandler(log_path, encoding='utf-8'), logging.StreamHandler()]
     )
-    logging.info('--- Overlord started ---')
+    logging.info(f'--- Overlord started --- (log file: {log_path})')
 
 def main():
     setup_logger()
