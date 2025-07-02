@@ -12,7 +12,6 @@ var nInstanceNumber = App.instanceName();
 
 var sOutputDirectory = oScriptArgs['image_output_dir'];
 var oOutputDirectory = new DzDir(sOutputDirectory);
-var sSpritesheetOutputDirectory = oScriptArgs['spritesheet_output_dir'];
 var aSets = oScriptArgs['source_sets'].toString().split(',');
 var oRenderMgr = App.getRenderMgr();
 var oIrayOptions = oRenderMgr.getRenderElementObjects()[1];
@@ -217,21 +216,5 @@ for (var s = 0; s != aSets.length; s++) {
 		if (oSubject) Scene.removeNode(oSubject);
 	}
 }
-// Tasks that only one instance should perform
-if (nInstanceNumber == 1) {
 
-	// TODO: https://github.com/Laserwolve-Games/Overlord/issues/7
-
-	// Execute a PowerShell script with arguments: https://github.com/Laserwolve-Games/Overlord/discussions/6
-	var sTempPath = App.getTempPath();
-	var oSpritesheetExecutor = new DzFile(sTempPath + '/spriteSheetExecutor.cmd');
-	var sSpritesheetExecutorCode = 'powershell -NoProfile -ExecutionPolicy Bypass -File '
-	+ sScriptPath + '/makeSpritesheets.ps1 -sourceDirectory "' + sOutputDirectory + '" -outputDirectory "' + sSpritesheetOutputDirectory + '"';
-
-	oSpritesheetExecutor.open(DzFile.WriteOnly);
-	oSpritesheetExecutor.write(sSpritesheetExecutorCode);
-	oSpritesheetExecutor.close();
-
-	App.showURL('file:///' + sTempPath + '/spriteSheetExecutor.cmd');
-}
 App.delayedExit();

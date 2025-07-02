@@ -55,10 +55,8 @@ def main():
 
     # File/folder path parameters
     file_params = [
-        "Render Script Path",
         "Source Sets",
-        "Image Output Directory",
-        "Spritesheet Output Directory"
+        "Output Directory"
     ]
     # Short/simple parameters
     param_params = [
@@ -115,32 +113,7 @@ def main():
         param_label = tk.Label(file_table_frame, text=param, font=("Arial", 10), anchor="w")
         param_label.grid(row=i+1, column=0, padx=10, pady=5, sticky="w")
 
-        if param == "Render Script Path":
-            value_entry = tk.Entry(file_table_frame, width=80, font=("Consolas", 10))
-            default_script_path = os.path.join(
-                os.path.expanduser("~"),
-                "Documents", "GitHub", "Overlord", "scripts", "masterRenderer.dsa"
-            )
-            value_entry.insert(0, default_script_path)
-            value_entry.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
-
-            browse_button = tk.Button(
-                file_table_frame,
-                text="Browse",
-                command=make_browse_file(
-                    value_entry,
-                    initialdir=os.path.join(
-                        os.path.expanduser("~"),
-                        "Documents", "GitHub", "Overlord"
-                    ),
-                    filetypes=(("DAZ Script files", "*.dsa"), ("All files", "*.*")),
-                    title="Select Render Script"
-                )
-            )
-            browse_button.grid(row=i+1, column=2, padx=5, pady=5)
-            value_entries[param] = value_entry
-
-        elif param == "Source Sets":
+        if param == "Source Sets":
             text_widget = tk.Text(file_table_frame, width=80, height=5, font=("Consolas", 10))  # Changed height to 5
             text_widget.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
             def browse_folders_append():
@@ -175,8 +148,7 @@ def main():
             )
             clear_button.grid(row=i+1, column=2, padx=5, pady=(100, 5))
             value_entries[param] = text_widget
-
-        elif param == "Image Output Directory":
+        elif param == "Output Directory":
             value_entry = tk.Entry(file_table_frame, width=80, font=("Consolas", 10))
             default_img_dir = os.path.join(
                 os.path.expanduser("~"),
@@ -191,32 +163,13 @@ def main():
                 command=make_browse_folder(
                     value_entry,
                     initialdir=default_img_dir,
-                    title="Select Image Output Directory"
+                    title="Select Output Directory"
                 )
             )
             browse_button.grid(row=i+1, column=2, padx=5, pady=5)
             value_entries[param] = value_entry
 
-        elif param == "Spritesheet Output Directory":
-            value_entry = tk.Entry(file_table_frame, width=80, font=("Consolas", 10))
-            default_sheet_dir = os.path.join(
-                os.path.expanduser("~"),
-                "Documents", "GitHub", "PlainsOfShinar", "spritesheets"
-            )
-            value_entry.insert(0, default_sheet_dir)
-            value_entry.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
 
-            browse_button = tk.Button(
-                file_table_frame,
-                text="Browse",
-                command=make_browse_folder(
-                    value_entry,
-                    initialdir=default_sheet_dir,
-                    title="Select Spritesheet Output Directory"
-                )
-            )
-            browse_button.grid(row=i+1, column=2, padx=5, pady=5)
-            value_entries[param] = value_entry
 
     # Short/simple parameters table
     for i, param in enumerate(param_params):
@@ -291,7 +244,7 @@ def main():
         return newest_file
 
     def show_last_rendered_image():
-        output_dir = value_entries["Image Output Directory"].get()
+        output_dir = value_entries["Output Directory"].get()
         newest_img_path = find_newest_image(output_dir)
         if newest_img_path and os.path.exists(newest_img_path):
             try:
@@ -331,8 +284,8 @@ def main():
     # Update image when output directory changes or after render
     def on_output_dir_change(*args):
         root.after(200, show_last_rendered_image)
-    value_entries["Image Output Directory"].bind("<FocusOut>", lambda e: on_output_dir_change())
-    value_entries["Image Output Directory"].bind("<Return>", lambda e: on_output_dir_change())
+    value_entries["Output Directory"].bind("<FocusOut>", lambda e: on_output_dir_change())
+    value_entries["Output Directory"].bind("<Return>", lambda e: on_output_dir_change())
 
     # Also update after render
     def start_render():
@@ -341,13 +294,13 @@ def main():
             os.environ.get("ProgramFiles", "C:\\Program Files"),
             "DAZ 3D", "DAZStudio4", "DAZStudio.exe"
         )
-        render_script_path = value_entries["Render Script Path"].get().replace("\\", "/")
+        # Hardcoded render script path in the installed scripts directory
+        render_script_path = resource_path(os.path.join("scripts", "masterRenderer.dsa")).replace("\\", "/")
         # Use "Source Sets" and treat as folders
         source_sets = value_entries["Source Sets"].get("1.0", tk.END).strip().replace("\\", "/").split("\n")
         source_sets = [folder for folder in source_sets if folder]  # Remove empty lines
         source_sets = json.dumps(source_sets)
-        image_output_dir = value_entries["Image Output Directory"].get().replace("\\", "/")
-        spritesheet_output_dir = value_entries["Spritesheet Output Directory"].get().replace("\\", "/")
+        image_output_dir = value_entries["Output Directory"].get().replace("\\", "/")
         num_instances = value_entries["Number of Instances"].get()
         log_size = value_entries["Log File Size (MBs)"].get()
         log_size = int(log_size) * 1000000  # Convert MBs to bytes
@@ -362,7 +315,6 @@ def main():
             f'{{'
             f'"num_instances": "{num_instances}", '
             f'"image_output_dir": "{image_output_dir}", '
-            f'"spritesheet_output_dir": "{spritesheet_output_dir}", '
             f'"frame_rate": "{frame_rate}", '
             f'"source_sets": {source_sets}'
             f'}}'
