@@ -317,8 +317,14 @@ def main():
             os.environ.get("ProgramFiles", "C:\\Program Files"),
             "DAZ 3D", "DAZStudio4", "DAZStudio.exe"
         )
-        # Hardcoded render script path in the installed scripts directory
-        render_script_path = resource_path(os.path.join("scripts", "masterRenderer.dsa")).replace("\\", "/")
+        # Always use the installed scripts directory (next to the EXE)
+        if getattr(sys, 'frozen', False):
+            # Running as PyInstaller EXE
+            base_dir = os.path.dirname(sys.executable)
+        else:
+            # Running as script
+            base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        render_script_path = os.path.join(base_dir, "scripts", "masterRenderer.dsa").replace("\\", "/")
         # Use "Source Sets" and treat as folders
         source_sets = value_entries["Source Sets"].get("1.0", tk.END).strip().replace("\\", "/").split("\n")
         source_sets = [folder for folder in source_sets if folder]  # Remove empty lines
