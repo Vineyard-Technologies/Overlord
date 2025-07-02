@@ -27,10 +27,10 @@ jobs:
           Set-Content -Path src/version.py -Value "__version__ = '$tag'"
           # Update installer.iss with the version for AppVersion, VersionInfoVersion, and OutputBaseFilename
           $dashed = $tag -replace '\.', '-'
-          (Get-Content installer.iss) \
-            -replace 'AppVersion=__APP_VERSION__', "AppVersion=$tag" \
-            | ForEach-Object { $_ -replace 'VersionInfoVersion=__APP_VERSION__', "VersionInfoVersion=$tag" } \
-            | ForEach-Object { $_ -replace 'OutputBaseFilename=OverlordInstaller__APP_VERSION_DASHED__', "OutputBaseFilename=OverlordInstaller$dashed" } \
+          (Get-Content installer.iss) `
+            -replace 'AppVersion=__APP_VERSION__', "AppVersion=$tag" `
+            | ForEach-Object { $_ -replace 'VersionInfoVersion=__APP_VERSION__', "VersionInfoVersion=$tag" } `
+            | ForEach-Object { $_ -replace 'OutputBaseFilename=OverlordInstaller__APP_VERSION_DASHED__', "OutputBaseFilename=OverlordInstaller$dashed" } `
             | Set-Content installer.iss
 
       - name: Install dependencies
