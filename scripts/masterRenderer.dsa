@@ -13,6 +13,8 @@ var nInstanceNumber = App.instanceName();
 var sOutputDirectory = oScriptArgs['image_output_dir'];
 var oOutputDirectory = new DzDir(sOutputDirectory);
 var aSets = oScriptArgs['source_sets'].toString().split(',');
+var oActionMgr = MainWindow.getActionMgr();
+var oClearKeysSelectedItemsAction = oActionMgr.findAction('DzClearKeysSelectedItemsAction');
 var oRenderMgr = App.getRenderMgr();
 var oIrayOptions = oRenderMgr.getRenderElementObjects()[1];
 var oEnvironmentOptionsPropertyGroups = oRenderMgr.getRenderElementObjects()[3].getPropertyGroups();
@@ -21,7 +23,6 @@ var oViewport = MainWindow.getViewportMgr().getActiveViewport().get3DViewport();
 var oActiveCanvasProperty = oIrayOptions.getPropertyGroups().findProperty('Active Canvas');
 var oDrawGroundProperty = oEnvironmentOptionsPropertyGroups.findProperty('Draw Ground');
 var oEnvironmentModeProperty = oEnvironmentOptionsPropertyGroups.findProperty('Environment Mode');
-var oSceneHelper = new DzSceneHelper();
 var nDEGREES_IN_CIRCLE = 360;
 var nFrameRate = oScriptArgs['frame_rate'];
 var nDAZ_TICKS = 4800;
@@ -59,12 +60,8 @@ function renderCore(sSet, sName, nDegrees, sAnimationName, bIsGear, bIsShadow) {
 			// then check if that number is divisible by the total number of instances,
 			// we'll find out if the current instance should render the current frame.
 			if ((nFrame - (nInstanceNumber - 1)) % nTotalNumberOfInstances != 0) continue;
-
-			// (bIsShadow ? 'shadow' : 'model')
 			
 			// Everything in a set will always be loaded together. No subsection of a set will ever be loaded separately from the rest of the set.
-
-			// Example: C:\Users\Andrew\Documents\assets\LaserwolveGames\output\broadword(man)_block_shadow/-22.5_012.png
 
 			// Example: C:\Users\Andrew\Downloads\output\goblinWarlock\attack\attack90_004.png
 			var sFinalFilePath = sOutputDirectory + '/' + sName + (bIsShadow ? '_shadow' : '') + '/' + sAnimationName
@@ -120,7 +117,7 @@ for (var s = 0; s != aSets.length; s++) {
 
 	for (var nSubjectCounter = 0; nSubjectCounter != aSubjects.length; nSubjectCounter++) // For each subject...
 	{
-		oContentMgr.openFile(aSubjects[nSubjectCounter], true);		// Merge in a subject, and get its name.
+		oContentMgr.openFile(aSubjects[nSubjectCounter], true);
 
 		var sSubjectName = getName(aSubjects[nSubjectCounter]);
 		var oSubjectFile = new DzFile(aSubjects[nSubjectCounter]);
@@ -137,12 +134,13 @@ for (var s = 0; s != aSets.length; s++) {
 			'. Using default of value of ' + nAngles + ' angles.');
 
 		var nDegrees = nDEGREES_IN_CIRCLE / nAngles;
-		var oSubject = Scene.findNodeByLabel('subject');		// Set up the subject.
+		var oSubject = Scene.findNodeByLabel('subject');
 		var aSubjectChildren = oSubject.getNodeChildren(true);
 		var oSubjectMatteParameter = oSubject.findPropertyByLabel('Enable Iray Matte');
 
 		oRoot.addNodeChild(oSubject, true);
 
+		// If there's no animations, we can start rendering
 		if (!aAnimations.length) renderCore(sSet, sSubjectName, nDegrees, 'default', false, false);
 
 		else for (var j = 0; j != aAnimations.length; j++) // For each animation...
@@ -168,7 +166,7 @@ for (var s = 0; s != aSets.length; s++) {
 			}
 			oContentMgr.openFile(aAnimations[j], true); // only the subject can be selected when we merge in an animation
 
-			if (aPropAnimations)
+			if (aPropAnimations) // if this animation includes animated props...
 			for (var nPropAnimationCounter = 0; nPropAnimationCounter != aPropAnimations.length; nPropAnimationCounter++)
 			{
 				var sPropAnimationFileName = getName(aPropAnimations[nPropAnimationCounter]); // walk-LightningOrb
@@ -213,6 +211,22 @@ for (var s = 0; s != aSets.length; s++) {
 
 				Scene.removeNode(oGear);
 			}
+
+			// select all the subject's children, recursively
+			for (var nSubjectChildrenCounter = 0; nSubjectChildrenCounter != aSubjectChildren.length; nSubjectChildrenCounter++) {
+				var oSubjectChild = aSubjectChildren[nSubjectChildrenCounter];
+				oSubjectChild.select(true);
+			}
+
+			// clear the keys off the subject (which was already selected) and its children (this includes animated props and gear)
+			oClearKeysSelectedItemsAction.trigger();
+
+			// deselect all the subject's children, recursively
+			for (var nSubjectChildrenCounter = 0; nSubjectChildrenCounter != aSubjectChildren.length; nSubjectChildrenCounter++) {
+				var oSubjectChild = aSubjectChildren[nSubjectChildrenCounter];
+				oSubjectChild.select(false);
+			}
+
 			Scene.setAnimRange(DzTimeRange(0, 0));
 		}
 		if (oSubject) Scene.removeNode(oSubject);
