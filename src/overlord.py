@@ -276,7 +276,8 @@ def main():
                 orig_img = Image.open(newest_img_path)
                 width, height = orig_img.size
                 file_size = os.path.getsize(newest_img_path)
-                details_path.config(text=f"{newest_img_path}")  # No "Path: " prefix
+                # Always display path with Windows separators
+                details_path.config(text=newest_img_path.replace('/', '\\'))  # No "Path: " prefix
                 details_dim.config(text=f"Dimensions: {width} x {height}")
                 details_size.config(text=f"Size: {file_size/1024:.1f} KB")
                 tk_img = ImageTk.PhotoImage(img)
@@ -284,6 +285,7 @@ def main():
                 img_label.image = tk_img
                 no_img_label.lower()
                 logging.info(f'Displaying image: {newest_img_path}')
+                show_last_rendered_image.last_no_img_logged = False
             except Exception as e:
                 img_label.config(image="")
                 img_label.image = None
@@ -299,7 +301,9 @@ def main():
             details_dim.config(text="Dimensions: ")
             details_size.config(text="Size: ")
             no_img_label.lift()
-            logging.info('No images found in output directory')
+            if not getattr(show_last_rendered_image, 'last_no_img_logged', False):
+                logging.info('No images found in output directory')
+                show_last_rendered_image.last_no_img_logged = True
         # Schedule to check again in 1 second
         root.after(1000, show_last_rendered_image)
 
@@ -384,7 +388,46 @@ def main():
             else:
                 logging.info('All render instances launched')
                 root.after(1000, show_last_rendered_image)  # Update image after render
+
         run_all_instances()
+
+        # After 30 seconds, start checking for DazStudio process every 30 seconds
+        def check_dazstudio_process():
+            import psutil
+            found = any(p.name().lower() == "DAZStudio.exe" for p in psutil.process_iter(['name']))
+            if not found:
+                logging.info('Daz Studio is not running. Checking output directory...')
+                if not value_entries["Output Directory"].get().strip():
+                    logging.error('Output Directory is empty')
+                else:
+                    logging.info('Output Directory contains files. Verifying contents...')
+                    # Recursively check for .zip files in the output directory
+                    zip_found = False
+                    for rootdir, _, files in os.walk(value_entries["Output Directory"].get()):
+                        for fname in files:
+                            if fname.lower().endswith('.zip'):
+                                zip_found = True
+                    if not zip_found:
+                        logging.info('No zip files found in output directory. Beginning archive process...')
+                        try:
+                            archive_script_path = os.path.join(install_dir, "scripts", "archiveFiles.py")
+                            subprocess.Popen([
+                                sys.executable,
+                                archive_script_path,
+                                value_entries["Output Directory"].get()
+                            ])
+                            logging.info(f'archiveFiles.py started with argument: {value_entries["Output Directory"].get()}')
+                        except Exception as e:
+                            logging.error(f'Failed to execute archiveFiles.py: {e}')
+                    else:
+                        logging.error('Zip files found in output directory already')
+                # DazStudio is not running, add your code here
+                pass
+            else:
+                logging.info('Daz Studio is running, checking again in 30 seconds')
+                root.after(30000, check_dazstudio_process)
+
+        root.after(30000, check_dazstudio_process)
 
     def end_all_daz_studio():
         logging.info('End all Daz Studio Instances button clicked')

@@ -48,8 +48,7 @@ jobs:
           choco install innosetup -y
 
       - name: Build overlord.exe
-        shell: pwsh
-        run: ./scripts/createExecutable.ps1
+        run: python scripts/createExecutable.py
 
       - name: Build Installer
         run: |

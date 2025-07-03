@@ -66,9 +66,9 @@ function renderCore(sSet, sName, nDegrees, sAnimationName, bIsGear, bIsShadow) {
 
 			// Example: C:\Users\Andrew\Documents\assets\LaserwolveGames\output\broadword(man)_block_shadow/-22.5_012.png
 
-			// Example: C:\Users\Andrew\Downloads\output\goblinWarlock\attack\90_004.png
+			// Example: C:\Users\Andrew\Downloads\output\goblinWarlock\attack\attack90_004.png
 			var sFinalFilePath = sOutputDirectory + '/' + sName + (bIsShadow ? '_shadow' : '') + '/' + sAnimationName
-			+ '/' + nOutputAngle + '_' + ('000' + nFrame).slice(-3) + '.png';
+			+ '/' + sAnimationName + '_' + nOutputAngle + '_' + ('000' + nFrame).slice(-3) + '.png';
 
 			// If the image we're going to make already exists and isn't 0 bytes, skip it if we have flagged as such.
 			if (oOutputDirectory.exists(sFinalFilePath) && DzFileInfo(sFinalFilePath).size != 0 && !bOverwriteExistingImages) continue;

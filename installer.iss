@@ -21,7 +21,7 @@ Source: "dist\overlord.exe"; DestDir: "{app}"; Flags: ignoreversion 64bit
 Source: "scripts\masterRenderer.dsa"; DestDir: "{app}\scripts"; Flags: ignoreversion 64bit
 
 [Icons]
-Name: "{group}\Overlord"; Filename: "{app}\overlord.exe"; IconFilename: "{app}\assets\favicon.ico"
+Name: "{group}\Overlord"; Filename: "{app}\overlord.exe"
 
 [Run]
 Filename: "{app}\overlord.exe"; Description: "Launch Overlord"; Flags: nowait postinstall skipifsilent
