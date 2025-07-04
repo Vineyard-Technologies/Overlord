@@ -367,7 +367,8 @@ def main():
             f'"num_instances": "{num_instances}", '
             f'"image_output_dir": "{image_output_dir}", '
             f'"frame_rate": "{frame_rate}", '
-            f'"source_sets": {source_sets}'
+            f'"source_sets": {source_sets}, '
+            f'"template_path": "{template_path}"'
             f'}}'
         )
 
@@ -379,8 +380,7 @@ def main():
                 "-instanceName", "#",  # Hardcoded value
                 "-logSize", str(log_size),
                 "-noPrompt",           # Always add -noPrompt
-                render_script_path,
-                template_path
+                render_script_path
             ]
             logging.info(f'Command executed: {command}')
             try:
@@ -397,8 +397,6 @@ def main():
                 root.after(1000, show_last_rendered_image)  # Update image after render
 
         run_all_instances()
-
-        # Removed automatic archiveFiles.py logic; now handled by Zip Outputted Files button
 
     def end_all_daz_studio():
         logging.info('End all Daz Studio Instances button clicked')
