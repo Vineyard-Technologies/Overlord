@@ -284,7 +284,10 @@ def main():
                 img_label.config(image=tk_img)
                 img_label.image = tk_img
                 no_img_label.lower()
-                logging.info(f'Displaying image: {newest_img_path}')
+                # Only log if the image path has changed
+                if getattr(show_last_rendered_image, 'last_logged_img_path', None) != newest_img_path:
+                    logging.info(f'Displaying image: {newest_img_path}')
+                    show_last_rendered_image.last_logged_img_path = newest_img_path
                 show_last_rendered_image.last_no_img_logged = False
             except Exception as e:
                 img_label.config(image="")

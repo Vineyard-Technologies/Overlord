@@ -3,48 +3,101 @@ var oScriptArgs = JSON.parse(App.scriptArgs[0]);
 var nTotalNumberOfInstances = oScriptArgs['num_instances'];
 var sAssetPath = 'C:/Users/Andrew/Documents/assets/LaserwolveGames/';
 var sMasterTemplatePath = sAssetPath + 'templates/masterTemplate.duf';
-
-oContentMgr.openFile(sMasterTemplatePath, false);
-
 var oScriptFileInfo = new DzFileInfo(getScriptFileName());
 var sScriptPath = oScriptFileInfo.path();
 var nInstanceNumber = App.instanceName();
-
 var sOutputDirectory = oScriptArgs['image_output_dir'];
 var oOutputDirectory = new DzDir(sOutputDirectory);
-var aSets = oScriptArgs['source_sets'].toString().split(',');
-var oActionMgr = MainWindow.getActionMgr();
-var oClearKeysSelectedItemsAction = oActionMgr.findAction('DzClearKeysSelectedItemsAction');
-var oRenderMgr = App.getRenderMgr();
-var oIrayOptions = oRenderMgr.getRenderElementObjects()[1];
-var oEnvironmentOptionsPropertyGroups = oRenderMgr.getRenderElementObjects()[3].getPropertyGroups();
-var oRenderOptions = oRenderMgr.getRenderOptions();
-var oViewport = MainWindow.getViewportMgr().getActiveViewport().get3DViewport();
-var oActiveCanvasProperty = oIrayOptions.getPropertyGroups().findProperty('Active Canvas');
-var oDrawGroundProperty = oEnvironmentOptionsPropertyGroups.findProperty('Draw Ground');
-var oEnvironmentModeProperty = oEnvironmentOptionsPropertyGroups.findProperty('Environment Mode');
+var aSetFilepaths = oScriptArgs['source_sets'].toString().split(',');
 var nDEGREES_IN_CIRCLE = 360;
 var nFrameRate = oScriptArgs['frame_rate'];
 var nDAZ_TICKS = 4800;
 var nTicksPerFrame = nDAZ_TICKS / nFrameRate;
-var oRoot = Scene.findNodeByLabel('root');
-var oShadowPlane = Scene.findNodeByLabel('shadowPlane');
 var bOverwriteExistingImages = false;
+var oRenderMgr;
+var oIrayOptions;
+var oEnvironmentOptionsPropertyGroups;
+var oRenderOptions;
+var oActiveCanvasProperty;
+var oDrawGroundProperty;
+var oEnvironmentModeProperty;
+var oRoot;
+var oShadowPlane;
 
 function getName(sFileName) // Obtain the desired name out of a filepath or filename.
 {
 	return sFileName.split('/').pop().split('_')[0];
 }
-function setMatte(bBool) // Set the Matte Parameter of a subject and its children.
+function setMatte(oSubject, bBool) // Set the Matte Parameter of a subject and its children.
 {
-	if (oSubjectMatteParameter) oSubjectMatteParameter.setValue(bBool);
+	if (oSubject.matteParameter) oSubject.matteParameter.setValue(bBool);
 
-	for (var i = 0; i != aSubjectChildren.length; i++) {
-		var oChildMatteParameter = aSubjectChildren[i].findPropertyByLabel('Enable Iray Matte');
-		if (oChildMatteParameter) oChildMatteParameter.setValue(bBool);
+	for (var nChildCounter = 0; nChildCounter != oSubject.children.length; nChildCounter++) {
+
+		var oChild = oSubject.children[nChildCounter];
+		oChild.matteParameter = oChild.findPropertyByLabel('Enable Iray Matte');
+		if (oChild.matteParameter) oChild.matteParameter.setValue(bBool);
 	}
 }
-function renderCore(sSet, sName, nDegrees, sAnimationName, bIsGear, bIsShadow) {
+function renderCore(sName, sAnimationName, bIsGear, bIsShadow) {
+
+	oSubject.children = oSubject.getNodeChildren(true);
+	oSubject.matteParameter = oSubject.findPropertyByLabel('Enable Iray Matte');
+
+	// These variables have to be determined when we start rendering
+	oRenderMgr = App.getRenderMgr();
+	oIrayOptions = oRenderMgr.getRenderElementObjects()[1];
+	oEnvironmentOptionsPropertyGroups = oRenderMgr.getRenderElementObjects()[3].getPropertyGroups();
+	oRenderOptions = oRenderMgr.getRenderOptions();
+	oActiveCanvasProperty = oIrayOptions.getPropertyGroups().findProperty('Active Canvas');
+	oDrawGroundProperty = oEnvironmentOptionsPropertyGroups.findProperty('Draw Ground');
+	oEnvironmentModeProperty = oEnvironmentOptionsPropertyGroups.findProperty('Environment Mode');
+	oRoot = Scene.findNodeByLabel('root');
+	oShadowPlane = Scene.findNodeByLabel('shadowPlane');
+
+	{ // Read the subject's JSON to see how many angles it has
+
+		var oSubjectFile = new DzFile(sSubjectFilepath);
+		var nAngles = 16;
+
+		oSubjectFile.open(DzFile.ReadOnly);
+
+		var nAnglesFromJson = JSON.parse(oSubjectFile.read()).asset_info.angles;
+
+		oSubjectFile.close();
+
+		if (nAnglesFromJson) nAngles = nAnglesFromJson;
+		else App.warning('Number of angles not found in the JSON for ' + sSubjectFilepath +
+			'. Using default of value of ' + nAngles + ' angles.');
+
+		var nDegrees = nDEGREES_IN_CIRCLE / nAngles;
+	}
+	
+	{ // Read the animation's JSON to see how many frames it has
+		// https://github.com/Laserwolve-Games/Overlord/discussions/4 
+		var oAnimationFile = new DzFile(sAnimationFilepath);
+
+		oAnimationFile.open(DzFile.ReadOnly);
+		var oAnimationsJson = JSON.parse(oAnimationFile.read()).scene.animations;
+		oAnimationFile.close();
+
+		for (var i = 0; i < oAnimationsJson.length; i++) {
+
+			var nNumberOfFrames = oAnimationsJson[i].keys.length;
+
+			if (nNumberOfFrames > 1) {
+
+				// Subtract 1 here to make it 0-based
+				Scene.setAnimRange(DzTimeRange(0, (nNumberOfFrames - 1) * nTicksPerFrame));
+
+				break;
+			}
+		}
+	}
+
+	// Add the subject as a child to the root
+	oRoot.addNodeChild(oSubject, true);
+
 	// variables that have to be determined when we start rendering
 	var nFramesTotal = Scene.getPlayRange().end / nTicksPerFrame;
 
@@ -55,13 +108,8 @@ function renderCore(sSet, sName, nDegrees, sAnimationName, bIsGear, bIsShadow) {
 
 		for (var nFrame = 0; nFrame <= nFramesTotal; nFrame++) // Loop through each frame...
 		{
-			// subtract 1 from the instance number to make it 0 based.
-			// if we subtract the 0-based instanced number from the frame,
-			// then check if that number is divisible by the total number of instances,
-			// we'll find out if the current instance should render the current frame.
+			// Check if the current Daz istance should render this frame.
 			if ((nFrame - (nInstanceNumber - 1)) % nTotalNumberOfInstances != 0) continue;
-			
-			// Everything in a set will always be loaded together. No subsection of a set will ever be loaded separately from the rest of the set.
 
 			// Example: C:\Users\Andrew\Downloads\output\goblinWarlock\attack\attack90_004.png
 			var sFinalFilePath = sOutputDirectory + '/' + sName + (bIsShadow ? '_shadow' : '') + '/' + sAnimationName
@@ -79,13 +127,13 @@ function renderCore(sSet, sName, nDegrees, sAnimationName, bIsGear, bIsShadow) {
 				oDrawGroundProperty.setValue(true);
 				oShadowPlane.setVisible(true);
 				oActiveCanvasProperty.setValue(0);
-				if (bIsGear) setMatte(true);
+				if (bIsGear) setMatte(oSubject, true);
 			}
 			else {
 				oEnvironmentModeProperty.setValue(2); // Sun-Sky Only
 				oDrawGroundProperty.setValue(false);
 				oShadowPlane.setVisible(false);
-				setMatte(false);
+				setMatte(oSubject, false);
 				if (bIsGear) oActiveCanvasProperty.setValue(1);
 			}
 			while (backgroundProgressIsActive()) processEvents();		// Wait for everything else to finish first, specifically the mesh smoother, then render.
@@ -103,74 +151,44 @@ function renderCore(sSet, sName, nDegrees, sAnimationName, bIsGear, bIsShadow) {
 			if (DzFileInfo(sFinalFilePath).size() == 4181) App.warning(sFinalFilePath + ' is 4181 bytes. It is likely a blank image.');
 		}
 	}
-	if (!bIsShadow) renderCore(sSet, sName, nDegrees, sAnimationName, bIsGear, true);
+	if (!bIsShadow) renderCore(sName, nDegrees, sAnimationName, bIsGear, true);
 }
-for (var s = 0; s != aSets.length; s++) {
+for (var nSetFilepathsCounter = 0; nSetFilepathsCounter != aSetFilepaths.length; nSetFilepathsCounter++) {
 
-	var sSet = aSets[s];
-	var oSetDirectory = new DzDir(sSet);
+	var sSetFilepath = aSetFilepaths[nSetFilepathsCounter];
+	var oSetDirectory = new DzDir(sSetFilepath);
+	var aSubjectFilepaths = oSetDirectory.getFilesFromDir(['*_subject.duf'], false);
+	var aAnimationFilepaths = oSetDirectory.getFilesFromDir(['*_animation.duf'], false);
+	var aPropAnimationFilepaths = oSetDirectory.getFilesFromDir(['*_propAnimation.duf'], false);
+	var aGearFilepaths = oSetDirectory.getFilesFromDir(['*_gear.duf'], false);
+	var aGearAnimationFilepaths = oSetDirectory.getFilesFromDir(['*_gearAnimation.duf'], false);
 
-	var aSubjects = oSetDirectory.getFilesFromDir(['*_subject.duf'], false);
-	var aAnimations = oSetDirectory.getFilesFromDir(['*_animation.duf'], false);
-	var aPropAnimations = oSetDirectory.getFilesFromDir(['*_propAnimation.duf'], false);
-	var aGear = oSetDirectory.getFilesFromDir(['*_gear.duf'], false);
+	for (var nSubjectCounter = 0; nSubjectCounter != aSubjectFilepaths.length; nSubjectCounter++) {
+	
+		// If there are animations, loop over them
+		if (aAnimationFilepaths.length) for (var nAnimationFilepathsCounter = 0; nAnimationFilepathsCounter != aAnimationFilepaths.length; nAnimationFilepathsCounter++) {
+		
+			var sSubjectFilepath = aSubjectFilepaths[nSubjectCounter];
+			var sSubjectName = getName(sSubjectFilepath);
+			var sAnimationFilepath = aAnimationFilepaths[nAnimationFilepathsCounter];
+			var sAnimationName = getName(sAnimationFilepath);
+			
+			// Start with a blank scene
+			oContentMgr.openFile(sMasterTemplatePath, false);
 
-	for (var nSubjectCounter = 0; nSubjectCounter != aSubjects.length; nSubjectCounter++) // For each subject...
-	{
-		oContentMgr.openFile(aSubjects[nSubjectCounter], true);
+			// Merge in the subject
+			oContentMgr.openFile(sSubjectFilepath, true);
 
-		var sSubjectName = getName(aSubjects[nSubjectCounter]);
-		var oSubjectFile = new DzFile(aSubjects[nSubjectCounter]);
+			var oSubject = Scene.findNodeByLabel('subject');
+			
+			oContentMgr.openFile(sAnimationFilepath, true);
 
-		// read the subject's JSON to see how many angles of it we want to render
-		oSubjectFile.open(DzFile.ReadOnly);
-		var nAnglesFromJson = JSON.parse(oSubjectFile.read()).asset_info.angles;
-		oSubjectFile.close();
+			 // If this animation has corresponding animated props, merge them all in
+			if (aPropAnimationFilepaths.length) for (var nPropAnimationCounter = 0; nPropAnimationCounter != aPropAnimationFilepaths.length; nPropAnimationCounter++) {
 
-		var nAngles = 16;
-
-		if (nAnglesFromJson) nAngles = nAnglesFromJson;
-		else App.warning('Number of angles not found in the JSON for ' + aSubjects[nSubjectCounter] +
-			'. Using default of value of ' + nAngles + ' angles.');
-
-		var nDegrees = nDEGREES_IN_CIRCLE / nAngles;
-		var oSubject = Scene.findNodeByLabel('subject');
-		var aSubjectChildren = oSubject.getNodeChildren(true);
-		var oSubjectMatteParameter = oSubject.findPropertyByLabel('Enable Iray Matte');
-
-		oRoot.addNodeChild(oSubject, true);
-
-		// If there's no animations, we can start rendering
-		if (!aAnimations.length) renderCore(sSet, sSubjectName, nDegrees, 'default', false, false);
-
-		else for (var j = 0; j != aAnimations.length; j++) // For each animation...
-		{
-			// Expand play range using animation JSON data: https://github.com/Laserwolve-Games/Overlord/discussions/4
-			var oAnimationFile = new DzFile(aAnimations[j]);
-
-			oAnimationFile.open(DzFile.ReadOnly);
-			var oAnimationsJson = JSON.parse(oAnimationFile.read()).scene.animations;
-			oAnimationFile.close();
-
-			for (var i = 0; i < oAnimationsJson.length; i++) {
-
-				var nNumberOfFrames = oAnimationsJson[i].keys.length;
-
-				if (nNumberOfFrames > 1) {
-
-					// Subtract 1 here to make it 0-based
-					Scene.setAnimRange(DzTimeRange(0, (nNumberOfFrames - 1) * nTicksPerFrame));
-
-					break;
-				}
-			}
-			oContentMgr.openFile(aAnimations[j], true); // only the subject can be selected when we merge in an animation
-
-			if (aPropAnimations) // if this animation includes animated props...
-			for (var nPropAnimationCounter = 0; nPropAnimationCounter != aPropAnimations.length; nPropAnimationCounter++)
-			{
-				var sPropAnimationFileName = getName(aPropAnimations[nPropAnimationCounter]); // walk-LightningOrb
-				var sAnimationName = getName(aAnimations[j]); // walk
+				var sPropAnimationFilepath = aPropAnimationFilepaths[nPropAnimationCounter];
+				var sPropAnimationFileName = getName(sPropAnimationFilepath); // walk-LightningOrb
+				var sAnimationName = getName(sAnimationFilepath); // walk
 
 				if (sPropAnimationFileName.indexOf(sAnimationName) !== -1) {
 
@@ -180,23 +198,19 @@ for (var s = 0; s != aSets.length; s++) {
 					oSubject.select(false);
 					oProp.select(true);
 
-					oContentMgr.openFile(aPropAnimations[nPropAnimationCounter], true);
+					oContentMgr.openFile(sPropAnimationFilepath, true);
 
 					oProp.select(false);
 					oSubject.select(true);
 
 				} else continue;
-
 			}
-
-			var sAnimationName = getName(aAnimations[j]);
-
-			if (!aGear.length) renderCore(sSet, sSubjectName, nDegrees, sAnimationName, false, false);
-
-			else for (var k = 0; k != aGear.length; k++) // If there are gears, for each gear...
-			{
-				oContentMgr.openFile(aGear[k], true);
-				var sGearName = getName(aGear[k]);
+	
+			if (aGearFilepaths.length) for (var nGearCounter = 0; nGearCounter != aGearFilepaths.length; nGearCounter++) {
+			
+				var sGearFilepath = aGearFilepaths[nGearCounter];
+				oContentMgr.openFile(sGearFilepath, true);
+				var sGearName = getName(sGearFilepath);
 				var oGear = Scene.findNodeByLabel('gear');
 
 				var aGearChildren = oGear.getNodeChildren(false);
@@ -207,29 +221,15 @@ for (var s = 0; s != aSets.length; s++) {
 				for (var ii = 0; ii != aGearChildren.length; ii++) oIrayOptions.addNodeToNodeList('visibleNodes', aGearChildren[ii]);
 
 				// TODO: This is probably wrong now that we are using parentheses?
-				renderCore(sSet, sSubjectName + '_' + sGearName, nDegrees, sAnimationName, true, false);
+				renderCore(sSetFilepath, sSubjectName + '_' + sGearName, nDegrees, sAnimationName, true, false);
 
 				Scene.removeNode(oGear);
 			}
+			else renderCore(sSubjectName, sAnimationName, false, false);
 
-			// select all the subject's children, recursively
-			for (var nSubjectChildrenCounter = 0; nSubjectChildrenCounter != aSubjectChildren.length; nSubjectChildrenCounter++) {
-				var oSubjectChild = aSubjectChildren[nSubjectChildrenCounter];
-				oSubjectChild.select(true);
-			}
-
-			// clear the keys off the subject (which was already selected) and its children (this includes animated props and gear)
-			oClearKeysSelectedItemsAction.trigger();
-
-			// deselect all the subject's children, recursively
-			for (var nSubjectChildrenCounter = 0; nSubjectChildrenCounter != aSubjectChildren.length; nSubjectChildrenCounter++) {
-				var oSubjectChild = aSubjectChildren[nSubjectChildrenCounter];
-				oSubjectChild.select(false);
-			}
-
-			Scene.setAnimRange(DzTimeRange(0, 0));
+		} else {
+			// handle non-animated subjects here
 		}
-		if (oSubject) Scene.removeNode(oSubject);
 	}
 }
 
