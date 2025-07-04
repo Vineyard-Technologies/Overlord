@@ -398,50 +398,7 @@ def main():
 
         run_all_instances()
 
-        # After 30 seconds, start checking for DazStudio process every 30 seconds
-        # Track if Daz Studio was killed by the user
-        main.dazstudio_killed_by_user = False
-        def check_dazstudio_process():
-            import psutil
-            found = any(p.name().lower() == "dazstudio.exe" for p in psutil.process_iter(['name']))
-            if not found:
-                logging.info('Daz Studio is not running. Checking output directory...')
-                # Only run archiveFiles.py if Daz Studio was NOT killed by the user
-                if getattr(main, 'dazstudio_killed_by_user', False):
-                    logging.info('Daz Studio was killed by user. Skipping archiveFiles.py.')
-                    main.dazstudio_killed_by_user = False  # Reset for next run
-                    return
-                if not value_entries["Output Directory"].get().strip():
-                    logging.error('Output Directory is empty')
-                else:
-                    logging.info('Output Directory contains files. Verifying contents...')
-                    # Recursively check for .zip files in the output directory
-                    zip_found = False
-                    for rootdir, _, files in os.walk(value_entries["Output Directory"].get()):
-                        for fname in files:
-                            if fname.lower().endswith('.zip'):
-                                zip_found = True
-                    if not zip_found:
-                        logging.info('No zip files found in output directory. Beginning archive process...')
-                        try:
-                            archive_script_path = os.path.join(install_dir, "scripts", "archiveFiles.py")
-                            subprocess.Popen([
-                                sys.executable,
-                                archive_script_path,
-                                value_entries["Output Directory"].get()
-                            ])
-                            logging.info(f'archiveFiles.py started with argument: {value_entries["Output Directory"].get()}')
-                        except Exception as e:
-                            logging.error(f'Failed to execute archiveFiles.py: {e}')
-                    else:
-                        logging.error('Zip files found in output directory already')
-                # DazStudio is not running, add your code here
-                pass
-            else:
-                logging.info('Daz Studio is running, checking again in 30 seconds')
-                root.after(30000, check_dazstudio_process)
-
-        root.after(30000, check_dazstudio_process)
+        # Removed automatic archiveFiles.py logic; now handled by Zip Outputted Files button
 
     def end_all_daz_studio():
         logging.info('End all Daz Studio Instances button clicked')
@@ -459,8 +416,9 @@ def main():
     # Initial display
     root.after(500, show_last_rendered_image)
 
-    button = tk.Button(root, text="Start Render", command=start_render, font=("Arial", 16, "bold"), width=20, height=2)
-    button.pack(side="left", anchor="sw", padx=(30,10), pady=20)
+    button = tk.Button(root, text="Start Render", command=start_render, font=("Arial", 16, "bold"), width=16, height=2)
+    button.pack(side="left", anchor="sw", pady=20)
+
 
     end_button = tk.Button(
         root,
@@ -471,6 +429,35 @@ def main():
         height=2
     )
     end_button.pack(side="left", anchor="sw", padx=0, pady=20)
+
+    def zip_outputted_files():
+        logging.info('Zip Outputted Files button clicked')
+        try:
+            # Use the same logic as for finding the script path
+            if getattr(sys, 'frozen', False):
+                install_dir = os.path.dirname(sys.executable)
+                archive_script_path = os.path.join(install_dir, "scripts", "archiveFiles.py")
+            else:
+                install_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+                archive_script_path = os.path.join(install_dir, "scripts", "archiveFiles.py")
+            subprocess.Popen([
+                sys.executable,
+                archive_script_path,
+                value_entries["Output Directory"].get()
+            ])
+            logging.info(f'archiveFiles.py started with argument: {value_entries["Output Directory"].get()}')
+        except Exception as e:
+            logging.error(f'Failed to execute archiveFiles.py: {e}')
+
+    zip_button = tk.Button(
+        root,
+        text="Zip Outputted Files",
+        command=zip_outputted_files,
+        font=("Arial", 16, "bold"),
+        width=18,
+        height=2
+    )
+    zip_button.pack(side="left", anchor="sw", padx=0, pady=20)
 
     # Run the application
     root.mainloop()
