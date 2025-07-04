@@ -146,7 +146,8 @@ def main():
                 )
                 # askdirectory only allows one folder at a time, so allow multiple by repeated selection
                 if foldername:
-                    current = text_widget.get("1.0", tk.END).strip()
+                    foldername = foldername.replace('/', '\\')
+                    current = text_widget.get("1.0", tk.END).strip().replace('/', '\\')
                     current_folders = set(current.split("\n")) if current else set()
                     if foldername not in current_folders:
                         if current:

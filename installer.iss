@@ -3,7 +3,9 @@
 AppName=Overlord
 ; AppVersion will be replaced by GitHub Actions to match the release tag
 AppVersion=__APP_VERSION__
-DefaultDirName={pf}\Overlord
+DefaultDirName={autopf}\Overlord
+PrivilegesRequired=admin
+PrivilegesRequiredOverridesAllowed=dialog
 DefaultGroupName=Overlord
 OutputDir=dist
 ; OutputBaseFilename will be replaced by GitHub Actions to include the version in the format OverlordInstallerX-X-X
@@ -23,7 +25,13 @@ Source: "scripts\archiveFiles.py"; DestDir: "{app}\scripts"; Flags: ignoreversio
 Source: "templates\masterTemplate.duf"; DestDir: "{userappdata}\Overlord\templates"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\Overlord"; Filename: "{app}\overlord.exe"
+
+Name: "{group}\Overlord"; Filename: "{app}\overlord.exe"; Tasks: startmenuicon
+Name: "{userdesktop}\Overlord"; Filename: "{app}\overlord.exe"; Tasks: desktopicon
+; Ask user if they want desktop/start menu shortcuts
+[Tasks]
+Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional icons:"; Flags: unchecked
+Name: "startmenuicon"; Description: "Create a &Start Menu shortcut"; GroupDescription: "Additional icons:"; Flags: checkedonce
 
 [Run]
 Filename: "{app}\overlord.exe"; Description: "Launch Overlord"; Flags: nowait postinstall skipifsilent
