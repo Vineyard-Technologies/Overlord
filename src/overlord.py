@@ -41,19 +41,19 @@ def main():
     # Create the main window
     root = tk.Tk()
     root.title(f"Overlord {overlord_version}")
-    root.iconbitmap(resource_path(os.path.join("assets", "favicon.ico")))  # Set the application icon
+    root.iconbitmap(resource_path(os.path.join("images", "favicon.ico")))  # Set the application icon
 
     # Maximize the application window
     root.state("zoomed")
 
     # Load and display the logo image
-    logo = tk.PhotoImage(file=resource_path(os.path.join("assets", "overlordLogo.png")))
+    logo = tk.PhotoImage(file=resource_path(os.path.join("images", "overlordLogo.png")))
     logo_label = tk.Label(root, image=logo, cursor="hand2")
     logo_label.image = logo  # Keep a reference to avoid garbage collection
     logo_label.place(anchor="nw", x=10, y=10)  # Place in upper left corner, 10px down and right
 
     # Add Laserwolve Games logo to upper right corner
-    lwg_logo = tk.PhotoImage(file=resource_path(os.path.join("assets", "laserwolveGamesLogo.png")))
+    lwg_logo = tk.PhotoImage(file=resource_path(os.path.join("images", "laserwolveGamesLogo.png")))
     lwg_logo_label = tk.Label(root, image=lwg_logo, cursor="hand2")
     lwg_logo_label.image = lwg_logo  # Keep a reference to avoid garbage collection
     # Place in upper right using place geometry manager
@@ -324,26 +324,29 @@ def main():
             os.environ.get("ProgramFiles", "C:\\Program Files"),
             "DAZ 3D", "DAZStudio4", "DAZStudio.exe"
         )
-        # Use user-writable scripts directory in %APPDATA%\Overlord\scripts
-        appdata = os.environ.get('APPDATA') or os.path.expanduser('~')
-        user_scripts_dir = os.path.join(appdata, 'Overlord', 'scripts')
-        os.makedirs(user_scripts_dir, exist_ok=True)
-        render_script_path = os.path.join(user_scripts_dir, "masterRenderer.dsa").replace("\\", "/")
-
-        # On first run or update, copy the script from the install dir if not present or outdated
+        # Use local scripts directory if running in VS Code (not frozen), else use user-writable scripts directory
         if getattr(sys, 'frozen', False):
             install_dir = os.path.dirname(sys.executable)
+            appdata = os.environ.get('APPDATA') or os.path.expanduser('~')
+            user_scripts_dir = os.path.join(appdata, 'Overlord', 'scripts')
+            os.makedirs(user_scripts_dir, exist_ok=True)
+            render_script_path = os.path.join(user_scripts_dir, "masterRenderer.dsa").replace("\\", "/")
+            install_script_path = os.path.join(install_dir, "scripts", "masterRenderer.dsa")
+            try:
+                if (not os.path.exists(render_script_path)) or (
+                    os.path.getmtime(install_script_path) > os.path.getmtime(render_script_path)):
+                    import shutil
+                    shutil.copy2(install_script_path, render_script_path)
+                    logging.info(f'Copied masterRenderer.dsa to user scripts dir: {render_script_path}')
+            except Exception as e:
+                logging.error(f'Could not copy masterRenderer.dsa to user scripts dir: {e}')
+            # Path to masterTemplate.duf in appData
+            template_path = os.path.join(appdata, 'Overlord', 'templates', 'masterTemplate.duf').replace("\\", "/")
         else:
+            # Use scripts directly from the repository for development/VS Code preview
             install_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-        install_script_path = os.path.join(install_dir, "scripts", "masterRenderer.dsa")
-        try:
-            if (not os.path.exists(render_script_path)) or (
-                os.path.getmtime(install_script_path) > os.path.getmtime(render_script_path)):
-                import shutil
-                shutil.copy2(install_script_path, render_script_path)
-                logging.info(f'Copied masterRenderer.dsa to user scripts dir: {render_script_path}')
-        except Exception as e:
-            logging.error(f'Could not copy masterRenderer.dsa to user scripts dir: {e}')
+            render_script_path = os.path.join(install_dir, "scripts", "masterRenderer.dsa").replace("\\", "/")
+            template_path = os.path.join(install_dir, "templates", "masterTemplate.duf").replace("\\", "/")
         # Use "Source Sets" and treat as folders
         source_sets = value_entries["Source Sets"].get("1.0", tk.END).strip().replace("\\", "/").split("\n")
         source_sets = [folder for folder in source_sets if folder]  # Remove empty lines
@@ -376,7 +379,8 @@ def main():
                 "-instanceName", "#",  # Hardcoded value
                 "-logSize", str(log_size),
                 "-noPrompt",           # Always add -noPrompt
-                render_script_path
+                render_script_path,
+                template_path
             ]
             logging.info(f'Command executed: {command}')
             try:
