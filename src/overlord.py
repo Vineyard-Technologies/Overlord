@@ -173,7 +173,7 @@ def main():
             value_entry = tk.Entry(file_table_frame, width=80, font=("Consolas", 10))
             default_img_dir = os.path.join(
                 os.path.expanduser("~"),
-                "Documents", "GitHub", "PlainsOfShinar", "individual_images"
+                "Downloads", "output"
             )
             value_entry.insert(0, default_img_dir)
             value_entry.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
@@ -392,11 +392,18 @@ def main():
         run_all_instances()
 
         # After 30 seconds, start checking for DazStudio process every 30 seconds
+        # Track if Daz Studio was killed by the user
+        main.dazstudio_killed_by_user = False
         def check_dazstudio_process():
             import psutil
-            found = any(p.name().lower() == "DAZStudio.exe" for p in psutil.process_iter(['name']))
+            found = any(p.name().lower() == "dazstudio.exe" for p in psutil.process_iter(['name']))
             if not found:
                 logging.info('Daz Studio is not running. Checking output directory...')
+                # Only run archiveFiles.py if Daz Studio was NOT killed by the user
+                if getattr(main, 'dazstudio_killed_by_user', False):
+                    logging.info('Daz Studio was killed by user. Skipping archiveFiles.py.')
+                    main.dazstudio_killed_by_user = False  # Reset for next run
+                    return
                 if not value_entries["Output Directory"].get().strip():
                     logging.error('Output Directory is empty')
                 else:
@@ -437,6 +444,7 @@ def main():
                 "-Command",
                 'Get-Process -Name "DAZStudio" -ErrorAction SilentlyContinue | ForEach-Object { $_.Kill() }'
             ])
+            main.dazstudio_killed_by_user = True
             logging.info('Kill command sent to all DAZStudio processes')
         except Exception as e:
             logging.error(f'Failed to kill DAZStudio processes: {e}')
