@@ -7,6 +7,7 @@ import webbrowser
 import json
 from PIL import Image, ImageTk
 import time
+import psutil
 import logging
 from version import __version__ as overlord_version
 
@@ -401,14 +402,17 @@ def main():
 
     def end_all_daz_studio():
         logging.info('End all Daz Studio Instances button clicked')
+        killed = 0
         try:
-            subprocess.Popen([
-                "powershell",
-                "-Command",
-                'Get-Process -Name "DAZStudio" -ErrorAction SilentlyContinue | ForEach-Object { $_.Kill() }'
-            ])
+            for proc in psutil.process_iter(['name']):
+                try:
+                    if proc.info['name'] and 'DAZStudio' in proc.info['name']:
+                        proc.kill()
+                        killed += 1
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
             main.dazstudio_killed_by_user = True
-            logging.info('Kill command sent to all DAZStudio processes')
+            logging.info(f'Killed {killed} DAZStudio process(es)')
         except Exception as e:
             logging.error(f'Failed to kill DAZStudio processes: {e}')
 
@@ -417,7 +421,6 @@ def main():
 
     button = tk.Button(root, text="Start Render", command=start_render, font=("Arial", 16, "bold"), width=16, height=2)
     button.pack(side="left", anchor="sw", pady=20)
-
 
     end_button = tk.Button(
         root,
