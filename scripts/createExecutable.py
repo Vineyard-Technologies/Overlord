@@ -7,10 +7,10 @@ def main():
         "--onefile",
         "--windowed",
         "--noconsole",
-        "--icon", "assets/favicon.ico",
-        "--add-data", "assets/favicon.ico:assets",
-        "--add-data", "assets/overlordLogo.png:assets",
-        "--add-data", "assets/laserwolveGamesLogo.png:assets",
+        "--icon", "images/favicon.ico",
+        "--add-data", "images/favicon.ico:images",
+        "--add-data", "images/overlordLogo.png:images",
+        "--add-data", "images/laserwolveGamesLogo.png:images",
         "src/overlord.py"
     ]
     result = subprocess.run(cmd)
