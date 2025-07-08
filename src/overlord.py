@@ -155,21 +155,27 @@ def main():
                             text_widget.insert(tk.END, "\n" + foldername)
                         else:
                             text_widget.insert(tk.END, foldername)
+            # Place Browse and Clear buttons vertically, aligned to the top right of the text box
+            button_frame = tk.Frame(file_table_frame)
+            button_frame.grid(row=i+1, column=2, padx=5, pady=5, sticky="n")
+
             browse_button = tk.Button(
-                file_table_frame,
+                button_frame,
                 text="Browse",
-                command=browse_folders_append
+                command=browse_folders_append,
+                width=8
             )
-            browse_button.grid(row=i+1, column=2, padx=5, pady=5)
-            # Add Clear button below Browse button
+            browse_button.pack(side="top", fill="x", pady=(0, 2))
+
             def clear_source_sets():
                 text_widget.delete("1.0", tk.END)
             clear_button = tk.Button(
-                file_table_frame,
+                button_frame,
                 text="Clear",
-                command=clear_source_sets
+                command=clear_source_sets,
+                width=8
             )
-            clear_button.grid(row=i+1, column=2, padx=5, pady=(100, 5))
+            clear_button.pack(side="top", fill="x")
             value_entries[param] = text_widget
         elif param == "Output Directory":
             value_entry = tk.Entry(file_table_frame, width=80, font=("Consolas", 10))
@@ -187,7 +193,8 @@ def main():
                     value_entry,
                     initialdir=default_img_dir,
                     title="Select Output Directory"
-                )
+                ),
+                width=8
             )
             browse_button.grid(row=i+1, column=2, padx=5, pady=5)
             value_entries[param] = value_entry
