@@ -34,4 +34,5 @@ Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription
 Name: "startmenuicon"; Description: "Create a &Start Menu shortcut"; GroupDescription: "Additional icons:"; Flags: checkedonce
 
 [Run]
+Filename: "{cmd}"; Parameters: '/C pip install psutil'; StatusMsg: "Installing Python dependency: psutil..."; Flags: runhidden
 Filename: "{app}\overlord.exe"; Description: "Launch Overlord"; Flags: nowait postinstall skipifsilent
