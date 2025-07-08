@@ -248,6 +248,80 @@ def main():
     details_dim = tk.Label(details_frame, text="Dimensions: ", font=("Arial", 10))
     details_dim.pack(anchor="nw", pady=(0, 5))
 
+    # --- Output Details Column ---
+    output_details_frame = tk.Frame(root, width=350)
+    output_details_frame.place(relx=0.01, rely=0.6, anchor="nw", width=350, height=200)
+    output_details_frame.pack_propagate(False)
+
+    output_details_title = tk.Label(output_details_frame, text="Output Details", font=("Arial", 14, "bold"))
+    output_details_title.pack(anchor="nw", pady=(0, 10))
+
+    output_folder_size = tk.Label(output_details_frame, text="Folder Size: ", font=("Arial", 10))
+    output_folder_size.pack(anchor="nw", pady=(0, 5))
+    output_png_count = tk.Label(output_details_frame, text="PNG Files: ", font=("Arial", 10))
+    output_png_count.pack(anchor="nw", pady=(0, 5))
+    output_zip_count = tk.Label(output_details_frame, text="ZIP Files: ", font=("Arial", 10))
+    output_zip_count.pack(anchor="nw", pady=(0, 5))
+    output_folder_count = tk.Label(output_details_frame, text="Sub-folders: ", font=("Arial", 10))
+    output_folder_count.pack(anchor="nw", pady=(0, 5))
+
+    def update_output_details():
+        """Update the output details with current folder statistics"""
+        output_dir = value_entries["Output Directory"].get()
+        
+        if not os.path.exists(output_dir):
+            output_folder_size.config(text="Folder Size: N/A")
+            output_png_count.config(text="PNG Files: N/A")
+            output_zip_count.config(text="ZIP Files: N/A")
+            output_folder_count.config(text="Sub-folders: N/A")
+            return
+        
+        try:
+            total_size = 0
+            png_count = 0
+            zip_count = 0
+            folder_count = 0
+            
+            for rootdir, dirs, files in os.walk(output_dir):
+                # Count all subdirectories (not just immediate ones)
+                for dir_name in dirs:
+                    folder_count += 1
+                
+                for file in files:
+                    file_path = os.path.join(rootdir, file)
+                    try:
+                        file_size = os.path.getsize(file_path)
+                        total_size += file_size
+                        
+                        # Count file types
+                        if file.lower().endswith('.png'):
+                            png_count += 1
+                        elif file.lower().endswith('.zip'):
+                            zip_count += 1
+                    except (OSError, IOError):
+                        continue
+            
+            # Format size in appropriate units
+            if total_size < 1024:
+                size_str = f"{total_size} B"
+            elif total_size < 1024 * 1024:
+                size_str = f"{total_size / 1024:.1f} KB"
+            elif total_size < 1024 * 1024 * 1024:
+                size_str = f"{total_size / (1024 * 1024):.1f} MB"
+            else:
+                size_str = f"{total_size / (1024 * 1024 * 1024):.1f} GB"
+            
+            output_folder_size.config(text=f"Folder Size: {size_str}")
+            output_png_count.config(text=f"PNG Files: {png_count}")
+            output_zip_count.config(text=f"ZIP Files: {zip_count}")
+            output_folder_count.config(text=f"Sub-folders: {folder_count}")
+            
+        except Exception as e:
+            output_folder_size.config(text="Folder Size: Error")
+            output_png_count.config(text="PNG Files: Error")
+            output_zip_count.config(text="ZIP Files: Error")
+            output_folder_count.config(text="Sub-folders: Error")
+
     no_img_label = tk.Label(right_frame, text="No images found in output directory", font=("Arial", 12))
     no_img_label.place(relx=0.5, rely=0.5, anchor="center")
     no_img_label.lower()  # Hide initially
@@ -312,15 +386,23 @@ def main():
         # Schedule to check again in 1 second
         root.after(1000, show_last_rendered_image)
 
+    def periodic_update_output_details():
+        """Periodically update output details every 5 seconds"""
+        update_output_details()
+        root.after(5000, periodic_update_output_details)
+
     # Update image when output directory changes or after render
     def on_output_dir_change(*args):
         logging.info(f'Output Directory changed to: {value_entries["Output Directory"].get()}')
+        update_console(f'Output dir: {os.path.basename(value_entries["Output Directory"].get())}')
         root.after(200, show_last_rendered_image)
+        root.after(200, update_output_details)
     value_entries["Output Directory"].bind("<FocusOut>", lambda e: on_output_dir_change())
     value_entries["Output Directory"].bind("<Return>", lambda e: on_output_dir_change())
 
     def start_render():
         logging.info('Start Render button clicked')
+        update_console('Start Render button clicked')
         # Hardcoded Daz Studio Executable Path
         daz_executable_path = os.path.join(
             os.environ.get("ProgramFiles", "C:\\Program Files"),
@@ -340,8 +422,10 @@ def main():
                     import shutil
                     shutil.copy2(install_script_path, render_script_path)
                     logging.info(f'Copied masterRenderer.dsa to user scripts dir: {render_script_path}')
+                    update_console('Copied masterRenderer.dsa to scripts dir')
             except Exception as e:
                 logging.error(f'Could not copy masterRenderer.dsa to user scripts dir: {e}')
+                update_console(f'Error copying script: {e}')
             # Path to masterTemplate.duf in appData
             template_path = os.path.join(appdata, 'Overlord', 'templates', 'masterTemplate.duf').replace("\\", "/")
         else:
@@ -376,6 +460,7 @@ def main():
 
         def run_instance():
             logging.info('Launching Daz Studio render instance')
+            update_console('Launching Daz Studio instance...')
             command = [
                 daz_executable_path,
                 "-scriptArg", json_map,
@@ -388,20 +473,24 @@ def main():
             try:
                 subprocess.Popen(command)
                 logging.info('Daz Studio instance started successfully')
+                update_console('Daz Studio instance started')
             except Exception as e:
                 logging.error(f'Failed to start Daz Studio instance: {e}')
+                update_console(f'Failed to start instance: {e}')
         def run_all_instances(i=0):
             if i < num_instances_int:
                 run_instance()
                 root.after(5000, lambda: run_all_instances(i + 1))
             else:
                 logging.info('All render instances launched')
+                update_console(f'All {num_instances_int} instances launched')
                 root.after(1000, show_last_rendered_image)  # Update image after render
 
         run_all_instances()
 
     def end_all_daz_studio():
         logging.info('End all Daz Studio Instances button clicked')
+        update_console('Ending all Daz Studio instances...')
         killed = 0
         try:
             for proc in psutil.process_iter(['name']):
@@ -413,27 +502,149 @@ def main():
                     continue
             main.dazstudio_killed_by_user = True
             logging.info(f'Killed {killed} DAZStudio process(es)')
+            update_console(f'Killed {killed} DAZStudio process(es)')
         except Exception as e:
             logging.error(f'Failed to kill DAZStudio processes: {e}')
+            update_console(f'Failed to kill processes: {e}')
+
+    # --- Console Area Setup (early in the code) ---
+    console_frame = tk.Frame(root)
+    console_frame.place(relx=0.01, rely=0.85, anchor="nw", width=850, height=120)
+    
+    console_text = tk.Text(console_frame, width=60, height=6, font=("Consolas", 8), 
+                          state=tk.DISABLED, wrap=tk.WORD, bg="#f0f0f0")
+    console_text.pack(fill="both", expand=True)
+    
+    # Store console messages
+    console_messages = []
+    
+    # Get log file path (same as setup_logger)
+    appdata = os.environ.get('APPDATA')
+    if appdata:
+        log_dir = os.path.join(appdata, 'Overlord')
+    else:
+        log_dir = os.path.join(os.path.expanduser('~'), 'Overlord')
+    log_file_path = os.path.join(log_dir, 'log.txt')
+    
+    # Track log file reading
+    log_file_position = 0
+    if os.path.exists(log_file_path):
+        # Start from end of existing log file
+        with open(log_file_path, 'r', encoding='utf-8') as f:
+            f.seek(0, 2)  # Seek to end
+            log_file_position = f.tell()
+    
+    def update_console(message):
+        console_messages.append(message)
+        if len(console_messages) > 5:
+            console_messages.pop(0)
+        
+        console_text.config(state=tk.NORMAL)
+        console_text.delete("1.0", tk.END)
+        console_text.insert(tk.END, "\n".join(console_messages))
+        console_text.config(state=tk.DISABLED)
+        console_text.see(tk.END)
+    
+    def extract_message_from_log_line(line):
+        """Extract just the message part from a log line, removing timestamp and level"""
+        line = line.strip()
+        if not line:
+            return None
+        
+        # Format is: "2025-01-08 12:34:56,789 INFO: message"
+        # Find the first colon after the log level
+        parts = line.split(' ', 2)  # Split into at most 3 parts
+        if len(parts) >= 3:
+            # parts[0] = date, parts[1] = time, parts[2] = "LEVEL: message"
+            level_and_msg = parts[2]
+            if ':' in level_and_msg:
+                level, message = level_and_msg.split(':', 1)
+                return message.strip()
+        
+        # Fallback: return the whole line if parsing fails
+        return line
+    
+    def monitor_log_file():
+        """Check for new lines in the log file and add them to console"""
+        nonlocal log_file_position
+        
+        try:
+            if os.path.exists(log_file_path):
+                with open(log_file_path, 'r', encoding='utf-8') as f:
+                    f.seek(log_file_position)
+                    new_lines = f.readlines()
+                    log_file_position = f.tell()
+                    
+                    for line in new_lines:
+                        message = extract_message_from_log_line(line)
+                        if message:
+                            update_console(message)
+        except Exception as e:
+            # Silently handle file reading errors to avoid spam
+            pass
+        
+        # Schedule next check in 1 second
+        root.after(1000, monitor_log_file)
+
+    # Initialize console with startup messages
+    update_console(f'Overlord {overlord_version} started')
+    update_console('Ready for rendering operations')
+    
+    # Start monitoring log file
+    root.after(2000, monitor_log_file)  # Start after 2 seconds to avoid startup spam
 
     # Initial display
     root.after(500, show_last_rendered_image)
+    root.after(1000, update_output_details)  # Initial output details update
+    root.after(2000, periodic_update_output_details)  # Start periodic updates
 
-    button = tk.Button(root, text="Start Render", command=start_render, font=("Arial", 16, "bold"), width=16, height=2)
-    button.pack(side="left", anchor="sw", pady=20)
+    # --- Buttons Section ---
+    buttons_frame = tk.Frame(root)
+    buttons_frame.place(relx=0.0, rely=0.78, anchor="nw")
+
+    button = tk.Button(buttons_frame, text="Start Render", command=start_render, font=("Arial", 16, "bold"), width=16, height=2)
+    button.pack(side="left", padx=(20, 10), pady=10)
 
     end_button = tk.Button(
-        root,
+        buttons_frame,
         text="End all Daz Studio Instances",
         command=end_all_daz_studio,
         font=("Arial", 16, "bold"),
         width=26,
         height=2
     )
-    end_button.pack(side="left", anchor="sw", padx=0, pady=20)
+    end_button.pack(side="left", padx=10, pady=10)
 
     def zip_outputted_files():
         logging.info('Zip Outputted Files button clicked')
+        update_console('Zip Outputted Files button clicked')
+        
+        # Check if any DAZ Studio instances are running
+        daz_running = False
+        try:
+            for proc in psutil.process_iter(['name']):
+                try:
+                    if proc.info['name'] and 'DAZStudio' in proc.info['name']:
+                        daz_running = True
+                        break
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+        except Exception:
+            pass
+        
+        # Show confirmation dialog if DAZ Studio is running
+        if daz_running:
+            from tkinter import messagebox
+            result = messagebox.askyesno(
+                "DAZ Studio Running", 
+                "DAZ Studio is currently running. Archiving while rendering may cause issues.\n\nDo you want to continue anyway?",
+                icon="warning"
+            )
+            if not result:
+                update_console('Archive cancelled - DAZ Studio running')
+                logging.info('Archive cancelled by user - DAZ Studio running')
+                return
+        
         try:
             # Use the same logic as for finding the script path
             if getattr(sys, 'frozen', False):
@@ -448,18 +659,20 @@ def main():
                 value_entries["Output Directory"].get()
             ])
             logging.info(f'archiveFiles.py started with argument: {value_entries["Output Directory"].get()}')
+            update_console('Archive process started successfully')
         except Exception as e:
             logging.error(f'Failed to execute archiveFiles.py: {e}')
+            update_console(f'Failed to execute archiveFiles.py: {e}')
 
     zip_button = tk.Button(
-        root,
+        buttons_frame,
         text="Zip Outputted Files",
         command=zip_outputted_files,
         font=("Arial", 16, "bold"),
         width=18,
         height=2
     )
-    zip_button.pack(side="left", anchor="sw", padx=0, pady=20)
+    zip_button.pack(side="left", padx=10, pady=10)
 
     # Run the application
     root.mainloop()
