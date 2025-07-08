@@ -345,6 +345,10 @@ def main():
         newest_img_path = find_newest_image(output_dir)
         if newest_img_path and os.path.exists(newest_img_path):
             try:
+                # First, verify the image integrity
+                with Image.open(newest_img_path) as verify_img:
+                    verify_img.verify()  # Will raise if the image is incomplete or corrupt
+                # If verification passes, reopen for display
                 img = Image.open(newest_img_path).convert("RGBA")  # Ensure image is in RGBA mode
                 # Handle transparency by adding a white background
                 bg = Image.new("RGBA", img.size, (255, 255, 255, 255))
