@@ -44,6 +44,8 @@ def main():
     root.title(f"Overlord {overlord_version}")
     root.iconbitmap(resource_path(os.path.join("images", "favicon.ico")))  # Set the application icon
 
+    # ...existing code...
+
     # Maximize the application window
     root.state("zoomed")
 
@@ -255,10 +257,32 @@ def main():
     details_dim = tk.Label(details_frame, text="Dimensions: ", font=("Arial", 10))
     details_dim.pack(anchor="nw", pady=(0, 5))
 
+
     # --- Output Details Column ---
     output_details_frame = tk.Frame(root, width=350)
     output_details_frame.place(relx=0.01, rely=0.6, anchor="nw", width=350, height=200)
     output_details_frame.pack_propagate(False)
+
+    # Progress Bar for Render Completion (directly above Output Details title, not inside output_details_frame)
+    from tkinter import ttk
+    progress_var = tk.DoubleVar(master=root, value=0)
+    # Label for images remaining (above progress bar)
+    images_remaining_var = tk.StringVar(master=root, value="0 images remaining")
+    images_remaining_label = tk.Label(root, textvariable=images_remaining_var, font=("Arial", 10, "bold"), anchor="w", justify="left")
+    # Estimated Time Remaining label (right aligned, above progress bar)
+    estimated_time_remaining_var = tk.StringVar(master=root, value="Estimated time remaining: --")
+    estimated_time_remaining_label = tk.Label(
+        root,
+        textvariable=estimated_time_remaining_var,
+        font=("Arial", 10, "bold"),
+        anchor="e",
+        justify="right"
+    )
+    # estimated_time_remaining_label.place(relx=0.01, rely=0.55, anchor="nw", width=425, height=18)
+    images_remaining_label.place(relx=0.01, rely=0.55, anchor="nw", width=300, height=18)
+    progress_bar = ttk.Progressbar(root, variable=progress_var, maximum=100)
+    # Place the progress bar just above the output_details_frame, matching its width and alignment
+    progress_bar.place(relx=0.01, rely=0.57, anchor="nw", width=850, height=18)
 
     output_details_title = tk.Label(output_details_frame, text="Output Details", font=("Arial", 14, "bold"))
     output_details_title.pack(anchor="nw", pady=(0, 10))
@@ -269,46 +293,47 @@ def main():
     output_png_count.pack(anchor="nw", pady=(0, 5))
     output_zip_count = tk.Label(output_details_frame, text="ZIP Files: ", font=("Arial", 10))
     output_zip_count.pack(anchor="nw", pady=(0, 5))
+
     output_folder_count = tk.Label(output_details_frame, text="Sub-folders: ", font=("Arial", 10))
     output_folder_count.pack(anchor="nw", pady=(0, 5))
+
+    # Add Total Images to Render label (updated only on Start Render)
+    output_total_images = tk.Label(output_details_frame, text="Total Images to Render: ", font=("Arial", 10))
+    output_total_images.pack(anchor="nw", pady=(0, 5))
+
+
+
 
     def update_output_details():
         """Update the output details with current folder statistics"""
         output_dir = value_entries["Output Directory"].get()
-        
         if not os.path.exists(output_dir):
             output_folder_size.config(text="Folder Size: N/A")
             output_png_count.config(text="PNG Files: N/A")
             output_zip_count.config(text="ZIP Files: N/A")
             output_folder_count.config(text="Sub-folders: N/A")
+            progress_var.set(0)
+            images_remaining_var.set("0 images remaining")
             return
-        
         try:
             total_size = 0
             png_count = 0
             zip_count = 0
             folder_count = 0
-            
             for rootdir, dirs, files in os.walk(output_dir):
-                # Count all subdirectories (not just immediate ones)
                 for dir_name in dirs:
                     folder_count += 1
-                
                 for file in files:
                     file_path = os.path.join(rootdir, file)
                     try:
                         file_size = os.path.getsize(file_path)
                         total_size += file_size
-                        
-                        # Count file types
                         if file.lower().endswith('.png'):
                             png_count += 1
                         elif file.lower().endswith('.zip'):
                             zip_count += 1
                     except (OSError, IOError):
                         continue
-            
-            # Format size in appropriate units
             if total_size < 1024:
                 size_str = f"{total_size} B"
             elif total_size < 1024 * 1024:
@@ -317,17 +342,32 @@ def main():
                 size_str = f"{total_size / (1024 * 1024):.1f} MB"
             else:
                 size_str = f"{total_size / (1024 * 1024 * 1024):.1f} GB"
-            
             output_folder_size.config(text=f"Folder Size: {size_str}")
             output_png_count.config(text=f"PNG Files: {png_count}")
             output_zip_count.config(text=f"ZIP Files: {zip_count}")
             output_folder_count.config(text=f"Sub-folders: {folder_count}")
-            
+            # Update progress bar and images remaining label
+            try:
+                total_images_str = output_total_images.cget("text").replace("Total Images to Render: ", "").strip()
+                total_images = int(total_images_str) if total_images_str.isdigit() else None
+                if total_images and total_images > 0:
+                    percent = min(100, (png_count / total_images) * 100)
+                    progress_var.set(percent)
+                    remaining = max(0, total_images - png_count)
+                    images_remaining_var.set(f"{remaining} images remaining")
+                else:
+                    progress_var.set(0)
+                    images_remaining_var.set("0 images remaining")
+            except Exception:
+                progress_var.set(0)
+                images_remaining_var.set("0 images remaining")
         except Exception as e:
             output_folder_size.config(text="Folder Size: Error")
             output_png_count.config(text="PNG Files: Error")
             output_zip_count.config(text="ZIP Files: Error")
             output_folder_count.config(text="Sub-folders: Error")
+            progress_var.set(0)
+            images_remaining_var.set("0 images remaining")
 
     no_img_label = tk.Label(right_frame, text="No images found in output directory", font=("Arial", 12))
     no_img_label.place(relx=0.5, rely=0.5, anchor="center")
@@ -412,6 +452,69 @@ def main():
     value_entries["Output Directory"].bind("<Return>", lambda e: on_output_dir_change())
 
     def start_render():
+        # Validate Source Sets and Output Directory before launching render
+        source_sets = value_entries["Source Sets"].get("1.0", tk.END).strip().replace("\\", "/").split("\n")
+        source_sets = [folder for folder in source_sets if folder]
+        output_dir = value_entries["Output Directory"].get().strip()
+        if not source_sets:
+            from tkinter import messagebox
+            messagebox.showerror("Missing Source Sets", "Please specify at least one Source Set before starting the render.")
+            update_console("Start Render cancelled: No Source Sets specified.")
+            logging.info("Start Render cancelled: No Source Sets specified.")
+            return
+        if not output_dir:
+            from tkinter import messagebox
+            messagebox.showerror("Missing Output Directory", "Please specify an Output Directory before starting the render.")
+            update_console("Start Render cancelled: No Output Directory specified.")
+            logging.info("Start Render cancelled: No Output Directory specified.")
+            return
+
+        # Calculate and display total images to render (update label)
+        total_images = None
+        try:
+            if source_sets:
+                script_path = os.path.join(os.path.dirname(__file__), "findTotalNumber.py")
+                result = subprocess.run([
+                    sys.executable,
+                    script_path,
+                    json.dumps(source_sets)
+                ], capture_output=True, text=True, timeout=30)
+                output = result.stdout.strip()
+                if output.isdigit():
+                    total_images = int(output)
+        except Exception:
+            total_images = None
+        if total_images is not None:
+            output_total_images.config(text=f"Total Images to Render: {total_images}")
+        else:
+            output_total_images.config(text="Total Images to Render: ")
+
+        # Check if any DAZ Studio instances are running
+        daz_running = False
+        try:
+            for proc in psutil.process_iter(['name']):
+                try:
+                    if proc.info['name'] and 'DAZStudio' in proc.info['name']:
+                        daz_running = True
+                        break
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+        except Exception:
+            pass
+
+        # Show confirmation dialog if DAZ Studio is running
+        if daz_running:
+            from tkinter import messagebox
+            result = messagebox.askyesno(
+                "DAZ Studio Running", 
+                "DAZ Studio is already running.\n\nDo you want to continue?",
+                icon="warning"
+            )
+            if not result:
+                update_console('Start Render cancelled - DAZ Studio running')
+                logging.info('Start Render cancelled by user - DAZ Studio running')
+                return
+
         logging.info('Start Render button clicked')
         update_console('Start Render button clicked')
         # Hardcoded Daz Studio Executable Path

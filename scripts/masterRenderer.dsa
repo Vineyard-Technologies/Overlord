@@ -94,6 +94,15 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 		}
 	} else Scene.setAnimRange(DzTimeRange(0, 0));
 
+	if (bIsGear) {
+
+		oIrayOptions.addNodeToNodeList('visibleNodes', oGear); // Add the gear to the canvas.
+
+		// Add all gear children to the canvas as well.
+		for (var nGearChildrenCounter = 0; nGearChildrenCounter != aGearChildren.length; nGearChildrenCounter++)
+			oIrayOptions.addNodeToNodeList('visibleNodes', aGearChildren[nGearChildrenCounter]);
+	}
+
 	// Add the subject as a child to the root
 	oRoot.addNodeChild(oSubject, true);
 
@@ -209,19 +218,15 @@ for (var nSetFilepathsCounter = 0; nSetFilepathsCounter != aSetFilepaths.length;
 			if (aGearFilepaths.length) for (var nGearCounter = 0; nGearCounter != aGearFilepaths.length; nGearCounter++) {
 			
 				var sGearFilepath = aGearFilepaths[nGearCounter];
+
 				oContentMgr.openFile(sGearFilepath, true);
+
 				var sGearName = getName(sGearFilepath);
 				var oGear = Scene.findNodeByLabel('gear');
 
 				var aGearChildren = oGear.getNodeChildren(false);
 
-				oIrayOptions.addNodeToNodeList('visibleNodes', oGear); // Add the gear to the canvas.
-
-				// Add all gear children to the canvas as well.
-				for (var ii = 0; ii != aGearChildren.length; ii++) oIrayOptions.addNodeToNodeList('visibleNodes', aGearChildren[ii]);
-
-				// TODO: This is probably wrong now that we are using parentheses?
-				renderCore(sSetFilepath, sSubjectName + '_' + sGearName, nDegrees, sAnimationName, true, false);
+				renderCore(sSubjectName + '_' + sGearName, sAnimationName, true, false);
 
 				Scene.removeNode(oGear);
 			}
