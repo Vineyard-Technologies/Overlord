@@ -72,7 +72,7 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 		var nDegrees = nDEGREES_IN_CIRCLE / nAngles;
 	}
 	
-	{ // Read the animation's JSON to see how many frames it has
+	if (sAnimationName != 'static') { // Read the animation's JSON to see how many frames it has
 		// https://github.com/Laserwolve-Games/Overlord/discussions/4 
 		var oAnimationFile = new DzFile(sAnimationFilepath);
 
@@ -92,7 +92,7 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 				break;
 			}
 		}
-	}
+	} else Scene.setAnimRange(DzTimeRange(0, 0));
 
 	// Add the subject as a child to the root
 	oRoot.addNodeChild(oSubject, true);
@@ -163,12 +163,13 @@ for (var nSetFilepathsCounter = 0; nSetFilepathsCounter != aSetFilepaths.length;
 	var aGearAnimationFilepaths = oSetDirectory.getFilesFromDir(['*_gearAnimation.duf'], false);
 
 	for (var nSubjectCounter = 0; nSubjectCounter != aSubjectFilepaths.length; nSubjectCounter++) {
+
+			var sSubjectFilepath = aSubjectFilepaths[nSubjectCounter];
+			var sSubjectName = getName(sSubjectFilepath);
 	
 		// If there are animations, loop over them
 		if (aAnimationFilepaths.length) for (var nAnimationFilepathsCounter = 0; nAnimationFilepathsCounter != aAnimationFilepaths.length; nAnimationFilepathsCounter++) {
 		
-			var sSubjectFilepath = aSubjectFilepaths[nSubjectCounter];
-			var sSubjectName = getName(sSubjectFilepath);
 			var sAnimationFilepath = aAnimationFilepaths[nAnimationFilepathsCounter];
 			var sAnimationName = getName(sAnimationFilepath);
 			
@@ -227,7 +228,14 @@ for (var nSetFilepathsCounter = 0; nSetFilepathsCounter != aSetFilepaths.length;
 			else renderCore(sSubjectName, sAnimationName, false, false);
 
 		} else {
-			// handle non-animated subjects here
+
+			oContentMgr.openFile(sMasterTemplatePath, false);
+
+			oContentMgr.openFile(sSubjectFilepath, true);
+
+			var oSubject = Scene.findNodeByLabel('subject');
+
+			renderCore(sSubjectName, 'static', false, false);
 		}
 	}
 }
