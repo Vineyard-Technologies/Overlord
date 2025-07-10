@@ -43,6 +43,9 @@ jobs:
       - name: Install Pillow
         run: pip install pillow
 
+      - name: Install psutil
+        run: pip install psutil
+
       - name: Install Inno Setup
         run: |
           choco install innosetup -y
