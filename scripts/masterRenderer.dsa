@@ -10,6 +10,7 @@ var oOutputDirectory = new DzDir(sOutputDirectory);
 var aSetFilepaths = oScriptArgs['source_sets'].toString().split(',');
 var nDEGREES_IN_CIRCLE = 360;
 var nFrameRate = oScriptArgs['frame_rate'];
+var bRenderShadows = oScriptArgs['render_shadows'];
 var nDAZ_TICKS = 4800;
 var nTicksPerFrame = nDAZ_TICKS / nFrameRate;
 var bOverwriteExistingImages = false;
@@ -159,7 +160,7 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 			if (DzFileInfo(sFinalFilePath).size() == 4181) App.warning(sFinalFilePath + ' is 4181 bytes. It is likely a blank image.');
 		}
 	}
-	if (!bIsShadow) renderCore(sSubjectName, sAnimationName, bIsGear, true);
+	if (bRenderShadows) if (!bIsShadow) renderCore(sSubjectName, sAnimationName, bIsGear, true);
 }
 for (var nSetFilepathsCounter = 0; nSetFilepathsCounter != aSetFilepaths.length; nSetFilepathsCounter++) {
 

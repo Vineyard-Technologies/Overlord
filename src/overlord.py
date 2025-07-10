@@ -6,7 +6,6 @@ import sys
 import webbrowser
 import json
 from PIL import Image, ImageTk
-import time
 import psutil
 import logging
 from version import __version__ as overlord_version
@@ -29,14 +28,82 @@ def setup_logger():
         log_dir = os.path.join(os.path.expanduser('~'), 'Overlord')
     os.makedirs(log_dir, exist_ok=True)
     log_path = os.path.join(log_dir, 'log.txt')
+    from logging.handlers import RotatingFileHandler
+    max_bytes = 100 * 1024 * 1024  # 100 MB
+    file_handler = RotatingFileHandler(log_path, maxBytes=max_bytes, backupCount=1, encoding='utf-8')
+    stream_handler = logging.StreamHandler()
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s %(levelname)s: %(message)s',
-        handlers=[logging.FileHandler(log_path, encoding='utf-8'), logging.StreamHandler()]
+        handlers=[file_handler, stream_handler]
     )
-    logging.info(f'--- Overlord started --- (log file: {log_path})')
+    logging.info(f'--- Overlord started --- (log file: {log_path}, max size: 100 MB)')
 
 def main():
+    import re
+
+    def update_estimated_time_remaining(images_remaining):
+        # Get user profile directory
+        user_profile = os.environ.get('USERPROFILE') or os.path.expanduser('~')
+        base_log_dir = os.path.join(user_profile, "AppData", "Roaming", "DAZ 3D")
+        avg_times = []
+        num_instances_str = value_entries.get("Number of Instances", None)
+        try:
+            num_instances = int(num_instances_str.get()) if num_instances_str else 1
+        except Exception:
+            num_instances = 1
+
+        for i in range(1, num_instances + 1):
+            # Always use Studio4 [i] for all instances, including i==1
+            studio_dir = os.path.join(base_log_dir, f"Studio4 [{i}]")
+            log_path = os.path.join(studio_dir, "log.txt")
+            if not os.path.exists(log_path):
+                continue
+            try:
+                with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
+                    # Collect all matching times in this log
+                    times = [float(m.group(1)) for line in f if (m := re.search(r"Total Rendering Time: (\d+(?:\.\d+)?) seconds", line))]
+                    avg_times.extend(times)
+            except Exception:
+                continue
+
+        # Use only the 25 most recent render times (from all logs combined)
+        if avg_times and len(avg_times) > 0:
+            import datetime
+            recent_times = avg_times[-25:] if len(avg_times) > 25 else avg_times
+            avg_time = sum(recent_times) / len(recent_times)
+            total_seconds = int(avg_time * images_remaining)
+            # Format as H:MM:SS
+            hours = total_seconds // 3600
+            minutes = (total_seconds % 3600) // 60
+            seconds = total_seconds % 60
+            if hours > 0:
+                formatted = f"Estimated time remaining: {hours}:{minutes:02}:{seconds:02}"
+            else:
+                formatted = f"Estimated time remaining: {minutes}:{seconds:02}"
+            estimated_time_remaining_var.set(formatted)
+            # Set estimated completion at
+            completion_time = datetime.datetime.now() + datetime.timedelta(seconds=total_seconds)
+            # Format: "Thursday, July 10th, 2025 2:35 PM"
+            def ordinal(n):
+                if 10 <= n % 100 <= 20:
+                    suffix = 'th'
+                else:
+                    suffix = {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')
+                return str(n) + suffix
+
+            weekday = completion_time.strftime('%A')
+            month = completion_time.strftime('%B')
+            day = ordinal(completion_time.day)
+            year = completion_time.year
+            hour = completion_time.strftime('%I').lstrip('0') or '12'
+            minute = completion_time.strftime('%M')
+            ampm = completion_time.strftime('%p')
+            completion_str = f"Estimated completion at: {weekday}, {month} {day}, {year} {hour}:{minute} {ampm}"
+            estimated_completion_at_var.set(completion_str)
+        else:
+            estimated_time_remaining_var.set("Estimated time remaining: --")
+            estimated_completion_at_var.set("Estimated completion at: --")
     setup_logger()
     logging.info('Application launched')
     # Create the main window
@@ -203,6 +270,7 @@ def main():
 
 
 
+
     # Short/simple parameters table
     for i, param in enumerate(param_params):
         param_label = tk.Label(param_table_frame, text=param, font=("Arial", 10), anchor="w")
@@ -212,11 +280,25 @@ def main():
         if param == "Number of Instances":
             value_entry.insert(0, "1")
         elif param == "Log File Size (MBs)":
-            value_entry.insert(0, "500")
+            value_entry.insert(0, "100")
         elif param == "Frame Rate":
             value_entry.insert(0, "30")
         value_entry.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
         value_entries[param] = value_entry
+
+    # Add "Render shadows" label and checkbox under Log File Size
+    render_shadows_var = tk.BooleanVar(value=True)
+    # Label aligned under "Log File Size" label (column 0)
+    render_shadows_label = tk.Label(param_table_frame, text="Render shadows", font=("Arial", 10), anchor="w")
+    render_shadows_label.grid(row=len(param_params)+1, column=0, padx=10, pady=(0, 0), sticky="w")
+    # Checkbox aligned under input boxes (column 1)
+    render_shadows_checkbox = tk.Checkbutton(
+        param_table_frame,
+        variable=render_shadows_var,
+        width=2,
+        anchor="w"
+    )
+    render_shadows_checkbox.grid(row=len(param_params)+1, column=1, padx=10, pady=(0, 5), sticky="w")
 
     # --- Last Rendered Image Section ---
     right_frame = tk.Frame(root)
@@ -267,19 +349,34 @@ def main():
     from tkinter import ttk
     progress_var = tk.DoubleVar(master=root, value=0)
     # Label for images remaining (above progress bar)
-    images_remaining_var = tk.StringVar(master=root, value="0 images remaining")
-    images_remaining_label = tk.Label(root, textvariable=images_remaining_var, font=("Arial", 10, "bold"), anchor="w", justify="left")
-    # Estimated Time Remaining label (right aligned, above progress bar)
+    images_remaining_var = tk.StringVar(master=root, value="Images remaining: --")
     estimated_time_remaining_var = tk.StringVar(master=root, value="Estimated time remaining: --")
+    estimated_completion_at_var = tk.StringVar(master=root, value="Estimated completion at: --")
+    images_remaining_label = tk.Label(
+        root,
+        textvariable=images_remaining_var,
+        font=("Arial", 10, "bold"),
+        anchor="w",
+        justify="left"
+    )
     estimated_time_remaining_label = tk.Label(
         root,
         textvariable=estimated_time_remaining_var,
         font=("Arial", 10, "bold"),
         anchor="e",
+        justify="center"
+    )
+    estimated_completion_at_label = tk.Label(
+        root,
+        textvariable=estimated_completion_at_var,
+        font=("Arial", 10, "bold"),
+        anchor="e",
         justify="right"
     )
-    # estimated_time_remaining_label.place(relx=0.01, rely=0.55, anchor="nw", width=425, height=18)
-    images_remaining_label.place(relx=0.01, rely=0.55, anchor="nw", width=300, height=18)
+    images_remaining_label.place(relx=0.01, rely=0.55, anchor="nw", width=250, height=18)
+    estimated_time_remaining_label.place(relx=0.11, rely=0.55, anchor="nw", width=250, height=18)
+    estimated_completion_at_label.place(relx=0.245, rely=0.55, anchor="nw", width=400, height=18)
+
     progress_bar = ttk.Progressbar(root, variable=progress_var, maximum=100)
     # Place the progress bar just above the output_details_frame, matching its width and alignment
     progress_bar.place(relx=0.01, rely=0.57, anchor="nw", width=850, height=18)
@@ -299,10 +396,7 @@ def main():
 
     # Add Total Images to Render label (updated only on Start Render)
     output_total_images = tk.Label(output_details_frame, text="Total Images to Render: ", font=("Arial", 10))
-    output_total_images.pack(anchor="nw", pady=(0, 5))
-
-
-
+    # output_total_images.pack(anchor="nw", pady=(0, 5))
 
     def update_output_details():
         """Update the output details with current folder statistics"""
@@ -313,7 +407,7 @@ def main():
             output_zip_count.config(text="ZIP Files: N/A")
             output_folder_count.config(text="Sub-folders: N/A")
             progress_var.set(0)
-            images_remaining_var.set("0 images remaining")
+            images_remaining_var.set("Images remaining: --")
             return
         try:
             total_size = 0
@@ -349,25 +443,36 @@ def main():
             # Update progress bar and images remaining label
             try:
                 total_images_str = output_total_images.cget("text").replace("Total Images to Render: ", "").strip()
+                if not total_images_str:
+                    progress_var.set(0)
+                    images_remaining_var.set("Images remaining: --")
+                    estimated_time_remaining_var.set("Estimated time remaining: --")
+                    estimated_completion_at_var.set("Estimated completion at: --")
+                    return
                 total_images = int(total_images_str) if total_images_str.isdigit() else None
                 if total_images and total_images > 0:
                     percent = min(100, (png_count / total_images) * 100)
                     progress_var.set(percent)
                     remaining = max(0, total_images - png_count)
-                    images_remaining_var.set(f"{remaining} images remaining")
+                    images_remaining_var.set(f"Images remaining: {remaining}")
+                    update_estimated_time_remaining(remaining)
                 else:
                     progress_var.set(0)
-                    images_remaining_var.set("0 images remaining")
+                    images_remaining_var.set("Images remaining: --")
+                    estimated_time_remaining_var.set("Estimated time remaining: --")
+                    estimated_completion_at_var.set("Estimated completion at: --")
             except Exception:
                 progress_var.set(0)
-                images_remaining_var.set("0 images remaining")
+                images_remaining_var.set("Images remaining: --")
+                estimated_time_remaining_var.set("Estimated time remaining: --")
+                estimated_completion_at_var.set("Estimated completion at: --")
         except Exception as e:
             output_folder_size.config(text="Folder Size: Error")
             output_png_count.config(text="PNG Files: Error")
             output_zip_count.config(text="ZIP Files: Error")
             output_folder_count.config(text="Sub-folders: Error")
             progress_var.set(0)
-            images_remaining_var.set("0 images remaining")
+            images_remaining_var.set("Images remaining: --")
 
     no_img_label = tk.Label(right_frame, text="No images found in output directory", font=("Arial", 12))
     no_img_label.place(relx=0.5, rely=0.5, anchor="center")
@@ -375,22 +480,28 @@ def main():
 
     def find_newest_image(directory):
         image_exts = ('.png', '.jpg', '.jpeg', '.bmp', '.gif', '.tiff', '.webp')
-        newest_file = None
-        newest_time = None
+        # Collect all image files and their modification times
+        image_files = []
         for rootdir, _, files in os.walk(directory):
             for fname in files:
                 if fname.lower().endswith(image_exts):
                     fpath = os.path.join(rootdir, fname)
-                    mtime = os.path.getmtime(fpath)
-                    if newest_time is None or mtime > newest_time:
-                        newest_time = mtime
-                        newest_file = fpath
-        return newest_file
+                    try:
+                        mtime = os.path.getmtime(fpath)
+                        image_files.append((mtime, fpath))
+                    except Exception:
+                        continue
+        # Sort by most recent first
+        image_files.sort(reverse=True)
+        return [fpath for mtime, fpath in image_files]
 
     def show_last_rendered_image():
         output_dir = value_entries["Output Directory"].get()
-        newest_img_path = find_newest_image(output_dir)
-        if newest_img_path and os.path.exists(newest_img_path):
+        image_paths = find_newest_image(output_dir)
+        displayed = False
+        for newest_img_path in image_paths:
+            if not os.path.exists(newest_img_path):
+                continue
             try:
                 # First, verify the image integrity
                 with Image.open(newest_img_path) as verify_img:
@@ -416,15 +527,11 @@ def main():
                     logging.info(f'Displaying image: {newest_img_path}')
                     show_last_rendered_image.last_logged_img_path = newest_img_path
                 show_last_rendered_image.last_no_img_logged = False
-            except Exception as e:
-                img_label.config(image="")
-                img_label.image = None
-                details_path.config(text="")
-                details_dim.config(text="Dimensions: ")
-                details_size.config(text="Size: ")
-                no_img_label.lift()
-                logging.error(f'Error displaying image: {e}')
-        else:
+                displayed = True
+                break
+            except Exception:
+                continue
+        if not displayed:
             img_label.config(image="")
             img_label.image = None
             details_path.config(text="")
@@ -432,7 +539,7 @@ def main():
             details_size.config(text="Size: ")
             no_img_label.lift()
             if not getattr(show_last_rendered_image, 'last_no_img_logged', False):
-                logging.info('No images found in output directory')
+                logging.info('No images found in output directory or all images failed to load')
                 show_last_rendered_image.last_no_img_logged = True
         # Schedule to check again in 1 second
         root.after(1000, show_last_rendered_image)
@@ -485,6 +592,11 @@ def main():
         except Exception:
             total_images = None
         if total_images is not None:
+            # TODO: This should be read from the JSON of the _subject files.
+            total_images *= 16
+            # If Render Shadows is checked, double the total images
+            if render_shadows_var.get():
+                total_images *= 2
             output_total_images.config(text=f"Total Images to Render: {total_images}")
         else:
             output_total_images.config(text="Total Images to Render: ")
@@ -562,13 +674,16 @@ def main():
         except Exception:
             num_instances_int = 1
 
+        # Add render_shadows to json_map
+        render_shadows = render_shadows_var.get()
         json_map = (
             f'{{'
             f'"num_instances": "{num_instances}", '
             f'"image_output_dir": "{image_output_dir}", '
             f'"frame_rate": "{frame_rate}", '
             f'"source_sets": {source_sets}, '
-            f'"template_path": "{template_path}"'
+            f'"template_path": "{template_path}", '
+            f'"render_shadows": {str(render_shadows).lower()}'
             f'}}'
         )
 
@@ -620,6 +735,12 @@ def main():
         except Exception as e:
             logging.error(f'Failed to kill DAZStudio processes: {e}')
             update_console(f'Failed to kill processes: {e}')
+        # Reset progress and time labels, and total images label (always reset regardless of error)
+        output_total_images.config(text="Total Images to Render: ")
+        images_remaining_var.set("Images remaining: --")
+        estimated_time_remaining_var.set("Estimated time remaining: --")
+        estimated_completion_at_var.set("Estimated completion at: --")
+        progress_var.set(0)
 
     # --- Console Area Setup (early in the code) ---
     console_frame = tk.Frame(root)

@@ -21,7 +21,9 @@ def find_total_images(source_sets):
                             animations = data.get('scene', {}).get('animations', [])
                             for anim in animations:
                                 keys = anim.get('keys', [])
-                                total_frames += len(keys)
+                                if len(keys) != 1:
+                                    total_frames += len(keys)
+                                    break  # Continue to the next file
                     except Exception:
                         continue
     return total_frames
