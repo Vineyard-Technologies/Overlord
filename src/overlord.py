@@ -577,18 +577,34 @@ def main():
             return
 
         # Calculate and display total images to render (update label)
+        def find_total_images(source_sets):
+            total_frames = 0
+            for set_dir in source_sets:
+                for root, dirs, files in os.walk(set_dir):
+                    for fname in files:
+                        if '_animation.duf' in fname:
+                            try:
+                                fpath = os.path.join(root, fname)
+                                with open(fpath, 'r', encoding='utf-8') as f:
+                                    content = f.read()
+                                    json_start = content.find('{')
+                                    if json_start == -1:
+                                        continue
+                                    data = json.loads(content[json_start:])
+                                    animations = data.get('scene', {}).get('animations', [])
+                                    for anim in animations:
+                                        keys = anim.get('keys', [])
+                                        if len(keys) != 1:
+                                            total_frames += len(keys)
+                                            break
+                            except Exception:
+                                continue
+            return total_frames
+
         total_images = None
         try:
             if source_sets:
-                script_path = os.path.join(os.path.dirname(__file__), "findTotalNumber.py")
-                result = subprocess.run([
-                    sys.executable,
-                    script_path,
-                    json.dumps(source_sets)
-                ], capture_output=True, text=True, timeout=30)
-                output = result.stdout.strip()
-                if output.isdigit():
-                    total_images = int(output)
+                total_images = find_total_images(source_sets)
         except Exception:
             total_images = None
         if total_images is not None:

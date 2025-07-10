@@ -22,7 +22,6 @@ VersionInfoDescription=Overlord - Render Pipeline Manager
 Source: "dist\overlord.exe"; DestDir: "{app}"; Flags: ignoreversion 64bit
 Source: "scripts\masterRenderer.dsa"; DestDir: "{app}\scripts"; Flags: ignoreversion 64bit
 Source: "scripts\archiveFiles.py"; DestDir: "{app}\scripts"; Flags: ignoreversion 64bit
-Source: "scripts\findTotalNumber.py"; DestDir: "{app}\scripts"; Flags: ignoreversion 64bit
 Source: "templates\masterTemplate.duf"; DestDir: "{userappdata}\Overlord\templates"; Flags: ignoreversion
 
 [Icons]

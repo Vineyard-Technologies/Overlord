@@ -11,7 +11,6 @@ def main():
         "--add-data", "images/favicon.ico:images",
         "--add-data", "images/overlordLogo.png:images",
         "--add-data", "images/laserwolveGamesLogo.png:images",
-        "--add-data", "src/findTotalNumber.py:scripts",
         "src/overlord.py"
     ]
     result = subprocess.run(cmd)
