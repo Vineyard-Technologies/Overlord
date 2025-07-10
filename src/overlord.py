@@ -39,6 +39,33 @@ def setup_logger():
     )
     logging.info(f'--- Overlord started --- (log file: {log_path}, max size: 100 MB)')
 
+def load_settings():
+    """Load application settings from JSON file"""
+    try:
+        # Get settings file path
+        appdata = os.environ.get('APPDATA')
+        if appdata:
+            settings_dir = os.path.join(appdata, 'Overlord')
+        else:
+            settings_dir = os.path.join(os.path.expanduser('~'), 'Overlord')
+        
+        settings_path = os.path.join(settings_dir, 'settings.json')
+        
+        if not os.path.exists(settings_path):
+            logging.info('No settings file found, using defaults')
+            return {}
+        
+        # Load settings from file
+        with open(settings_path, 'r', encoding='utf-8') as f:
+            settings = json.load(f)
+        
+        logging.info(f'Settings loaded from: {settings_path}')
+        return settings
+        
+    except Exception as e:
+        logging.error(f'Failed to load settings: {e}')
+        return {}
+
 def main():
     import re
 
@@ -106,12 +133,61 @@ def main():
             estimated_completion_at_var.set("Estimated completion at: --")
     setup_logger()
     logging.info('Application launched')
+    
+    # Load saved settings
+    saved_settings = load_settings()
+    
     # Create the main window
     root = tk.Tk()
     root.title(f"Overlord {overlord_version}")
     root.iconbitmap(resource_path(os.path.join("images", "favicon.ico")))  # Set the application icon
 
-    # ...existing code...
+    def save_settings():
+        """Save current application settings to a JSON file"""
+        try:
+            # Get user's appdata directory for settings
+            appdata = os.environ.get('APPDATA')
+            if appdata:
+                settings_dir = os.path.join(appdata, 'Overlord')
+            else:
+                settings_dir = os.path.join(os.path.expanduser('~'), 'Overlord')
+            
+            os.makedirs(settings_dir, exist_ok=True)
+            settings_path = os.path.join(settings_dir, 'settings.json')
+            
+            # Collect current settings
+            settings = {}
+            
+            # Source Sets (get text from widget)
+            if 'Source Sets' in value_entries:
+                source_sets_text = value_entries['Source Sets'].get("1.0", tk.END).strip()
+                settings['source_sets'] = source_sets_text
+            
+            # Other text/entry fields
+            for key, widget in value_entries.items():
+                if key != 'Source Sets':  # Already handled above
+                    if hasattr(widget, 'get'):
+                        settings[key] = widget.get()
+            
+            # Checkbox states
+            settings['render_shadows'] = render_shadows_var.get()
+            
+            # Save to file
+            with open(settings_path, 'w', encoding='utf-8') as f:
+                json.dump(settings, f, indent=2, ensure_ascii=False)
+            
+            logging.info(f'Settings saved to: {settings_path}')
+            
+        except Exception as e:
+            logging.error(f'Failed to save settings: {e}')
+
+    def on_closing():
+        """Handle application closing - save settings and exit"""
+        save_settings()
+        root.destroy()
+    
+    # Register the closing handler
+    root.protocol("WM_DELETE_WINDOW", on_closing)
 
     # Maximize the application window
     root.state("zoomed")
@@ -224,6 +300,8 @@ def main():
                             text_widget.insert(tk.END, "\n" + foldername)
                         else:
                             text_widget.insert(tk.END, foldername)
+                        # Update source set details after adding folder
+                        root.after(100, update_source_sets_from_widget)
             # Place Browse and Clear buttons vertically, aligned to the top right of the text box
             button_frame = tk.Frame(file_table_frame)
             button_frame.grid(row=i+1, column=2, padx=5, pady=5, sticky="n")
@@ -238,6 +316,8 @@ def main():
 
             def clear_source_sets():
                 text_widget.delete("1.0", tk.END)
+                # Update source set details after clearing
+                root.after(100, update_source_sets_from_widget)
             clear_button = tk.Button(
                 button_frame,
                 text="Clear",
@@ -246,13 +326,43 @@ def main():
             )
             clear_button.pack(side="top", fill="x")
             value_entries[param] = text_widget
+            
+            # Add function to update source set details when text changes
+            def update_source_sets_from_widget():
+                source_sets_text = text_widget.get("1.0", tk.END).strip().replace("\\", "/")
+                if source_sets_text:
+                    source_sets = [folder for folder in source_sets_text.split("\n") if folder.strip()]
+                    update_source_set_details(source_sets)
+                else:
+                    # Clear the source set details if no source sets
+                    source_subjects_count.config(text="Subjects: ")
+                    source_animations_count.config(text="Animations: ")
+                    source_gear_count.config(text="Gear: ")
+                    source_prop_animations_count.config(text="Prop Animations: ")
+                    source_gear_animations_count.config(text="Gear Animations: ")
+            
+            # Bind text change events to update source set details
+            def on_source_sets_change(event=None):
+                # Use after_idle to avoid calling during rapid text changes
+                root.after_idle(update_source_sets_from_widget)
+            
+            text_widget.bind('<KeyRelease>', on_source_sets_change)
+            text_widget.bind('<ButtonRelease>', on_source_sets_change)
+            
+            # Load saved source sets if available
+            if 'source_sets' in saved_settings and saved_settings['source_sets']:
+                text_widget.insert("1.0", saved_settings['source_sets'])
+                # Trigger initial update of source set details
+                root.after(100, update_source_sets_from_widget)
         elif param == "Output Directory":
             value_entry = tk.Entry(file_table_frame, width=80, font=("Consolas", 10))
             default_img_dir = os.path.join(
                 os.path.expanduser("~"),
                 "Downloads", "output"
             )
-            value_entry.insert(0, default_img_dir)
+            # Use saved setting or default
+            initial_value = saved_settings.get("Output Directory", default_img_dir)
+            value_entry.insert(0, initial_value)
             value_entry.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
 
             browse_button = tk.Button(
@@ -260,7 +370,7 @@ def main():
                 text="Browse",
                 command=make_browse_folder(
                     value_entry,
-                    initialdir=default_img_dir,
+                    initialdir=initial_value,
                     title="Select Output Directory"
                 ),
                 width=8
@@ -277,17 +387,28 @@ def main():
         param_label.grid(row=i+1, column=0, padx=10, pady=5, sticky="w")
 
         value_entry = tk.Entry(param_table_frame, width=5, font=("Consolas", 10))
+        
+        # Set default values or load from saved settings
         if param == "Number of Instances":
-            value_entry.insert(0, "1")
+            default_value = "1"
         elif param == "Log File Size (MBs)":
-            value_entry.insert(0, "100")
+            default_value = "100"
         elif param == "Frame Rate":
-            value_entry.insert(0, "30")
+            default_value = "30"
+        else:
+            default_value = ""
+            
+        # Use saved setting or default
+        initial_value = saved_settings.get(param, default_value)
+        value_entry.insert(0, initial_value)
+        
         value_entry.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
         value_entries[param] = value_entry
 
     # Add "Render shadows" label and checkbox under Log File Size
-    render_shadows_var = tk.BooleanVar(value=True)
+    # Use saved setting or default to True
+    render_shadows_default = saved_settings.get('render_shadows', True)
+    render_shadows_var = tk.BooleanVar(value=render_shadows_default)
     # Label aligned under "Log File Size" label (column 0)
     render_shadows_label = tk.Label(param_table_frame, text="Render shadows", font=("Arial", 10), anchor="w")
     render_shadows_label.grid(row=len(param_params)+1, column=0, padx=10, pady=(0, 0), sticky="w")
@@ -345,6 +466,11 @@ def main():
     output_details_frame.place(relx=0.01, rely=0.6, anchor="nw", width=350, height=200)
     output_details_frame.pack_propagate(False)
 
+    # --- Source Set Details Column ---
+    source_details_frame = tk.Frame(root, width=350)
+    source_details_frame.place(relx=0.11, rely=0.6, anchor="nw", width=250, height=200)
+    source_details_frame.pack_propagate(False)
+
     # Progress Bar for Render Completion (directly above Output Details title, not inside output_details_frame)
     from tkinter import ttk
     progress_var = tk.DoubleVar(master=root, value=0)
@@ -397,6 +523,21 @@ def main():
     # Add Total Images to Render label (updated only on Start Render)
     output_total_images = tk.Label(output_details_frame, text="Total Images to Render: ", font=("Arial", 10))
     # output_total_images.pack(anchor="nw", pady=(0, 5))
+
+    # Source Set Details content
+    source_details_title = tk.Label(source_details_frame, text="Source Set Details", font=("Arial", 14, "bold"))
+    source_details_title.pack(anchor="nw", pady=(0, 10))
+
+    source_subjects_count = tk.Label(source_details_frame, text="Subjects: ", font=("Arial", 10))
+    source_subjects_count.pack(anchor="nw", pady=(0, 5))
+    source_animations_count = tk.Label(source_details_frame, text="Animations: ", font=("Arial", 10))
+    source_animations_count.pack(anchor="nw", pady=(0, 5))
+    source_gear_count = tk.Label(source_details_frame, text="Gear: ", font=("Arial", 10))
+    source_gear_count.pack(anchor="nw", pady=(0, 5))
+    source_prop_animations_count = tk.Label(source_details_frame, text="Prop Animations: ", font=("Arial", 10))
+    source_prop_animations_count.pack(anchor="nw", pady=(0, 5))
+    source_gear_animations_count = tk.Label(source_details_frame, text="Gear Animations: ", font=("Arial", 10))
+    source_gear_animations_count.pack(anchor="nw", pady=(0, 5))
 
     def update_output_details():
         """Update the output details with current folder statistics"""
@@ -557,6 +698,67 @@ def main():
         root.after(200, update_output_details)
     value_entries["Output Directory"].bind("<FocusOut>", lambda e: on_output_dir_change())
     value_entries["Output Directory"].bind("<Return>", lambda e: on_output_dir_change())
+    
+    # Auto-save settings when values change
+    def auto_save_settings():
+        """Auto-save settings with a delay to avoid excessive saves"""
+        if hasattr(auto_save_settings, 'pending_save'):
+            root.after_cancel(auto_save_settings.pending_save)
+        auto_save_settings.pending_save = root.after(2000, save_settings)  # Save after 2 seconds of inactivity
+    
+    # Bind auto-save to various events
+    for widget in value_entries.values():
+        if hasattr(widget, 'bind'):
+            widget.bind('<KeyRelease>', lambda e: auto_save_settings())
+            widget.bind('<FocusOut>', lambda e: auto_save_settings())
+    
+    # Auto-save when render shadows checkbox changes
+    def on_render_shadows_change():
+        auto_save_settings()
+    render_shadows_var.trace_add('write', lambda *args: on_render_shadows_change())
+
+    def update_source_set_details(source_sets):
+        """Count and display source set file types"""
+        subjects_count = 0
+        animations_count = 0
+        gear_count = 0
+        prop_animations_count = 0
+        gear_animations_count = 0
+        
+        try:
+            for source_set in source_sets:
+                if not os.path.exists(source_set):
+                    continue
+                    
+                for root_dir, dirs, files in os.walk(source_set):
+                    for file in files:
+                        if file.lower().endswith('.duf'):
+                            if file.endswith('_subject.duf'):
+                                subjects_count += 1
+                            elif file.endswith('_animation.duf'):
+                                animations_count += 1
+                            elif file.endswith('_gear.duf'):
+                                gear_count += 1
+                            elif file.endswith('_propAnimation.duf'):
+                                prop_animations_count += 1
+                            elif file.endswith('_gearAnimation.duf'):
+                                gear_animations_count += 1
+                                
+            source_subjects_count.config(text=f"Subjects: {subjects_count}")
+            source_animations_count.config(text=f"Animations: {animations_count}")
+            source_gear_count.config(text=f"Gear: {gear_count}")
+            source_prop_animations_count.config(text=f"Prop Animations: {prop_animations_count}")
+            source_gear_animations_count.config(text=f"Gear Animations: {gear_animations_count}")
+            
+            logging.info(f'Source set analysis: {subjects_count} subjects, {animations_count} animations, {gear_count} gear, {prop_animations_count} prop animations, {gear_animations_count} gear animations')
+            
+        except Exception as e:
+            logging.error(f'Error analyzing source sets: {e}')
+            source_subjects_count.config(text="Subjects: Error")
+            source_animations_count.config(text="Animations: Error")
+            source_gear_count.config(text="Gear: Error")
+            source_prop_animations_count.config(text="Prop Animations: Error")
+            source_gear_animations_count.config(text="Gear Animations: Error")
 
     def start_render():
         # Validate Source Sets and Output Directory before launching render
@@ -909,8 +1111,28 @@ def main():
     )
     zip_button.pack(side="left", padx=10, pady=10)
 
+    # Load settings on startup
+    settings = load_settings()
+    if settings:
+        # Restore text fields
+        for key, value in settings.items():
+            if key in value_entries:
+                if hasattr(value_entries[key], 'delete') and hasattr(value_entries[key], 'insert'):
+                    value_entries[key].delete(0, tk.END)
+                    value_entries[key].insert(0, value)
+                elif hasattr(value_entries[key], 'delete') and hasattr(value_entries[key], 'get'):
+                    value_entries[key].delete("1.0", tk.END)
+                    value_entries[key].insert(tk.END, value)
+        
+        # Restore checkbox states
+        if 'render_shadows' in settings:
+            render_shadows_var.set(settings['render_shadows'])
+    
     # Run the application
     root.mainloop()
+
+    # Save settings on exit
+    save_settings()
 
 if __name__ == "__main__":
     main()
