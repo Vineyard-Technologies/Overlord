@@ -580,7 +580,7 @@ def main():
         total_images = None
         try:
             if source_sets:
-                script_path = os.path.join(os.path.dirname(__file__), "scripts", "findTotalNumber.py")
+                script_path = os.path.join(os.path.dirname(__file__), "findTotalNumber.py")
                 result = subprocess.run([
                     sys.executable,
                     script_path,
