@@ -6,14 +6,6 @@ AppVersion=__APP_VERSION__
 DefaultDirName={code:GetInstallDir}
 PrivilegesRequired=admin
 PrivilegesRequiredOverridesAllowed=dialog
-[Code]
-function GetInstallDir(Default: String): String;
-begin
-  if IsAdminInstallMode then
-    Result := ExpandConstant('{autopf}') + '\Overlord';
-  else
-    Result := ExpandConstant('{userpf}') + '\Overlord';
-end;
 DefaultGroupName=Overlord
 OutputDir=dist
 ; OutputBaseFilename will be replaced by GitHub Actions to include the version in the format OverlordInstallerX-X-X
@@ -44,3 +36,12 @@ Name: "startmenuicon"; Description: "Create a &Start Menu shortcut"; GroupDescri
 [Run]
 Filename: "{cmd}"; Parameters: '/C pip install psutil'; StatusMsg: "Installing Python dependency: psutil..."; Flags: runhidden
 Filename: "{app}\overlord.exe"; Description: "Launch Overlord"; Flags: nowait postinstall skipifsilent
+
+[Code]
+function GetInstallDir(Default: String): String;
+begin
+  if IsAdminInstallMode then
+    Result := ExpandConstant('{autopf}') + '\Overlord';
+  else
+    Result := ExpandConstant('{userpf}') + '\Overlord';
+end;
