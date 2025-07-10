@@ -3,9 +3,17 @@
 AppName=Overlord
 ; AppVersion will be replaced by GitHub Actions to match the release tag
 AppVersion=__APP_VERSION__
-DefaultDirName={autopf}\Overlord
+DefaultDirName={code:GetInstallDir}
 PrivilegesRequired=admin
 PrivilegesRequiredOverridesAllowed=dialog
+[Code]
+function GetInstallDir(Default: String): String;
+begin
+  if IsAdminInstallMode then
+    Result := ExpandConstant('{autopf}') + '\Overlord';
+  else
+    Result := ExpandConstant('{userpf}') + '\Overlord';
+end;
 DefaultGroupName=Overlord
 OutputDir=dist
 ; OutputBaseFilename will be replaced by GitHub Actions to include the version in the format OverlordInstallerX-X-X

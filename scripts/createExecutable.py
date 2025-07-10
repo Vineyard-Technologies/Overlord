@@ -8,10 +8,11 @@ def main():
         "--windowed",
         "--noconsole",
         "--icon", "images/favicon.ico",
-        "--add-data", "images/favicon.ico:images",
-        "--add-data", "images/overlordLogo.png:images",
-        "--add-data", "images/laserwolveGamesLogo.png:images",
-        "src/overlord.py"
+            "--hidden-import=psutil",
+            "--add-data", "images/favicon.ico:images",
+            "--add-data", "images/overlordLogo.png:images",
+            "--add-data", "images/laserwolveGamesLogo.png:images",
+            "src/overlord.py"
     ]
     result = subprocess.run(cmd)
     if result.returncode != 0:
