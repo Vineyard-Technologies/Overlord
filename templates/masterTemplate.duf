@@ -9,7 +9,7 @@
 			"website" : ""
 		},
 		"revision" : "1.0",
-		"modified" : "2025-07-04T14:39:30Z"
+		"modified" : "2025-07-14T12:39:15Z"
 	},
 	"geometry_library" : [
 		{
@@ -9290,7 +9290,7 @@
 					"active_renderer" : "DzIrayRenderer",
 					"aspect_ratio" : [ 1, 1 ],
 					"startTime" : 0,
-					"endTime" : 16.63312,
+					"endTime" : 16.63292,
 					"renderMovToId" : "ImageSeries",
 					"renderViewport" : false,
 					"isAspectConstrained" : true,
