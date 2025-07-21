@@ -52,7 +52,10 @@ def archive_all_inner_folders(base_path):
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = [executor.submit(archive_and_delete, inner_path, archive_path) for inner_path, archive_path in to_archive]
         for future in as_completed(futures):
-            pass  # All logging is handled in the function
+            try:
+                future.result()  # Ensure any exceptions are raised here
+            except Exception as e:
+                logging.error(f"An error occurred while processing a future: {e}")
 
 def resource_path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """
