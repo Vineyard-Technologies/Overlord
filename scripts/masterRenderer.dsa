@@ -12,6 +12,7 @@ var nDEGREES_IN_CIRCLE = 360;
 var nFrameRate = oScriptArgs['frame_rate'];
 var bRenderShadows = oScriptArgs['render_shadows'];
 var nDAZ_TICKS = 4800;
+var nBlankImageSize = 4181;
 var nTicksPerFrame = nDAZ_TICKS / nFrameRate;
 var bOverwriteExistingImages = false;
 var oRenderMgr;
@@ -124,8 +125,8 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 			var sFinalFilePath = sOutputDirectory + '/' + sSubjectName + (bIsShadow ? '_shadow' : '') + '/' + sAnimationName
 			+ '/' + sAnimationName + '_' + nOutputAngle + '/' + sAnimationName + '_' + nOutputAngle + '_' + ('000' + nFrame).slice(-3) + '.png';
 
-			// If the image we're going to make already exists and isn't 0 bytes, skip it if we have flagged as such.
-			if (oOutputDirectory.exists(sFinalFilePath) && DzFileInfo(sFinalFilePath).size != 0 && !bOverwriteExistingImages) continue;
+			// If the image we're going to make already exists and isn't the blank image size, skip it if we have flagged as such.
+			if (oOutputDirectory.exists(sFinalFilePath) && DzFileInfo(sFinalFilePath).size != nBlankImageSize && !bOverwriteExistingImages) continue;
 			oRenderOptions.renderImgFilename = sFinalFilePath; // Set the filepath.
 
 			Scene.setFrame(nFrame);
@@ -157,7 +158,7 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 				oCanvasDirectory.rmdir();
 			}
 			// Looping through all pixels of the output image would be much slower than checking the file size.
-			if (DzFileInfo(sFinalFilePath).size() == 4181) App.warning(sFinalFilePath + ' is 4181 bytes. It is likely a blank image.');
+			if (DzFileInfo(sFinalFilePath).size() == nBlankImageSize) App.warning(sFinalFilePath + ' is ' + nBlankImageSize + ' bytes. It is likely a blank image.');
 		}
 	}
 	if (bRenderShadows) if (!bIsShadow) renderCore(sSubjectName, sAnimationName, bIsGear, true);
