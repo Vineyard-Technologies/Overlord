@@ -1,6 +1,19 @@
+
+import os
+import sys
 import zipfile
 import shutil
+import subprocess
+import webbrowser
+import json
+import tkinter as tk
+from tkinter import filedialog
+from PIL import Image, ImageTk
+import psutil
+import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from version import __version__ as overlord_version
+
 def archive_and_delete(inner_path, archive_path):
     logging.info(f"Archiving {inner_path} to {archive_path}")
     try:
@@ -39,17 +52,6 @@ def archive_all_inner_folders(base_path):
         futures = [executor.submit(archive_and_delete, inner_path, archive_path) for inner_path, archive_path in to_archive]
         for future in as_completed(futures):
             pass  # All logging is handled in the function
-import tkinter as tk
-from tkinter import filedialog
-import os
-import subprocess
-import sys
-import webbrowser
-import json
-from PIL import Image, ImageTk
-import psutil
-import logging
-from version import __version__ as overlord_version
 
 def resource_path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """
