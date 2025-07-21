@@ -34,7 +34,8 @@ def archive_all_inner_folders(base_path):
                             archive_path = os.path.join(subfolder_path, f"{inner_name}.zip")
                             if not os.path.exists(archive_path):
                                 to_archive.append((inner_path, archive_path))
-    max_workers = min(8, os.cpu_count() or 1)
+    DEFAULT_MAX_WORKERS = int(os.environ.get('DEFAULT_MAX_WORKERS', 8))
+    max_workers = min(DEFAULT_MAX_WORKERS, os.cpu_count() or 1)
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = [executor.submit(archive_and_delete, inner_path, archive_path) for inner_path, archive_path in to_archive]
         for future in as_completed(futures):
