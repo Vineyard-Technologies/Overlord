@@ -358,6 +358,18 @@ def main():
     )
     close_after_render_checkbox.grid(row=len(param_params)+2, column=1, padx=10, pady=(0, 5), sticky="w")
 
+    # Add "Close Daz Studio on Finish" label and checkbox below Close Overlord
+    close_daz_on_finish_var = tk.BooleanVar(value=True)
+    close_daz_on_finish_label = tk.Label(param_table_frame, text="Close Daz Studio on Finish", font=("Arial", 10), anchor="w")
+    close_daz_on_finish_label.grid(row=len(param_params)+3, column=0, padx=10, pady=(0, 0), sticky="w")
+    close_daz_on_finish_checkbox = tk.Checkbutton(
+        param_table_frame,
+        variable=close_daz_on_finish_var,
+        width=2,
+        anchor="w"
+    )
+    close_daz_on_finish_checkbox.grid(row=len(param_params)+3, column=1, padx=10, pady=(0, 5), sticky="w")
+
     # --- Last Rendered Image Section ---
     right_frame = tk.Frame(root)
     right_frame.place(relx=0.73, rely=0.0, anchor="n", width=1024, height=1024)
@@ -745,8 +757,9 @@ def main():
         except Exception:
             num_instances_int = 1
 
-        # Add render_shadows to json_map
+        # Add render_shadows and close_daz_on_finish to json_map
         render_shadows = render_shadows_var.get()
+        close_daz_on_finish = close_daz_on_finish_var.get()
         json_map = (
             f'{{'
             f'"num_instances": "{num_instances}", '
@@ -754,7 +767,8 @@ def main():
             f'"frame_rate": "{frame_rate}", '
             f'"source_files": {source_files}, '
             f'"template_path": "{template_path}", '
-            f'"render_shadows": {str(render_shadows).lower()}'
+            f'"render_shadows": {str(render_shadows).lower()}, '
+            f'"close_daz_on_finish": {str(close_daz_on_finish).lower()}'
             f'}}'
         )
 

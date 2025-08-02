@@ -11,6 +11,7 @@ var aFilepaths = oScriptArgs['source_files'].toString().split(',');
 var nDEGREES_IN_CIRCLE = 360;
 var nFrameRate = oScriptArgs['frame_rate'];
 var bRenderShadows = oScriptArgs['render_shadows'];
+var bCloseDazOnFinish = oScriptArgs['close_daz_on_finish'];
 var nDAZ_TICKS = 4800;
 var nBlankImageSize = 4181;
 var nCorruptImageSize = 0;
@@ -182,7 +183,7 @@ var aAnimationFilepaths = filterFilepathsBySuffix(aFilepaths, '_animation.duf');
 var aPropAnimationFilepaths = filterFilepathsBySuffix(aFilepaths, '_propAnimation.duf');
 var aGearFilepaths = filterFilepathsBySuffix(aFilepaths, '_gear.duf');
 var aGearAnimationFilepaths = filterFilepathsBySuffix(aFilepaths, '_gearAnimation.duf');
-
+print('Subject filepath: ' + sSubjectFilepath);
 var sSubjectName = getName(sSubjectFilepath);
 
 // If there are animations, loop over them
@@ -251,5 +252,5 @@ if (aAnimationFilepaths.length) for (var nAnimationFilepathsCounter = 0; nAnimat
 
 		renderCore(sSubjectName, 'static', false, false);
 	}
-	
-// App.delayedExit();
+
+if (bCloseDazOnFinish) App.delayedExit();
