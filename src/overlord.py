@@ -193,7 +193,7 @@ def main():
 
     # File/folder path parameters
     file_params = [
-        "Source Sets",
+        "Source Files",
         "Output Directory"
     ]
     # Short/simple parameters
@@ -251,44 +251,45 @@ def main():
         param_label = tk.Label(file_table_frame, text=param, font=("Arial", 10), anchor="w")
         param_label.grid(row=i+1, column=0, padx=10, pady=5, sticky="w")
 
-        if param == "Source Sets":
-            text_widget = tk.Text(file_table_frame, width=80, height=5, font=("Consolas", 10))  # Changed height to 5
+        if param == "Source Files":
+            text_widget = tk.Text(file_table_frame, width=80, height=5, font=("Consolas", 10))
             text_widget.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
-            def browse_folders_append():
+            def browse_files_append():
                 # Start in user's Documents directory
                 documents_dir = os.path.join(os.path.expanduser("~"), "Documents")
-                foldername = filedialog.askdirectory(
+                filenames = filedialog.askopenfilenames(
                     initialdir=documents_dir,
-                    title="Select Source Set Folder"
+                    title="Select Source Files",
+                    filetypes=(("DSON User File", "*.duf"),)
                 )
-                # askdirectory only allows one folder at a time, so allow multiple by repeated selection
-                if foldername:
-                    foldername = foldername.replace('/', '\\')
+                if filenames:
+                    filenames = [fname.replace('/', '\\') for fname in filenames]
                     current = text_widget.get("1.0", tk.END).strip().replace('/', '\\')
-                    current_folders = set(current.split("\n")) if current else set()
-                    if foldername not in current_folders:
+                    current_files = set(current.split("\n")) if current else set()
+                    new_files = [fname for fname in filenames if fname not in current_files]
+                    if new_files:
+                        # If textbox is not empty, append new files each on a new line
                         if current:
-                            text_widget.insert(tk.END, "\n" + foldername)
+                            text_widget.insert(tk.END, "\n" + "\n".join(new_files))
                         else:
-                            text_widget.insert(tk.END, foldername)
-            # Place Browse and Clear buttons vertically, aligned to the top right of the text box
+                            text_widget.insert(tk.END, "\n".join(new_files))
             button_frame = tk.Frame(file_table_frame)
             button_frame.grid(row=i+1, column=2, padx=5, pady=5, sticky="n")
 
             browse_button = tk.Button(
                 button_frame,
                 text="Browse",
-                command=browse_folders_append,
+                command=browse_files_append,
                 width=8
             )
             browse_button.pack(side="top", fill="x", pady=(0, 2))
 
-            def clear_source_sets():
+            def clear_source_files():
                 text_widget.delete("1.0", tk.END)
             clear_button = tk.Button(
                 button_frame,
                 text="Clear",
-                command=clear_source_sets,
+                command=clear_source_files,
                 width=8
             )
             clear_button.pack(side="top", fill="x")
@@ -607,14 +608,14 @@ def main():
 
     def start_render():
         # Validate Source Sets and Output Directory before launching render
-        source_sets = value_entries["Source Sets"].get("1.0", tk.END).strip().replace("\\", "/").split("\n")
-        source_sets = [folder for folder in source_sets if folder]
+        source_files = value_entries["Source Files"].get("1.0", tk.END).strip().replace("\\", "/").split("\n")
+        source_files = [file for file in source_files if file]
         output_dir = value_entries["Output Directory"].get().strip()
-        if not source_sets:
+        if not source_files:
             from tkinter import messagebox
-            messagebox.showerror("Missing Source Sets", "Please specify at least one Source Set before starting the render.")
-            update_console("Start Render cancelled: No Source Sets specified.")
-            logging.info("Start Render cancelled: No Source Sets specified.")
+            messagebox.showerror("Missing Source Files", "Please specify at least one Source File before starting the render.")
+            update_console("Start Render cancelled: No Source Files specified.")
+            logging.info("Start Render cancelled: No Source Files specified.")
             return
         if not output_dir:
             from tkinter import messagebox
@@ -624,34 +625,31 @@ def main():
             return
 
         # Calculate and display total images to render (update label)
-        def find_total_images(source_sets):
+        def find_total_images(source_files):
             total_frames = 0
-            for set_dir in source_sets:
-                for root, dirs, files in os.walk(set_dir):
-                    for fname in files:
-                        if '_animation.duf' in fname:
-                            try:
-                                fpath = os.path.join(root, fname)
-                                with open(fpath, 'r', encoding='utf-8') as f:
-                                    content = f.read()
-                                    json_start = content.find('{')
-                                    if json_start == -1:
-                                        continue
-                                    data = json.loads(content[json_start:])
-                                    animations = data.get('scene', {}).get('animations', [])
-                                    for anim in animations:
-                                        keys = anim.get('keys', [])
-                                        if len(keys) != 1:
-                                            total_frames += len(keys)
-                                            break
-                            except Exception:
+            for file_path in source_files:
+                if '_animation.duf' in file_path:
+                    try:
+                        with open(file_path, 'r', encoding='utf-8') as f:
+                            content = f.read()
+                            json_start = content.find('{')
+                            if json_start == -1:
                                 continue
+                            data = json.loads(content[json_start:])
+                            animations = data.get('scene', {}).get('animations', [])
+                            for anim in animations:
+                                keys = anim.get('keys', [])
+                                if len(keys) != 1:
+                                    total_frames += len(keys)
+                                    break
+                    except Exception:
+                        continue
             return total_frames
 
         total_images = None
         try:
-            if source_sets:
-                total_images = find_total_images(source_sets)
+            if source_files:
+                total_images = find_total_images(source_files)
         except Exception:
             total_images = None
         if total_images is not None:
@@ -722,10 +720,10 @@ def main():
             install_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
             render_script_path = os.path.join(install_dir, "scripts", "masterRenderer.dsa").replace("\\", "/")
             template_path = os.path.join(install_dir, "templates", "masterTemplate.duf").replace("\\", "/")
-        # Use "Source Sets" and treat as folders
-        source_sets = value_entries["Source Sets"].get("1.0", tk.END).strip().replace("\\", "/").split("\n")
-        source_sets = [folder for folder in source_sets if folder]  # Remove empty lines
-        source_sets = json.dumps(source_sets)
+        # Use "Source Files" and treat as files
+        source_files = value_entries["Source Files"].get("1.0", tk.END).strip().replace("\\", "/").split("\n")
+        source_files = [file for file in source_files if file]  # Remove empty lines
+        source_files = json.dumps(source_files)
         image_output_dir = value_entries["Output Directory"].get().replace("\\", "/")
         num_instances = value_entries["Number of Instances"].get()
         log_size = value_entries["Log File Size (MBs)"].get()
@@ -744,7 +742,7 @@ def main():
             f'"num_instances": "{num_instances}", '
             f'"image_output_dir": "{image_output_dir}", '
             f'"frame_rate": "{frame_rate}", '
-            f'"source_sets": {source_sets}, '
+            f'"source_files": {source_files}, '
             f'"template_path": "{template_path}", '
             f'"render_shadows": {str(render_shadows).lower()}'
             f'}}'

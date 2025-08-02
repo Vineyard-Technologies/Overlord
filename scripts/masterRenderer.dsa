@@ -7,7 +7,7 @@ var sScriptPath = oScriptFileInfo.path();
 var nInstanceNumber = App.instanceName();
 var sOutputDirectory = oScriptArgs['image_output_dir'];
 var oOutputDirectory = new DzDir(sOutputDirectory);
-var aSetFilepaths = oScriptArgs['source_sets'].toString().split(',');
+var aFilepaths = oScriptArgs['source_files'].toString().split(',');
 var nDEGREES_IN_CIRCLE = 360;
 var nFrameRate = oScriptArgs['frame_rate'];
 var bRenderShadows = oScriptArgs['render_shadows'];
@@ -163,88 +163,90 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 	}
 	if (bRenderShadows) if (!bIsShadow) renderCore(sSubjectName, sAnimationName, bIsGear, true);
 }
-for (var nSetFilepathsCounter = 0; nSetFilepathsCounter != aSetFilepaths.length; nSetFilepathsCounter++) {
-
-	var sSetFilepath = aSetFilepaths[nSetFilepathsCounter];
-	var oSetDirectory = new DzDir(sSetFilepath);
-	var aSubjectFilepaths = oSetDirectory.getFilesFromDir(['*_subject.duf'], false);
-	var aAnimationFilepaths = oSetDirectory.getFilesFromDir(['*_animation.duf'], false);
-	var aPropAnimationFilepaths = oSetDirectory.getFilesFromDir(['*_propAnimation.duf'], false);
-	var aGearFilepaths = oSetDirectory.getFilesFromDir(['*_gear.duf'], false);
-	var aGearAnimationFilepaths = oSetDirectory.getFilesFromDir(['*_gearAnimation.duf'], false);
-
-	for (var nSubjectCounter = 0; nSubjectCounter != aSubjectFilepaths.length; nSubjectCounter++) {
-
-			var sSubjectFilepath = aSubjectFilepaths[nSubjectCounter];
-			var sSubjectName = getName(sSubjectFilepath);
-	
-		// If there are animations, loop over them
-		if (aAnimationFilepaths.length) for (var nAnimationFilepathsCounter = 0; nAnimationFilepathsCounter != aAnimationFilepaths.length; nAnimationFilepathsCounter++) {
-		
-			var sAnimationFilepath = aAnimationFilepaths[nAnimationFilepathsCounter];
-			var sAnimationName = getName(sAnimationFilepath);
-			
-			// Start with a blank scene
-			oContentMgr.openFile(sMasterTemplatePath, false);
-
-			// Merge in the subject
-			oContentMgr.openFile(sSubjectFilepath, true);
-
-			var oSubject = Scene.findNodeByLabel('subject');
-			
-			oContentMgr.openFile(sAnimationFilepath, true);
-
-			 // If this animation has corresponding animated props, merge them all in
-			if (aPropAnimationFilepaths.length) for (var nPropAnimationCounter = 0; nPropAnimationCounter != aPropAnimationFilepaths.length; nPropAnimationCounter++) {
-
-				var sPropAnimationFilepath = aPropAnimationFilepaths[nPropAnimationCounter];
-				var sPropAnimationFileName = getName(sPropAnimationFilepath); // walk-LightningOrb
-				var sAnimationName = getName(sAnimationFilepath); // walk
-
-				if (sPropAnimationFileName.indexOf(sAnimationName) !== -1) {
-
-					var sNameOfPropToAnimate = sPropAnimationFileName.split('-').pop(); //LightningOrb
-					var oProp = Scene.findNodeByLabel(sNameOfPropToAnimate);
-
-					oSubject.select(false);
-					oProp.select(true);
-
-					oContentMgr.openFile(sPropAnimationFilepath, true);
-
-					oProp.select(false);
-					oSubject.select(true);
-
-				} else continue;
-			}
-	
-			if (aGearFilepaths.length) for (var nGearCounter = 0; nGearCounter != aGearFilepaths.length; nGearCounter++) {
-			
-				var sGearFilepath = aGearFilepaths[nGearCounter];
-
-				oContentMgr.openFile(sGearFilepath, true);
-
-				var sGearName = getName(sGearFilepath);
-				var oGear = Scene.findNodeByLabel('gear');
-
-				var aGearChildren = oGear.getNodeChildren(false);
-
-				renderCore(sSubjectName + '_' + sGearName, sAnimationName, true, false);
-
-				Scene.removeNode(oGear);
-			}
-			else renderCore(sSubjectName, sAnimationName, false, false);
-
-		} else {
-
-			oContentMgr.openFile(sMasterTemplatePath, false);
-
-			oContentMgr.openFile(sSubjectFilepath, true);
-
-			var oSubject = Scene.findNodeByLabel('subject');
-
-			renderCore(sSubjectName, 'static', false, false);
+function filterFilepathsBySuffix(aFilepaths, suffix) {
+	var result = [];
+	for (var i = 0; i < aFilepaths.length; i++) {
+		if (aFilepaths[i].indexOf(suffix) === aFilepaths[i].length - suffix.length) {
+			result.push(aFilepaths[i]);
 		}
 	}
+	return result;
 }
 
-App.delayedExit();
+// There will only be one subject file
+var sSubjectFilepath = filterFilepathsBySuffix(aFilepaths, '_subject.duf')[0];
+var aAnimationFilepaths = filterFilepathsBySuffix(aFilepaths, '_animation.duf');
+var aPropAnimationFilepaths = filterFilepathsBySuffix(aFilepaths, '_propAnimation.duf');
+var aGearFilepaths = filterFilepathsBySuffix(aFilepaths, '_gear.duf');
+var aGearAnimationFilepaths = filterFilepathsBySuffix(aFilepaths, '_gearAnimation.duf');
+
+var sSubjectName = getName(sSubjectFilepath);
+
+// If there are animations, loop over them
+if (aAnimationFilepaths.length) for (var nAnimationFilepathsCounter = 0; nAnimationFilepathsCounter != aAnimationFilepaths.length; nAnimationFilepathsCounter++) {
+	
+		var sAnimationFilepath = aAnimationFilepaths[nAnimationFilepathsCounter];
+		var sAnimationName = getName(sAnimationFilepath);
+		
+		// Start with a blank scene
+		oContentMgr.openFile(sMasterTemplatePath, false);
+
+		// Merge in the subject
+		oContentMgr.openFile(sSubjectFilepath, true);
+
+		var oSubject = Scene.findNodeByLabel('subject');
+		
+		oContentMgr.openFile(sAnimationFilepath, true);
+
+			// If this animation has corresponding animated props, merge them all in
+		if (aPropAnimationFilepaths.length) for (var nPropAnimationCounter = 0; nPropAnimationCounter != aPropAnimationFilepaths.length; nPropAnimationCounter++) {
+
+			var sPropAnimationFilepath = aPropAnimationFilepaths[nPropAnimationCounter];
+			var sPropAnimationFileName = getName(sPropAnimationFilepath); // walk-LightningOrb
+			var sAnimationName = getName(sAnimationFilepath); // walk
+
+			if (sPropAnimationFileName.indexOf(sAnimationName) !== -1) {
+
+				var sNameOfPropToAnimate = sPropAnimationFileName.split('-').pop(); //LightningOrb
+				var oProp = Scene.findNodeByLabel(sNameOfPropToAnimate);
+
+				oSubject.select(false);
+				oProp.select(true);
+
+				oContentMgr.openFile(sPropAnimationFilepath, true);
+
+				oProp.select(false);
+				oSubject.select(true);
+
+			} else continue;
+		}
+
+		if (aGearFilepaths.length) for (var nGearCounter = 0; nGearCounter != aGearFilepaths.length; nGearCounter++) {
+		
+			var sGearFilepath = aGearFilepaths[nGearCounter];
+
+			oContentMgr.openFile(sGearFilepath, true);
+
+			var sGearName = getName(sGearFilepath);
+			var oGear = Scene.findNodeByLabel('gear');
+
+			var aGearChildren = oGear.getNodeChildren(false);
+
+			renderCore(sSubjectName + '_' + sGearName, sAnimationName, true, false);
+
+			Scene.removeNode(oGear);
+		}
+		else renderCore(sSubjectName, sAnimationName, false, false);
+
+	} else {
+
+		oContentMgr.openFile(sMasterTemplatePath, false);
+
+		oContentMgr.openFile(sSubjectFilepath, true);
+
+		var oSubject = Scene.findNodeByLabel('subject');
+
+		renderCore(sSubjectName, 'static', false, false);
+	}
+	
+// App.delayedExit();
