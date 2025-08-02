@@ -8,11 +8,134 @@ import webbrowser
 import json
 import tkinter as tk
 from tkinter import filedialog
+from tkinter import ttk
+import winreg
 from PIL import Image, ImageTk
 import psutil
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from version import __version__ as overlord_version
+
+def detect_windows_theme():
+    """Detect if Windows is using dark or light theme"""
+    try:
+        # Check Windows registry for theme setting
+        registry_key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, 
+                                     r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
+        value, _ = winreg.QueryValueEx(registry_key, "AppsUseLightTheme")
+        winreg.CloseKey(registry_key)
+        return "light" if value else "dark"
+    except Exception:
+        # Default to light theme if detection fails
+        return "light"
+
+class ThemeManager:
+    def __init__(self):
+        self.current_theme = detect_windows_theme()
+        self.themes = {
+            "light": {
+                "bg": "#f0f0f0",
+                "fg": "#000000",
+                "entry_bg": "#ffffff",
+                "entry_fg": "#000000",
+                "button_bg": "#e1e1e1",
+                "button_fg": "#000000",
+                "frame_bg": "#f0f0f0",
+                "text_bg": "#ffffff",
+                "text_fg": "#000000",
+                "console_bg": "#f0f0f0",
+                "console_fg": "#000000",
+                "select_bg": "#0078d4",
+                "select_fg": "#ffffff",
+                "highlight_bg": "#cccccc"
+            },
+            "dark": {
+                "bg": "#2d2d30",
+                "fg": "#ffffff",
+                "entry_bg": "#3c3c3c",
+                "entry_fg": "#ffffff",
+                "button_bg": "#404040",
+                "button_fg": "#ffffff",
+                "frame_bg": "#2d2d30",
+                "text_bg": "#1e1e1e",
+                "text_fg": "#ffffff",
+                "console_bg": "#1e1e1e",
+                "console_fg": "#ffffff",
+                "select_bg": "#0078d4",
+                "select_fg": "#ffffff",
+                "highlight_bg": "#404040"
+            }
+        }
+        self.widgets_to_theme = []
+        self.ttk_style = None
+        
+    def get_color(self, color_name):
+        return self.themes[self.current_theme][color_name]
+    
+    def setup_ttk_style(self):
+        """Setup ttk styles for themed widgets"""
+        if self.ttk_style is None:
+            self.ttk_style = ttk.Style()
+        
+        # Configure progress bar style
+        self.ttk_style.configure("Themed.Horizontal.TProgressbar",
+                                background=self.get_color("select_bg"),
+                                troughcolor=self.get_color("entry_bg"),
+                                bordercolor=self.get_color("highlight_bg"),
+                                lightcolor=self.get_color("select_bg"),
+                                darkcolor=self.get_color("select_bg"))
+    
+    def register_widget(self, widget, widget_type="default"):
+        """Register a widget to be themed"""
+        self.widgets_to_theme.append((widget, widget_type))
+        self.apply_theme_to_widget(widget, widget_type)
+    
+    def apply_theme_to_widget(self, widget, widget_type="default"):
+        """Apply current theme to a specific widget"""
+        try:
+            if widget_type == "root":
+                widget.configure(bg=self.get_color("bg"))
+            elif widget_type == "frame":
+                widget.configure(bg=self.get_color("frame_bg"))
+            elif widget_type == "label":
+                widget.configure(bg=self.get_color("bg"), fg=self.get_color("fg"))
+            elif widget_type == "entry":
+                widget.configure(bg=self.get_color("entry_bg"), fg=self.get_color("entry_fg"),
+                               insertbackground=self.get_color("entry_fg"))
+            elif widget_type == "text":
+                widget.configure(bg=self.get_color("text_bg"), fg=self.get_color("text_fg"),
+                               insertbackground=self.get_color("text_fg"),
+                               selectbackground=self.get_color("select_bg"),
+                               selectforeground=self.get_color("select_fg"))
+            elif widget_type == "button":
+                widget.configure(bg=self.get_color("button_bg"), fg=self.get_color("button_fg"),
+                               activebackground=self.get_color("highlight_bg"),
+                               activeforeground=self.get_color("fg"))
+            elif widget_type == "checkbutton":
+                widget.configure(bg=self.get_color("bg"), fg=self.get_color("fg"),
+                               activebackground=self.get_color("bg"),
+                               activeforeground=self.get_color("fg"),
+                               selectcolor=self.get_color("entry_bg"))
+            elif widget_type == "console":
+                widget.configure(bg=self.get_color("console_bg"), fg=self.get_color("console_fg"))
+            elif widget_type == "progressbar":
+                # Apply ttk style to progress bar
+                if self.ttk_style is None:
+                    self.setup_ttk_style()
+                widget.configure(style="Themed.Horizontal.TProgressbar")
+        except Exception:
+            # Some widgets might not support all options
+            pass
+    
+    def apply_theme_to_all(self):
+        """Apply current theme to all registered widgets"""
+        if self.ttk_style is None:
+            self.setup_ttk_style()
+        for widget, widget_type in self.widgets_to_theme:
+            self.apply_theme_to_widget(widget, widget_type)
+
+# Global theme manager instance
+theme_manager = ThemeManager()
 
 def archive_and_delete(inner_path, archive_path):
     logging.info(f"Archiving {inner_path} to {archive_path}")
@@ -153,10 +276,16 @@ def main():
             estimated_completion_at_var.set("Estimated completion at: --")
     setup_logger()
     logging.info('Application launched')
+    logging.info(f'Windows theme detected: {theme_manager.current_theme} mode')
     # Create the main window
     root = tk.Tk()
     root.title(f"Overlord {overlord_version}")
     root.iconbitmap(resource_path(os.path.join("images", "favicon.ico")))  # Set the application icon
+    
+    # Apply theme to root window
+    theme_manager.register_widget(root, "root")
+    # Setup ttk styles early
+    theme_manager.setup_ttk_style()
 
     # ...existing code...
 
@@ -168,6 +297,7 @@ def main():
     logo_label = tk.Label(root, image=logo, cursor="hand2")
     logo_label.image = logo  # Keep a reference to avoid garbage collection
     logo_label.place(anchor="nw", x=10, y=10)  # Place in upper left corner, 10px down and right
+    theme_manager.register_widget(logo_label, "label")
 
     # Add Laserwolve Games logo to upper right corner
     lwg_logo = tk.PhotoImage(file=resource_path(os.path.join("images", "laserwolveGamesLogo.png")))
@@ -175,6 +305,7 @@ def main():
     lwg_logo_label.image = lwg_logo  # Keep a reference to avoid garbage collection
     # Place in upper right using place geometry manager
     lwg_logo_label.place(anchor="nw", x=700)
+    theme_manager.register_widget(lwg_logo_label, "label")
     def open_lwg_link(event):
         logging.info('Laserwolve Games logo clicked')
         webbrowser.open("https://www.laserwolvegames.com/")
@@ -188,8 +319,11 @@ def main():
     # Create frames for the two tables
     file_table_frame = tk.Frame(root)
     file_table_frame.pack(pady=(150, 10), anchor="nw", side="top")  # Add top padding to move down
+    theme_manager.register_widget(file_table_frame, "frame")
+    
     param_table_frame = tk.Frame(root)
     param_table_frame.pack(pady=(20, 10), anchor="nw", side="top")  # 20px down from file_table_frame
+    theme_manager.register_widget(param_table_frame, "frame")
 
     # File/folder path parameters
     file_params = [
@@ -207,6 +341,7 @@ def main():
     # Replace file_table_frame headers with a centered "Options" header
     options_header = tk.Label(file_table_frame, text="Options", font=("Arial", 14, "bold"))
     options_header.grid(row=0, column=0, columnspan=3, padx=10, pady=5, sticky="ew")
+    theme_manager.register_widget(options_header, "label")
     file_table_frame.grid_columnconfigure(0, weight=1)
     file_table_frame.grid_columnconfigure(1, weight=1)
     file_table_frame.grid_columnconfigure(2, weight=1)
@@ -250,10 +385,12 @@ def main():
     for i, param in enumerate(file_params):
         param_label = tk.Label(file_table_frame, text=param, font=("Arial", 10), anchor="w")
         param_label.grid(row=i+1, column=0, padx=10, pady=5, sticky="w")
+        theme_manager.register_widget(param_label, "label")
 
         if param == "Source Files":
             text_widget = tk.Text(file_table_frame, width=80, height=5, font=("Consolas", 10))
             text_widget.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
+            theme_manager.register_widget(text_widget, "text")
             def browse_files_append():
                 # Start in user's Documents directory
                 documents_dir = os.path.join(os.path.expanduser("~"), "Documents")
@@ -275,6 +412,7 @@ def main():
                             text_widget.insert(tk.END, "\n".join(new_files))
             button_frame = tk.Frame(file_table_frame)
             button_frame.grid(row=i+1, column=2, padx=5, pady=5, sticky="n")
+            theme_manager.register_widget(button_frame, "frame")
 
             browse_button = tk.Button(
                 button_frame,
@@ -283,6 +421,7 @@ def main():
                 width=8
             )
             browse_button.pack(side="top", fill="x", pady=(0, 2))
+            theme_manager.register_widget(browse_button, "button")
 
             def clear_source_files():
                 text_widget.delete("1.0", tk.END)
@@ -293,6 +432,7 @@ def main():
                 width=8
             )
             clear_button.pack(side="top", fill="x")
+            theme_manager.register_widget(clear_button, "button")
             value_entries[param] = text_widget
         elif param == "Output Directory":
             value_entry = tk.Entry(file_table_frame, width=80, font=("Consolas", 10))
@@ -302,6 +442,7 @@ def main():
             )
             value_entry.insert(0, default_img_dir)
             value_entry.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
+            theme_manager.register_widget(value_entry, "entry")
 
             browse_button = tk.Button(
                 file_table_frame,
@@ -314,6 +455,7 @@ def main():
                 width=8
             )
             browse_button.grid(row=i+1, column=2, padx=5, pady=5)
+            theme_manager.register_widget(browse_button, "button")
             value_entries[param] = value_entry
 
 
@@ -323,6 +465,7 @@ def main():
     for i, param in enumerate(param_params):
         param_label = tk.Label(param_table_frame, text=param, font=("Arial", 10), anchor="w")
         param_label.grid(row=i+1, column=0, padx=10, pady=5, sticky="w")
+        theme_manager.register_widget(param_label, "label")
 
         value_entry = tk.Entry(param_table_frame, width=5, font=("Consolas", 10))
         if param == "Number of Instances":
@@ -332,12 +475,14 @@ def main():
         elif param == "Frame Rate":
             value_entry.insert(0, "30")
         value_entry.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
+        theme_manager.register_widget(value_entry, "entry")
         value_entries[param] = value_entry
 
     # Add "Render shadows" label and checkbox under Log File Size
     render_shadows_var = tk.BooleanVar(value=True)
     render_shadows_label = tk.Label(param_table_frame, text="Render shadows", font=("Arial", 10), anchor="w")
     render_shadows_label.grid(row=len(param_params)+1, column=0, padx=10, pady=(0, 0), sticky="w")
+    theme_manager.register_widget(render_shadows_label, "label")
     render_shadows_checkbox = tk.Checkbutton(
         param_table_frame,
         variable=render_shadows_var,
@@ -345,11 +490,13 @@ def main():
         anchor="w"
     )
     render_shadows_checkbox.grid(row=len(param_params)+1, column=1, padx=10, pady=(0, 5), sticky="w")
+    theme_manager.register_widget(render_shadows_checkbox, "checkbutton")
 
     # Add "Close Overlord After Starting Render" label and checkbox below Render Shadows
     close_after_render_var = tk.BooleanVar(value=False)
     close_after_render_label = tk.Label(param_table_frame, text="Close Overlord After Starting Render", font=("Arial", 10), anchor="w")
     close_after_render_label.grid(row=len(param_params)+2, column=0, padx=10, pady=(0, 0), sticky="w")
+    theme_manager.register_widget(close_after_render_label, "label")
     close_after_render_checkbox = tk.Checkbutton(
         param_table_frame,
         variable=close_after_render_var,
@@ -357,11 +504,13 @@ def main():
         anchor="w"
     )
     close_after_render_checkbox.grid(row=len(param_params)+2, column=1, padx=10, pady=(0, 5), sticky="w")
+    theme_manager.register_widget(close_after_render_checkbox, "checkbutton")
 
     # Add "Close Daz Studio on Finish" label and checkbox below Close Overlord
     close_daz_on_finish_var = tk.BooleanVar(value=True)
     close_daz_on_finish_label = tk.Label(param_table_frame, text="Close Daz Studio on Finish", font=("Arial", 10), anchor="w")
     close_daz_on_finish_label.grid(row=len(param_params)+3, column=0, padx=10, pady=(0, 0), sticky="w")
+    theme_manager.register_widget(close_daz_on_finish_label, "label")
     close_daz_on_finish_checkbox = tk.Checkbutton(
         param_table_frame,
         variable=close_daz_on_finish_var,
@@ -369,29 +518,37 @@ def main():
         anchor="w"
     )
     close_daz_on_finish_checkbox.grid(row=len(param_params)+3, column=1, padx=10, pady=(0, 5), sticky="w")
+    theme_manager.register_widget(close_daz_on_finish_checkbox, "checkbutton")
 
     # --- Last Rendered Image Section ---
     right_frame = tk.Frame(root)
     right_frame.place(relx=0.73, rely=0.0, anchor="n", width=1024, height=1024)
+    theme_manager.register_widget(right_frame, "frame")
 
-    right_frame.config(highlightbackground="black", highlightthickness=1)
+    # Set border color based on theme
+    border_color = "#cccccc" if theme_manager.current_theme == "light" else "#555555"
+    right_frame.config(highlightbackground=border_color, highlightthickness=1)
 
     # Place img_label directly in right_frame
     img_label = tk.Label(right_frame)
     img_label.place(relx=0.5, rely=0.5, anchor="center", relwidth=1.0, relheight=1.0)
+    theme_manager.register_widget(img_label, "label")
 
     # --- Image Details Column ---
     # Place details_frame to the right of param_table_frame
     details_frame = tk.Frame(root, width=350)
     details_frame.place(relx=0.25, rely=0.6, anchor="nw", width=350, height=200)
     details_frame.pack_propagate(False)
+    theme_manager.register_widget(details_frame, "frame")
 
     details_title = tk.Label(details_frame, text="Last Rendered Image Details", font=("Arial", 14, "bold"))
     details_title.pack(anchor="nw", pady=(0, 10))
+    theme_manager.register_widget(details_title, "label")
 
     # Show only the path (no "Path: " prefix)
     details_path = tk.Label(details_frame, text="", font=("Consolas", 9), wraplength=330, justify="left")
     details_path.pack(anchor="nw", pady=(0, 5))
+    theme_manager.register_widget(details_path, "label")
 
     # Add a button to copy the path to clipboard
     def copy_path_to_clipboard():
@@ -403,17 +560,22 @@ def main():
 
     copy_btn = tk.Button(details_frame, text="Copy Path", command=copy_path_to_clipboard, font=("Arial", 9))
     copy_btn.pack(anchor="nw", pady=(0, 8))
+    theme_manager.register_widget(copy_btn, "button")
 
     details_size = tk.Label(details_frame, text="Size: ", font=("Arial", 10))
     details_size.pack(anchor="nw", pady=(0, 5))
+    theme_manager.register_widget(details_size, "label")
     details_dim = tk.Label(details_frame, text="Dimensions: ", font=("Arial", 10))
     details_dim.pack(anchor="nw", pady=(0, 5))
+    theme_manager.register_widget(details_dim, "label")
 
 
     # --- Output Details Column ---
     output_details_frame = tk.Frame(root, width=350)
     output_details_frame.place(relx=0.01, rely=0.6, anchor="nw", width=350, height=200)
     output_details_frame.pack_propagate(False)
+    theme_manager.register_widget(output_details_frame, "frame")
+    theme_manager.register_widget(output_details_frame, "frame")
 
     # Progress Bar for Render Completion (directly above Output Details title, not inside output_details_frame)
     from tkinter import ttk
@@ -429,6 +591,7 @@ def main():
         anchor="w",
         justify="left"
     )
+    theme_manager.register_widget(images_remaining_label, "label")
     estimated_time_remaining_label = tk.Label(
         root,
         textvariable=estimated_time_remaining_var,
@@ -436,6 +599,7 @@ def main():
         anchor="e",
         justify="center"
     )
+    theme_manager.register_widget(estimated_time_remaining_label, "label")
     estimated_completion_at_label = tk.Label(
         root,
         textvariable=estimated_completion_at_var,
@@ -443,29 +607,40 @@ def main():
         anchor="e",
         justify="right"
     )
+    theme_manager.register_widget(estimated_completion_at_label, "label")
     images_remaining_label.place(relx=0.01, rely=0.55, anchor="nw", width=250, height=18)
+    theme_manager.register_widget(images_remaining_label, "label")
     estimated_time_remaining_label.place(relx=0.11, rely=0.55, anchor="nw", width=250, height=18)
+    theme_manager.register_widget(estimated_time_remaining_label, "label")
     estimated_completion_at_label.place(relx=0.245, rely=0.55, anchor="nw", width=400, height=18)
+    theme_manager.register_widget(estimated_completion_at_label, "label")
 
     progress_bar = ttk.Progressbar(root, variable=progress_var, maximum=100)
     # Place the progress bar just above the output_details_frame, matching its width and alignment
     progress_bar.place(relx=0.01, rely=0.57, anchor="nw", width=850, height=18)
+    theme_manager.register_widget(progress_bar, "progressbar")
 
     output_details_title = tk.Label(output_details_frame, text="Output Details", font=("Arial", 14, "bold"))
     output_details_title.pack(anchor="nw", pady=(0, 10))
+    theme_manager.register_widget(output_details_title, "label")
 
     output_folder_size = tk.Label(output_details_frame, text="Folder Size: ", font=("Arial", 10))
     output_folder_size.pack(anchor="nw", pady=(0, 5))
+    theme_manager.register_widget(output_folder_size, "label")
     output_png_count = tk.Label(output_details_frame, text="PNG Files: ", font=("Arial", 10))
     output_png_count.pack(anchor="nw", pady=(0, 5))
+    theme_manager.register_widget(output_png_count, "label")
     output_zip_count = tk.Label(output_details_frame, text="ZIP Files: ", font=("Arial", 10))
     output_zip_count.pack(anchor="nw", pady=(0, 5))
+    theme_manager.register_widget(output_zip_count, "label")
 
     output_folder_count = tk.Label(output_details_frame, text="Sub-folders: ", font=("Arial", 10))
     output_folder_count.pack(anchor="nw", pady=(0, 5))
+    theme_manager.register_widget(output_folder_count, "label")
 
     # Add Total Images to Render label (updated only on Start Render)
     output_total_images = tk.Label(output_details_frame, text="Total Images to Render: ", font=("Arial", 10))
+    theme_manager.register_widget(output_total_images, "label")
     # output_total_images.pack(anchor="nw", pady=(0, 5))
 
     def update_output_details():
@@ -547,6 +722,7 @@ def main():
     no_img_label = tk.Label(right_frame, text="No images found in output directory", font=("Arial", 12))
     no_img_label.place(relx=0.5, rely=0.5, anchor="center")
     no_img_label.lower()  # Hide initially
+    theme_manager.register_widget(no_img_label, "label")
 
     def find_newest_image(directory):
         image_exts = ('.png', '.jpg', '.jpeg', '.bmp', '.gif', '.tiff', '.webp')
@@ -578,8 +754,14 @@ def main():
                     verify_img.verify()  # Will raise if the image is incomplete or corrupt
                 # If verification passes, reopen for display
                 img = Image.open(newest_img_path).convert("RGBA")  # Ensure image is in RGBA mode
-                # Handle transparency by adding a white background
-                bg = Image.new("RGBA", img.size, (255, 255, 255, 255))
+                # Handle transparency by adding a theme-appropriate background
+                if theme_manager.current_theme == "dark":
+                    # Dark grey background for dark theme
+                    bg_color = (60, 60, 60, 255)  # Dark grey
+                else:
+                    # White background for light theme
+                    bg_color = (255, 255, 255, 255)  # White
+                bg = Image.new("RGBA", img.size, bg_color)
                 img = Image.alpha_composite(bg, img)
                 orig_img = Image.open(newest_img_path)
                 width, height = orig_img.size
@@ -833,10 +1015,12 @@ def main():
     # --- Console Area Setup (early in the code) ---
     console_frame = tk.Frame(root)
     console_frame.place(relx=0.01, rely=0.85, anchor="nw", width=850, height=120)
+    theme_manager.register_widget(console_frame, "frame")
     
     console_text = tk.Text(console_frame, width=60, height=6, font=("Consolas", 8), 
-                          state=tk.DISABLED, wrap=tk.WORD, bg="#f0f0f0")
+                          state=tk.DISABLED, wrap=tk.WORD)
     console_text.pack(fill="both", expand=True)
+    theme_manager.register_widget(console_text, "console")
     
     # Store console messages
     console_messages = []
@@ -924,9 +1108,11 @@ def main():
     # --- Buttons Section ---
     buttons_frame = tk.Frame(root)
     buttons_frame.place(relx=0.0, rely=0.78, anchor="nw")
+    theme_manager.register_widget(buttons_frame, "frame")
 
     button = tk.Button(buttons_frame, text="Start Render", command=start_render, font=("Arial", 16, "bold"), width=16, height=2)
     button.pack(side="left", padx=(20, 10), pady=10)
+    theme_manager.register_widget(button, "button")
 
     end_button = tk.Button(
         buttons_frame,
@@ -937,6 +1123,7 @@ def main():
         height=2
     )
     end_button.pack(side="left", padx=10, pady=10)
+    theme_manager.register_widget(end_button, "button")
 
     def zip_outputted_files():
         logging.info('Zip Outputted Files button clicked')
@@ -986,6 +1173,7 @@ def main():
         height=2
     )
     zip_button.pack(side="left", padx=10, pady=10)
+    theme_manager.register_widget(zip_button, "button")
 
     # Run the application
     root.mainloop()
