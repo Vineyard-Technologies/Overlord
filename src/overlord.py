@@ -13,6 +13,9 @@ import winreg
 from PIL import Image, ImageTk
 import psutil
 import logging
+import atexit
+import tempfile
+import gc
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from version import __version__ as overlord_version
 
@@ -137,6 +140,86 @@ class ThemeManager:
 # Global theme manager instance
 theme_manager = ThemeManager()
 
+# Global cleanup manager
+class CleanupManager:
+    def __init__(self):
+        self.temp_files = []
+        self.image_references = []
+        self.executor = None
+        self.cleanup_registered = False
+    
+    def register_temp_file(self, filepath):
+        """Register a temporary file for cleanup"""
+        self.temp_files.append(filepath)
+    
+    def register_image_reference(self, image_ref):
+        """Register an image reference for cleanup"""
+        self.image_references.append(image_ref)
+    
+    def register_executor(self, executor):
+        """Register a thread pool executor for cleanup"""
+        self.executor = executor
+    
+    def cleanup_all(self):
+        """Clean up all registered resources"""
+        try:
+            # Clear image references first
+            for img_ref in self.image_references:
+                try:
+                    if hasattr(img_ref, 'close'):
+                        img_ref.close()
+                    del img_ref
+                except Exception:
+                    pass
+            self.image_references.clear()
+            
+            # Force garbage collection
+            gc.collect()
+            
+            # Shutdown executor if exists
+            if self.executor:
+                try:
+                    self.executor.shutdown(wait=False)
+                except Exception:
+                    pass
+            
+            # Clean up temporary files
+            for temp_file in self.temp_files:
+                try:
+                    if os.path.exists(temp_file):
+                        os.unlink(temp_file)
+                except Exception:
+                    pass
+            self.temp_files.clear()
+            
+            # Additional cleanup for PIL temporary files
+            try:
+                # Clear PIL's internal cache
+                Image._initialized = 0
+                # Force cleanup of any remaining temporary files
+                temp_dir = tempfile.gettempdir()
+                for filename in os.listdir(temp_dir):
+                    if filename.startswith('tmp') and ('PIL' in filename or 'Tk' in filename):
+                        try:
+                            temp_path = os.path.join(temp_dir, filename)
+                            if os.path.isfile(temp_path):
+                                os.unlink(temp_path)
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+            
+        except Exception as e:
+            logging.error(f"Error during cleanup: {e}")
+
+cleanup_manager = CleanupManager()
+
+def register_cleanup():
+    """Register cleanup function to be called on exit"""
+    if not cleanup_manager.cleanup_registered:
+        atexit.register(cleanup_manager.cleanup_all)
+        cleanup_manager.cleanup_registered = True
+
 def archive_and_delete(inner_path, archive_path):
     logging.info(f"Archiving {inner_path} to {archive_path}")
     try:
@@ -173,6 +256,7 @@ def archive_all_inner_folders(base_path):
     DEFAULT_MAX_WORKERS = int(os.environ.get('DEFAULT_MAX_WORKERS', 8))
     max_workers = min(DEFAULT_MAX_WORKERS, os.cpu_count() or 1)
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        cleanup_manager.register_executor(executor)
         futures = [executor.submit(archive_and_delete, inner_path, archive_path) for inner_path, archive_path in to_archive]
         for future in as_completed(futures):
             try:
@@ -275,6 +359,7 @@ def main():
             estimated_time_remaining_var.set("Estimated time remaining: --")
             estimated_completion_at_var.set("Estimated completion at: --")
     setup_logger()
+    register_cleanup()  # Register cleanup functions
     logging.info('Application launched')
     logging.info(f'Windows theme detected: {theme_manager.current_theme} mode')
     # Create the main window
@@ -286,6 +371,16 @@ def main():
     theme_manager.register_widget(root, "root")
     # Setup ttk styles early
     theme_manager.setup_ttk_style()
+    
+    # Register proper window close handler
+    def on_closing():
+        """Handle window closing event"""
+        logging.info('Application closing...')
+        cleanup_manager.cleanup_all()
+        root.quit()
+        root.destroy()
+    
+    root.protocol("WM_DELETE_WINDOW", on_closing)
 
     # ...existing code...
 
@@ -749,31 +844,52 @@ def main():
             if not os.path.exists(newest_img_path):
                 continue
             try:
+                # Clean up previous image reference if it exists
+                if hasattr(img_label, 'image') and img_label.image:
+                    try:
+                        old_img = img_label.image
+                        if hasattr(old_img, 'close'):
+                            old_img.close()
+                        del old_img
+                    except Exception:
+                        pass
+                
                 # First, verify the image integrity
                 with Image.open(newest_img_path) as verify_img:
                     verify_img.verify()  # Will raise if the image is incomplete or corrupt
+                
                 # If verification passes, reopen for display
-                img = Image.open(newest_img_path).convert("RGBA")  # Ensure image is in RGBA mode
-                # Handle transparency by adding a theme-appropriate background
-                if theme_manager.current_theme == "dark":
-                    # Dark grey background for dark theme
-                    bg_color = (60, 60, 60, 255)  # Dark grey
-                else:
-                    # White background for light theme
-                    bg_color = (255, 255, 255, 255)  # White
-                bg = Image.new("RGBA", img.size, bg_color)
-                img = Image.alpha_composite(bg, img)
-                orig_img = Image.open(newest_img_path)
-                width, height = orig_img.size
+                with Image.open(newest_img_path) as img:
+                    img = img.convert("RGBA")  # Ensure image is in RGBA mode
+                    # Handle transparency by adding a theme-appropriate background
+                    if theme_manager.current_theme == "dark":
+                        # Dark grey background for dark theme
+                        bg_color = (60, 60, 60, 255)  # Dark grey
+                    else:
+                        # White background for light theme
+                        bg_color = (255, 255, 255, 255)  # White
+                    bg = Image.new("RGBA", img.size, bg_color)
+                    img = Image.alpha_composite(bg, img)
+                    
+                    # Create a copy to avoid keeping the file handle open
+                    img_copy = img.copy()
+                    width, height = img.size
+                
+                with Image.open(newest_img_path) as orig_img:
+                    width, height = orig_img.size
+                
                 file_size = os.path.getsize(newest_img_path)
                 # Always display path with Windows separators
                 details_path.config(text=newest_img_path.replace('/', '\\'))  # No "Path: " prefix
                 details_dim.config(text=f"Dimensions: {width} x {height}")
                 details_size.config(text=f"Size: {file_size/1024:.1f} KB")
-                tk_img = ImageTk.PhotoImage(img)
+                
+                tk_img = ImageTk.PhotoImage(img_copy)
+                cleanup_manager.register_image_reference(tk_img)  # Register for cleanup
                 img_label.config(image=tk_img)
                 img_label.image = tk_img
                 no_img_label.lower()
+                
                 # Only log if the image path has changed
                 if getattr(show_last_rendered_image, 'last_logged_img_path', None) != newest_img_path:
                     logging.info(f'Displaying image: {newest_img_path}')
@@ -783,7 +899,18 @@ def main():
                 break
             except Exception:
                 continue
+        
         if not displayed:
+            # Clean up image reference
+            if hasattr(img_label, 'image') and img_label.image:
+                try:
+                    old_img = img_label.image
+                    if hasattr(old_img, 'close'):
+                        old_img.close()
+                    del old_img
+                except Exception:
+                    pass
+            
             img_label.config(image="")
             img_label.image = None
             details_path.config(text="")
@@ -793,6 +920,10 @@ def main():
             if not getattr(show_last_rendered_image, 'last_no_img_logged', False):
                 logging.info('No images found in output directory or all images failed to load')
                 show_last_rendered_image.last_no_img_logged = True
+        
+        # Force garbage collection to clean up any remaining references
+        gc.collect()
+        
         # Schedule to check again in 1 second
         root.after(1000, show_last_rendered_image)
 
@@ -985,7 +1116,11 @@ def main():
         run_all_instances()
         # If "Close Overlord After Starting Render" is checked, close after 2 seconds
         if close_after_render_var.get():
-            root.after(2000, root.destroy)
+            def delayed_close():
+                cleanup_manager.cleanup_all()
+                root.quit()
+                root.destroy()
+            root.after(2000, delayed_close)
 
     def end_all_daz_studio():
         logging.info('End all Daz Studio Instances button clicked')
@@ -1176,7 +1311,14 @@ def main():
     theme_manager.register_widget(zip_button, "button")
 
     # Run the application
-    root.mainloop()
+    try:
+        root.mainloop()
+    except KeyboardInterrupt:
+        logging.info('Application interrupted by user')
+    finally:
+        # Ensure cleanup happens even if mainloop exits abnormally
+        cleanup_manager.cleanup_all()
+        logging.info('Application cleanup completed')
 
 if __name__ == "__main__":
     main()
