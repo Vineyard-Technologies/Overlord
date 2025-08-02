@@ -194,7 +194,6 @@ def main():
     # File/folder path parameters
     file_params = [
         "Source Sets",
-        "Gear (optional)",
         "Output Directory"
     ]
     # Short/simple parameters
@@ -253,14 +252,16 @@ def main():
         param_label.grid(row=i+1, column=0, padx=10, pady=5, sticky="w")
 
         if param == "Source Sets":
-            text_widget = tk.Text(file_table_frame, width=80, height=5, font=("Consolas", 10))
+            text_widget = tk.Text(file_table_frame, width=80, height=5, font=("Consolas", 10))  # Changed height to 5
             text_widget.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
             def browse_folders_append():
+                # Start in user's Documents directory
                 documents_dir = os.path.join(os.path.expanduser("~"), "Documents")
                 foldername = filedialog.askdirectory(
                     initialdir=documents_dir,
                     title="Select Source Set Folder"
                 )
+                # askdirectory only allows one folder at a time, so allow multiple by repeated selection
                 if foldername:
                     foldername = foldername.replace('/', '\\')
                     current = text_widget.get("1.0", tk.END).strip().replace('/', '\\')
@@ -270,6 +271,7 @@ def main():
                             text_widget.insert(tk.END, "\n" + foldername)
                         else:
                             text_widget.insert(tk.END, foldername)
+            # Place Browse and Clear buttons vertically, aligned to the top right of the text box
             button_frame = tk.Frame(file_table_frame)
             button_frame.grid(row=i+1, column=2, padx=5, pady=5, sticky="n")
 
@@ -287,49 +289,6 @@ def main():
                 button_frame,
                 text="Clear",
                 command=clear_source_sets,
-                width=8
-            )
-            clear_button.pack(side="top", fill="x")
-            value_entries[param] = text_widget
-        elif param == "Gear (optional)":
-            text_widget = tk.Text(file_table_frame, width=80, height=5, font=("Consolas", 10))
-            text_widget.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
-            def browse_files_append():
-                documents_dir = os.path.join(os.path.expanduser("~"), "Documents")
-                filenames = filedialog.askopenfilenames(
-                    initialdir=documents_dir,
-                    title="Select Gear Files",
-                    filetypes=(('DSON User File', '*.duf'),)
-                )
-                if filenames:
-                    current = text_widget.get("1.0", tk.END).strip().replace('/', '\\')
-                    current_files = set(current.split("\n")) if current else set()
-                    for fname in filenames:
-                        fname = fname.replace('/', '\\')
-                        if fname not in current_files:
-                            if current:
-                                text_widget.insert(tk.END, "\n" + fname)
-                            else:
-                                text_widget.insert(tk.END, fname)
-                            current = text_widget.get("1.0", tk.END).strip().replace('/', '\\')
-                            current_files = set(current.split("\n")) if current else set()
-            button_frame = tk.Frame(file_table_frame)
-            button_frame.grid(row=i+1, column=2, padx=5, pady=5, sticky="n")
-
-            browse_button = tk.Button(
-                button_frame,
-                text="Browse",
-                command=browse_files_append,
-                width=8
-            )
-            browse_button.pack(side="top", fill="x", pady=(0, 2))
-
-            def clear_gear_files():
-                text_widget.delete("1.0", tk.END)
-            clear_button = tk.Button(
-                button_frame,
-                text="Clear",
-                command=clear_gear_files,
                 width=8
             )
             clear_button.pack(side="top", fill="x")
@@ -650,8 +609,6 @@ def main():
         # Validate Source Sets and Output Directory before launching render
         source_sets = value_entries["Source Sets"].get("1.0", tk.END).strip().replace("\\", "/").split("\n")
         source_sets = [folder for folder in source_sets if folder]
-        gear_sets = value_entries["Gear (optional)"].get("1.0", tk.END).strip().replace("\\", "/").split("\n")
-        gear_sets = [folder for folder in gear_sets if folder]
         output_dir = value_entries["Output Directory"].get().strip()
         if not source_sets:
             from tkinter import messagebox
@@ -767,11 +724,8 @@ def main():
             template_path = os.path.join(install_dir, "templates", "masterTemplate.duf").replace("\\", "/")
         # Use "Source Sets" and treat as folders
         source_sets = value_entries["Source Sets"].get("1.0", tk.END).strip().replace("\\", "/").split("\n")
-        source_sets = [folder for folder in source_sets if folder]
-        gear_sets = value_entries["Gear (optional)"].get("1.0", tk.END).strip().replace("\\", "/").split("\n")
-        gear_sets = [folder for folder in gear_sets if folder]
-        source_sets_json = json.dumps(source_sets)
-        gear_sets_json = json.dumps(gear_sets)
+        source_sets = [folder for folder in source_sets if folder]  # Remove empty lines
+        source_sets = json.dumps(source_sets)
         image_output_dir = value_entries["Output Directory"].get().replace("\\", "/")
         num_instances = value_entries["Number of Instances"].get()
         log_size = value_entries["Log File Size (MBs)"].get()
@@ -783,15 +737,14 @@ def main():
         except Exception:
             num_instances_int = 1
 
-        # Add render_shadows and gear_sets to json_map
+        # Add render_shadows to json_map
         render_shadows = render_shadows_var.get()
         json_map = (
             f'{{'
             f'"num_instances": "{num_instances}", '
             f'"image_output_dir": "{image_output_dir}", '
             f'"frame_rate": "{frame_rate}", '
-            f'"source_sets": {source_sets_json}, '
-            f'"gear_sets": {gear_sets_json}, '
+            f'"source_sets": {source_sets}, '
             f'"template_path": "{template_path}", '
             f'"render_shadows": {str(render_shadows).lower()}'
             f'}}'
