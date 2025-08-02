@@ -13,6 +13,7 @@ var nFrameRate = oScriptArgs['frame_rate'];
 var bRenderShadows = oScriptArgs['render_shadows'];
 var nDAZ_TICKS = 4800;
 var nBlankImageSize = 4181;
+var nCorruptImageSize = 0;
 var nTicksPerFrame = nDAZ_TICKS / nFrameRate;
 var bOverwriteExistingImages = false;
 var oRenderMgr;
@@ -126,7 +127,9 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 			+ '/' + sAnimationName + '_' + nOutputAngle + '/' + sAnimationName + '_' + nOutputAngle + '_' + ('000' + nFrame).slice(-3) + '.png';
 
 			// If the image we're going to make already exists and isn't the blank image size, skip it if we have flagged as such.
-			if (oOutputDirectory.exists(sFinalFilePath) && DzFileInfo(sFinalFilePath).size() != nBlankImageSize && !bOverwriteExistingImages) continue;
+			if (oOutputDirectory.exists(sFinalFilePath) && DzFileInfo(sFinalFilePath).size() != nBlankImageSize
+				&& DzFileInfo(sFinalFilePath).size() != nCorruptImageSize && !bOverwriteExistingImages) continue;
+			
 			oRenderOptions.renderImgFilename = sFinalFilePath; // Set the filepath.
 
 			Scene.setFrame(nFrame);
