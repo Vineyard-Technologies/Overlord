@@ -336,10 +336,8 @@ def main():
 
     # Add "Render shadows" label and checkbox under Log File Size
     render_shadows_var = tk.BooleanVar(value=True)
-    # Label aligned under "Log File Size" label (column 0)
     render_shadows_label = tk.Label(param_table_frame, text="Render shadows", font=("Arial", 10), anchor="w")
     render_shadows_label.grid(row=len(param_params)+1, column=0, padx=10, pady=(0, 0), sticky="w")
-    # Checkbox aligned under input boxes (column 1)
     render_shadows_checkbox = tk.Checkbutton(
         param_table_frame,
         variable=render_shadows_var,
@@ -347,6 +345,18 @@ def main():
         anchor="w"
     )
     render_shadows_checkbox.grid(row=len(param_params)+1, column=1, padx=10, pady=(0, 5), sticky="w")
+
+    # Add "Close Overlord After Starting Render" label and checkbox below Render Shadows
+    close_after_render_var = tk.BooleanVar(value=False)
+    close_after_render_label = tk.Label(param_table_frame, text="Close Overlord After Starting Render", font=("Arial", 10), anchor="w")
+    close_after_render_label.grid(row=len(param_params)+2, column=0, padx=10, pady=(0, 0), sticky="w")
+    close_after_render_checkbox = tk.Checkbutton(
+        param_table_frame,
+        variable=close_after_render_var,
+        width=2,
+        anchor="w"
+    )
+    close_after_render_checkbox.grid(row=len(param_params)+2, column=1, padx=10, pady=(0, 5), sticky="w")
 
     # --- Last Rendered Image Section ---
     right_frame = tk.Frame(root)
@@ -777,6 +787,9 @@ def main():
                 root.after(1000, show_last_rendered_image)  # Update image after render
 
         run_all_instances()
+        # If "Close Overlord After Starting Render" is checked, close after 2 seconds
+        if close_after_render_var.get():
+            root.after(2000, root.destroy)
 
     def end_all_daz_studio():
         logging.info('End all Daz Studio Instances button clicked')
