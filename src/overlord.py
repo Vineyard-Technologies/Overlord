@@ -1493,7 +1493,7 @@ def main():
             logging.error(f"runIrayServer.vbs not found: {vbs_path}")
             return
         try:
-            subprocess.Popen(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", vbs_path])
+            os.startfile(vbs_path)
             update_console("Iray Server (VBScript) launched.")
             logging.info("Iray Server (VBScript) launched.")
         except Exception as e:
