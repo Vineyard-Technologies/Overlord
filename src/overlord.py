@@ -16,6 +16,7 @@ import logging
 import atexit
 import tempfile
 import gc
+import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from version import __version__ as overlord_version
 
@@ -140,6 +141,108 @@ class ThemeManager:
 # Global theme manager instance
 theme_manager = ThemeManager()
 
+# Settings manager for session persistence
+class SettingsManager:
+    def __init__(self):
+        # Get settings file path in user directory
+        appdata = os.environ.get('APPDATA')
+        if appdata:
+            self.settings_dir = os.path.join(appdata, 'Overlord')
+        else:
+            self.settings_dir = os.path.join(os.path.expanduser('~'), 'Overlord')
+        os.makedirs(self.settings_dir, exist_ok=True)
+        self.settings_file = os.path.join(self.settings_dir, 'settings.json')
+        
+        # Default settings
+        self.default_settings = {
+            "source_files": [],
+            "output_directory": os.path.join(os.path.expanduser("~"), "Downloads", "output"),
+            "number_of_instances": "1",
+            "frame_rate": "30",
+            "log_file_size": "100",
+            "render_shadows": True,
+            "close_overlord_after_render": False,
+            "close_daz_on_finish": True
+        }
+    
+    def load_settings(self):
+        """Load settings from file, return defaults if file doesn't exist or is corrupted"""
+        try:
+            if os.path.exists(self.settings_file):
+                with open(self.settings_file, 'r', encoding='utf-8') as f:
+                    settings = json.load(f)
+                    # Merge with defaults to handle new settings in updates
+                    merged_settings = self.default_settings.copy()
+                    merged_settings.update(settings)
+                    logging.info(f'Settings loaded from {self.settings_file}')
+                    return merged_settings
+            else:
+                logging.info('No settings file found, using defaults')
+        except Exception as e:
+            logging.warning(f'Failed to load settings: {e}, using defaults')
+        
+        return self.default_settings.copy()
+    
+    def save_settings(self, settings):
+        """Save settings to file"""
+        try:
+            with open(self.settings_file, 'w', encoding='utf-8') as f:
+                json.dump(settings, f, indent=2)
+            logging.info(f'Settings saved to {self.settings_file}')
+        except Exception as e:
+            logging.error(f'Failed to save settings: {e}')
+    
+    def get_current_settings(self, value_entries, render_shadows_var, close_after_render_var, close_daz_on_finish_var):
+        """Extract current settings from UI widgets"""
+        source_files_text = value_entries["Source Files"].get("1.0", tk.END).strip()
+        source_files = [f.strip() for f in source_files_text.split('\n') if f.strip()]
+        
+        return {
+            "source_files": source_files,
+            "output_directory": value_entries["Output Directory"].get(),
+            "number_of_instances": value_entries["Number of Instances"].get(),
+            "frame_rate": value_entries["Frame Rate"].get(),
+            "log_file_size": value_entries["Log File Size (MBs)"].get(),
+            "render_shadows": render_shadows_var.get(),
+            "close_overlord_after_render": close_after_render_var.get(),
+            "close_daz_on_finish": close_daz_on_finish_var.get()
+        }
+    
+    def apply_settings(self, settings, value_entries, render_shadows_var, close_after_render_var, close_daz_on_finish_var):
+        """Apply loaded settings to UI widgets"""
+        try:
+            # Source Files (text widget)
+            value_entries["Source Files"].delete("1.0", tk.END)
+            if settings["source_files"]:
+                value_entries["Source Files"].insert("1.0", "\n".join(settings["source_files"]))
+            
+            # Output Directory
+            value_entries["Output Directory"].delete(0, tk.END)
+            value_entries["Output Directory"].insert(0, settings["output_directory"])
+            
+            # Number of Instances
+            value_entries["Number of Instances"].delete(0, tk.END)
+            value_entries["Number of Instances"].insert(0, settings["number_of_instances"])
+            
+            # Frame Rate
+            value_entries["Frame Rate"].delete(0, tk.END)
+            value_entries["Frame Rate"].insert(0, settings["frame_rate"])
+            
+            # Log File Size
+            value_entries["Log File Size (MBs)"].delete(0, tk.END)
+            value_entries["Log File Size (MBs)"].insert(0, settings["log_file_size"])
+            
+            # Checkboxes
+            render_shadows_var.set(settings["render_shadows"])
+            close_after_render_var.set(settings["close_overlord_after_render"])
+            close_daz_on_finish_var.set(settings["close_daz_on_finish"])
+            
+            logging.info('Settings applied to UI')
+        except Exception as e:
+            logging.error(f'Failed to apply some settings: {e}')
+
+settings_manager = SettingsManager()
+
 # Global cleanup manager
 class CleanupManager:
     def __init__(self):
@@ -147,6 +250,7 @@ class CleanupManager:
         self.image_references = []
         self.executor = None
         self.cleanup_registered = False
+        self.save_settings_callback = None
     
     def register_temp_file(self, filepath):
         """Register a temporary file for cleanup"""
@@ -160,9 +264,20 @@ class CleanupManager:
         """Register a thread pool executor for cleanup"""
         self.executor = executor
     
+    def register_settings_callback(self, callback):
+        """Register a callback to save settings on exit"""
+        self.save_settings_callback = callback
+    
     def cleanup_all(self):
         """Clean up all registered resources"""
         try:
+            # Save settings before cleanup
+            if self.save_settings_callback:
+                try:
+                    self.save_settings_callback()
+                except Exception as e:
+                    logging.error(f"Error saving settings during cleanup: {e}")
+            
             # Clear image references first
             for img_ref in self.image_references:
                 try:
@@ -476,6 +591,13 @@ def main():
                 text_widget.insert(tk.END, "\n".join(filenames))
         return browse_files
 
+    # Auto-save settings when important values change
+    def auto_save_settings(*args):
+        try:
+            save_current_settings()
+        except Exception as e:
+            logging.error(f"Auto-save settings failed: {e}")
+
     # File/folder path parameters table
     for i, param in enumerate(file_params):
         param_label = tk.Label(file_table_frame, text=param, font=("Arial", 10), anchor="w")
@@ -529,6 +651,17 @@ def main():
             clear_button.pack(side="top", fill="x")
             theme_manager.register_widget(clear_button, "button")
             value_entries[param] = text_widget
+            
+            # Bind auto-save for source files (save after a delay to avoid saving on every keystroke)
+            def schedule_source_files_save(event=None):
+                # Cancel any existing scheduled save
+                if hasattr(schedule_source_files_save, 'after_id'):
+                    root.after_cancel(schedule_source_files_save.after_id)
+                # Schedule save after 2 seconds of inactivity
+                schedule_source_files_save.after_id = root.after(2000, auto_save_settings)
+            
+            text_widget.bind("<KeyRelease>", schedule_source_files_save)
+            text_widget.bind("<FocusOut>", lambda e: auto_save_settings())
         elif param == "Output Directory":
             value_entry = tk.Entry(file_table_frame, width=80, font=("Consolas", 10))
             default_img_dir = os.path.join(
@@ -614,6 +747,43 @@ def main():
     )
     close_daz_on_finish_checkbox.grid(row=len(param_params)+3, column=1, padx=10, pady=(0, 5), sticky="w")
     theme_manager.register_widget(close_daz_on_finish_checkbox, "checkbutton")
+
+    # Now that all widgets are created, load and apply saved settings
+    saved_settings = settings_manager.load_settings()
+    
+    # Register settings save callback for cleanup
+    def save_current_settings():
+        current_settings = settings_manager.get_current_settings(value_entries, render_shadows_var, close_after_render_var, close_daz_on_finish_var)
+        settings_manager.save_settings(current_settings)
+    
+    cleanup_manager.register_settings_callback(save_current_settings)
+    
+    # Auto-save settings when important values change
+    def auto_save_settings(*args):
+        try:
+            save_current_settings()
+        except Exception as e:
+            logging.error(f"Auto-save settings failed: {e}")
+    
+    # Apply the loaded settings to the UI (now that all widgets are created)
+    settings_manager.apply_settings(saved_settings, value_entries, render_shadows_var, close_after_render_var, close_daz_on_finish_var)
+    
+    # Log settings loading to console
+    if os.path.exists(settings_manager.settings_file):
+        root.after(100, lambda: update_console('Previous settings loaded and applied'))
+    else:
+        root.after(100, lambda: update_console('Using default settings (first run)'))
+    
+    # Bind auto-save to key widgets
+    value_entries["Output Directory"].bind("<FocusOut>", lambda e: auto_save_settings())
+    value_entries["Number of Instances"].bind("<FocusOut>", lambda e: auto_save_settings())
+    value_entries["Frame Rate"].bind("<FocusOut>", lambda e: auto_save_settings())
+    value_entries["Log File Size (MBs)"].bind("<FocusOut>", lambda e: auto_save_settings())
+    
+    # For checkboxes, bind to the variable change
+    render_shadows_var.trace_add('write', auto_save_settings)
+    close_after_render_var.trace_add('write', auto_save_settings)
+    close_daz_on_finish_var.trace_add('write', auto_save_settings)
 
     # --- Last Rendered Image Section ---
     right_frame = tk.Frame(root)
@@ -1091,9 +1261,10 @@ def main():
             command = [
                 daz_executable_path,
                 "-scriptArg", json_map,
-                "-instanceName", "#",  # Hardcoded value
+                "-instanceName", "#",
                 "-logSize", str(log_size),
-                "-noPrompt",           # Always add -noPrompt
+                "-headless",
+                "-noPrompt", 
                 render_script_path
             ]
             logging.info(f'Command executed: {command}')

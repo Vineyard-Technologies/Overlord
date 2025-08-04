@@ -19,6 +19,7 @@ var nTicksPerFrame = nDAZ_TICKS / nFrameRate;
 var bOverwriteExistingImages = false;
 var oRenderMgr;
 var oIrayOptions;
+var oRenderer;
 var oEnvironmentOptionsPropertyGroups;
 var oRenderOptions;
 var oActiveCanvasProperty;
@@ -26,6 +27,14 @@ var oDrawGroundProperty;
 var oEnvironmentModeProperty;
 var oRoot;
 var oShadowPlane;
+var oSettings = new DzSettings();
+
+oSettings.setIntValue( 'Connection', 0 );
+oSettings.setStringValue( 'Server', '127.0.0.1' );
+oSettings.setBoolValue( 'Secure', false );
+oSettings.setIntValue( 'Port', 9090 );
+oSettings.setStringValue( 'Username', 'admin' );
+oSettings.setStringValue( 'Password', 'John3:16' );
 
 function getName(sFileName) // Obtain the desired name out of a filepath or filename.
 {
@@ -50,6 +59,8 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 	// These variables have to be determined when we start rendering
 	oRenderMgr = App.getRenderMgr();
 	oIrayOptions = oRenderMgr.getRenderElementObjects()[1];
+	oRenderer = oRenderMgr.findRenderer( 'DzIrayRenderer' );
+	oRenderer.setBridgeConfiguration(oSettings);
 	oEnvironmentOptionsPropertyGroups = oRenderMgr.getRenderElementObjects()[3].getPropertyGroups();
 	oRenderOptions = oRenderMgr.getRenderOptions();
 	oActiveCanvasProperty = oIrayOptions.getPropertyGroups().findProperty('Active Canvas');
@@ -57,6 +68,7 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 	oEnvironmentModeProperty = oEnvironmentOptionsPropertyGroups.findProperty('Environment Mode');
 	oRoot = Scene.findNodeByLabel('root');
 	oShadowPlane = Scene.findNodeByLabel('shadowPlane');
+	var oCamera = Scene.findCameraByLabel("isometricCamera");
 
 	{ // Read the subject's JSON to see how many angles it has
 
@@ -150,8 +162,15 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 				setMatte(oSubject, false);
 				if (bIsGear) oActiveCanvasProperty.setValue(1);
 			}
-			while (backgroundProgressIsActive()) processEvents();		// Wait for everything else to finish first, specifically the mesh smoother, then render.
-			oRenderMgr.doRender();
+			// Wait for everything else to finish first, specifically the mesh smoother
+			while (backgroundProgressIsActive()) processEvents();
+
+			
+			// oRenderMgr.doRender();
+			oRenderer.exportRenderToBridgeQueue(sSubjectName + '_' + sAnimationName + '_' + nOutputAngle
+				+ '_' + sAnimationName + (bIsShadow ? '_shadow_' : '_') + nOutputAngle+ '_' + ('000' + nFrame).slice(-3),
+			
+			'png', oCamera, oRenderOptions, 0);
 
 			var oCanvasDirectory = DzDir(sFinalFilePath.replace('.png', '_canvases'));
 
