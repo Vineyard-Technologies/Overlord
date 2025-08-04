@@ -1,4 +1,3 @@
-
 import os
 import sys
 import zipfile
@@ -496,8 +495,6 @@ def main():
         root.destroy()
     
     root.protocol("WM_DELETE_WINDOW", on_closing)
-
-    # ...existing code...
 
     # Maximize the application window
     root.state("zoomed")
@@ -1481,24 +1478,31 @@ def main():
     zip_button.pack(side="left", padx=10, pady=10)
     theme_manager.register_widget(zip_button, "button")
 
-    # Button to run runIrayServer.py
+    # --- Iray Server Button (VBScript) ---
     def run_iray_server_py():
-        import subprocess
-        exe_path = r"C:\Program Files\NVIDIA Corporation\Iray Server\server\iray_server.exe"
-        install_path = r"C:\Program Files\NVIDIA Corporation\Iray Server"
-        working_dir = r"C:\ProgramData\NVIDIA Corporation\Iray Server"
-        cmd = [exe_path, "--install-path", install_path]
+        # Inline VBScript code to match runIrayServer.vbs exactly
+        vbs_code = r'''
+Set WshShell = CreateObject("WScript.Shell")
+cmd = """C:\Program Files\NVIDIA Corporation\Iray Server\server\iray_server.exe"""
+cmd = cmd & " --install-path ""C:\Program Files\NVIDIA Corporation\Iray Server"""
+WshShell.Run cmd, 0, False, "C:\ProgramData\NVIDIA Corporation\Iray Server"
+Set WshShell = Nothing
+'''
         try:
-            subprocess.Popen(cmd, cwd=working_dir)
-            update_console("Iray Server (Python) launched.")
-            logging.info("Iray Server (Python) launched.")
+            import tempfile
+            vbs_fd, vbs_path = tempfile.mkstemp(suffix=".vbs", text=True)
+            with open(vbs_path, "w", encoding="utf-8") as f:
+                f.write(vbs_code)
+            subprocess.Popen(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", vbs_path])
+            update_console("Iray Server (VBScript) launched.")
+            logging.info("Iray Server (VBScript) launched.")
         except Exception as e:
-            update_console(f"Failed to launch Iray Server (Python): {e}")
-            logging.error(f"Failed to launch Iray Server (Python): {e}")
+            update_console(f"Failed to launch Iray Server (VBScript): {e}")
+            logging.error(f"Failed to launch Iray Server (VBScript): {e}")
 
     iray_py_button = tk.Button(
         buttons_frame,
-        text="Run Iray Server (Python)",
+        text="Run Iray Server (VBScript)",
         command=run_iray_server_py,
         font=("Arial", 12, "bold"),
         width=22,
@@ -1506,6 +1510,7 @@ def main():
     )
     iray_py_button.pack(side="left", padx=(10, 5), pady=10)
     theme_manager.register_widget(iray_py_button, "button")
+
     # Run the application
     try:
         root.mainloop()
