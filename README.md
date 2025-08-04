@@ -7,10 +7,10 @@
 
 ### Prerequisites
 - **DAZ Studio 4**: Download and install from [Daz3d.com](https://www.daz3d.com/get_studio)
-- **Python 3.8+**: Required for running from source (not needed for executable). Download and install from [Python.org](https://www.python.org/downloads/).
+- **Python 3.8+**: Required for running from source or building locally. Download and install from [Python.org](https://www.python.org/downloads/).
 
-### Option 1: Install (Recommended)
-1. Browse to the [lasest release](https://github.com/Laserwolve-Games/Overlord/releases/latest)
+### Option 1: Install from Release (Recommended)
+1. Browse to the [latest release](https://github.com/Laserwolve-Games/Overlord/releases/latest)
 2. Download and run the `OverlordInstaller` executable
 
 ### Option 2: Run from Source
@@ -29,6 +29,21 @@
    ```bash
    python src/overlord.py
    ```
+
+### Option 3: Build Locally
+If you want to create your own executable and installer:
+
+1. Clone this repository and navigate to the directory
+2. Run the build script:
+   ```bash
+   python scripts/build.py
+   ```
+3. The script will prompt for a version number and automatically:
+   - Install required dependencies
+   - Build the executable
+   - Create the Windows installer (if Inno Setup is available)
+
+For detailed build instructions, see [BUILD.md](BUILD.md).
 
 ## Usage
 

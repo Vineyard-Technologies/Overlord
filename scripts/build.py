@@ -1,13 +1,41 @@
+
 import subprocess
 import sys
 import os
 import shutil
+import re
 from pathlib import Path
 
 def get_version():
     """Get version from user input or use 'dev' as default."""
-    version = input("Enter version (e.g., 1.0.0) or press Enter for 'dev': ").strip()
-    return version if version else "dev"
+    print("Latest known version: 1.5.3")
+    print("Suggested next versions: 1.5.4 (patch), 1.6.0 (minor), 2.0.0 (major)")
+    version = input("Enter version (e.g., 1.5.4) or press Enter for 'dev': ").strip()
+    
+    if not version:
+        return "dev"
+    
+    # Basic validation to warn about potentially old versions
+    if version != "dev":
+        try:
+            parts = version.split('.')
+            if len(parts) >= 3:
+                major, minor, patch = int(parts[0]), int(parts[1]), int(parts[2])
+                latest_major, latest_minor, latest_patch = 1, 5, 3
+                
+                if (major < latest_major or 
+                    (major == latest_major and minor < latest_minor) or 
+                    (major == latest_major and minor == latest_minor and patch <= latest_patch)):
+                    
+                    print(f"⚠️  Warning: Version {version} appears to be older than or equal to the latest version 1.5.3")
+                    confirm = input("Continue anyway? (y/N): ").strip().lower()
+                    if confirm != 'y':
+                        print("Build cancelled.")
+                        sys.exit(0)
+        except ValueError:
+            print(f"⚠️  Warning: Non-standard version format: {version}")
+    
+    return version
 
 def update_version_file(version):
     """Update the version.py file with the specified version."""
@@ -26,13 +54,51 @@ def update_installer_iss(version):
     content = installer_file.read_text()
     dashed_version = version.replace('.', '-')
     
-    # Replace placeholders with actual version
-    content = content.replace('AppVersion=__APP_VERSION__', f'AppVersion={version}')
-    content = content.replace('VersionInfoVersion=__APP_VERSION__', f'VersionInfoVersion={version}')
-    content = content.replace('OutputBaseFilename=OverlordInstaller__APP_VERSION_DASHED__', f'OutputBaseFilename=OverlordInstaller{dashed_version}')
+    # Format version for VersionInfoVersion (must be X.X.X.X format)
+    version_info = format_version_for_inno(version)
     
-    installer_file.write_text(content)
-    print(f"Updated installer.iss with version: {version}")
+    # Replace placeholders with actual version
+    updated_content = content.replace('AppVersion=__APP_VERSION__', f'AppVersion={version}')
+    updated_content = updated_content.replace('VersionInfoVersion=__APP_VERSION__', f'VersionInfoVersion={version_info}')
+    updated_content = updated_content.replace('OutputBaseFilename=OverlordInstaller__APP_VERSION_DASHED__', f'OutputBaseFilename=OverlordInstaller{dashed_version}')
+    
+    # Write the updated content back
+    installer_file.write_text(updated_content)
+    print(f"Updated installer.iss with version: {version} (VersionInfoVersion: {version_info})")
+    
+    # Verify the replacement worked
+    verify_content = installer_file.read_text()
+    if '__APP_VERSION__' in verify_content:
+        print("Warning: Some placeholders were not replaced in installer.iss")
+        print("Current content around VersionInfoVersion:")
+        lines = verify_content.split('\n')
+        for i, line in enumerate(lines):
+            if 'VersionInfoVersion' in line:
+                print(f"  Line {i+1}: {line}")
+
+def format_version_for_inno(version):
+    """Format version string for Inno Setup VersionInfoVersion (must be X.X.X.X)."""
+    if version == "dev":
+        return "0.0.0.0"
+    
+    # Split version and pad with zeros if needed
+    parts = version.split('.')
+    
+    # Ensure we have exactly 4 parts
+    while len(parts) < 4:
+        parts.append('0')
+    
+    # Take only first 4 parts and ensure they're numeric
+    formatted_parts = []
+    for i, part in enumerate(parts[:4]):
+        try:
+            # Convert to int to validate it's numeric, then back to string
+            formatted_parts.append(str(int(part)))
+        except ValueError:
+            # If not numeric, use 0
+            formatted_parts.append('0')
+    
+    return '.'.join(formatted_parts)
 
 def install_dependencies():
     """Install required dependencies."""
@@ -130,6 +196,30 @@ def cleanup():
                 os.remove(artifact)
             print(f"✓ Removed {artifact}")
 
+def reset_installer_iss():
+    """Reset installer.iss back to template state with placeholders."""
+    installer_file = Path("installer.iss")
+    if not installer_file.exists():
+        return
+    
+    content = installer_file.read_text()
+    
+    # Reset version placeholders back to template format
+    # This regex approach is more robust than simple string replacement
+    import re
+    
+    # Reset AppVersion
+    content = re.sub(r'AppVersion=.*', 'AppVersion=__APP_VERSION__', content)
+    
+    # Reset VersionInfoVersion  
+    content = re.sub(r'VersionInfoVersion=.*', 'VersionInfoVersion=__APP_VERSION__', content)
+    
+    # Reset OutputBaseFilename
+    content = re.sub(r'OutputBaseFilename=OverlordInstaller.*', 'OutputBaseFilename=OverlordInstaller__APP_VERSION_DASHED__', content)
+    
+    installer_file.write_text(content)
+    print("✓ Reset installer.iss to template state")
+
 def main():
     """Main build process."""
     print("=== Overlord Build Script ===")
@@ -157,6 +247,9 @@ def main():
     
     # Cleanup
     cleanup()
+    
+    # Reset installer.iss back to template state
+    reset_installer_iss()
     
     # Summary
     print("\n=== Build Summary ===")
