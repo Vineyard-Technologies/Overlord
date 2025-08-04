@@ -1,22 +1,22 @@
 import os
 import sys
-import zipfile
-import shutil
 import subprocess
-import webbrowser
+import shutil
 import json
+import logging
+import datetime
+import gc
+import re
+import webbrowser
+from concurrent.futures import ThreadPoolExecutor
+from PIL import Image, ImageTk
 import tkinter as tk
 from tkinter import filedialog
 from tkinter import ttk
 import winreg
-from PIL import Image, ImageTk
 import psutil
-import logging
 import atexit
 import tempfile
-import gc
-import json
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from version import __version__ as overlord_version
 
 def detect_windows_theme():
@@ -1480,26 +1480,19 @@ def main():
 
     # --- Iray Server Button (VBScript) ---
     def run_iray_server_py():
-        # Inline VBScript code to match runIrayServer.vbs exactly
-        vbs_code = r'''
-Set WshShell = CreateObject("WScript.Shell")
-cmd = """C:\Program Files\NVIDIA Corporation\Iray Server\server\iray_server.exe"""
-cmd = cmd & " --install-path ""C:\Program Files\NVIDIA Corporation\Iray Server"""
-WshShell.Run cmd, 0, False, "C:\ProgramData\NVIDIA Corporation\Iray Server"
-Set WshShell = Nothing
-'''
+        # Reference and execute runIrayServer.vbs from src directory
+        vbs_path = os.path.join(os.path.dirname(__file__), "runIrayServer.vbs")
+        if not os.path.exists(vbs_path):
+            update_console(f"runIrayServer.vbs not found: {vbs_path}")
+            logging.error(f"runIrayServer.vbs not found: {vbs_path}")
+            return
         try:
-            import tempfile
-            vbs_fd, vbs_path = tempfile.mkstemp(suffix=".vbs", text=True)
-            with open(vbs_path, "w", encoding="utf-8") as f:
-                f.write(vbs_code)
             subprocess.Popen(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", vbs_path])
             update_console("Iray Server (VBScript) launched.")
             logging.info("Iray Server (VBScript) launched.")
         except Exception as e:
             update_console(f"Failed to launch Iray Server (VBScript): {e}")
             logging.error(f"Failed to launch Iray Server (VBScript): {e}")
-
     iray_py_button = tk.Button(
         buttons_frame,
         text="Run Iray Server (VBScript)",

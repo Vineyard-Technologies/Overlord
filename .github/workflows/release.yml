@@ -53,6 +53,10 @@ jobs:
       - name: Build overlord.exe
         run: python scripts/createExecutable.py
 
+      - name: Copy runIrayServer.vbs to dist
+        run: |
+          copy src\runIrayServer.vbs dist\runIrayServer.vbs
+
       - name: Build Installer
         run: |
           iscc installer.iss
