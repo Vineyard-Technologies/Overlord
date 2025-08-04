@@ -8,7 +8,8 @@ import datetime
 import gc
 import re
 import webbrowser
-from concurrent.futures import ThreadPoolExecutor
+import zipfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from PIL import Image, ImageTk
 import tkinter as tk
 from tkinter import filedialog
@@ -267,9 +268,29 @@ class CleanupManager:
         """Register a callback to save settings on exit"""
         self.save_settings_callback = callback
     
+    def stop_iray_server(self):
+        """Stop all iray_server.exe and iray_server_worker.exe processes"""
+        killed_processes = []
+        try:
+            for proc in psutil.process_iter(['name']):
+                try:
+                    proc_name = proc.info['name']
+                    if proc_name and (proc_name.lower() == 'iray_server.exe' or proc_name.lower() == 'iray_server_worker.exe'):
+                        proc.kill()
+                        killed_processes.append(proc_name)
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+            if killed_processes:
+                logging.info(f'Stopped Iray Server processes: {", ".join(killed_processes)}')
+        except Exception as e:
+            logging.error(f'Failed to stop Iray Server processes: {e}')
+    
     def cleanup_all(self):
         """Clean up all registered resources"""
         try:
+            # Stop Iray Server processes
+            self.stop_iray_server()
+            
             # Save settings before cleanup
             if self.save_settings_callback:
                 try:
@@ -407,6 +428,104 @@ def setup_logger():
     )
     logging.info(f'--- Overlord started --- (log file: {log_path}, max size: 100 MB)')
 
+def is_iray_server_running():
+    """Check if Iray Server processes are already running"""
+    try:
+        for proc in psutil.process_iter(['name']):
+            try:
+                proc_name = proc.info['name']
+                if proc_name and (proc_name.lower() == 'iray_server.exe' or proc_name.lower() == 'iray_server_worker.exe'):
+                    return True
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+    except Exception:
+        pass
+    return False
+
+def start_iray_server():
+    """Start the Iray Server if it's not already running"""
+    if is_iray_server_running():
+        logging.info('Iray Server already running, skipping startup')
+        return
+    
+    try:
+        # Reference and execute runIrayServer.vbs from correct location
+        if getattr(sys, 'frozen', False):
+            # Running as PyInstaller executable - look in LocalAppData
+            localappdata = os.environ.get('LOCALAPPDATA', os.path.join(os.path.expanduser('~'), 'AppData', 'Local'))
+            vbs_dir = os.path.join(localappdata, 'Overlord', 'scripts')
+            vbs_path = os.path.join(vbs_dir, 'runIrayServer.vbs')
+            # Set working directory to LocalAppData/Overlord so Iray Server can create files there
+            working_dir = os.path.join(localappdata, 'Overlord')
+            
+            # Ensure the directories exist (backup safety check)
+            if not os.path.exists(vbs_dir):
+                try:
+                    os.makedirs(vbs_dir, exist_ok=True)
+                    logging.info(f"Created directory: {vbs_dir}")
+                except Exception as e:
+                    logging.error(f"Failed to create directory {vbs_dir}: {e}")
+                    return
+            
+            if not os.path.exists(working_dir):
+                try:
+                    os.makedirs(working_dir, exist_ok=True)
+                except Exception as e:
+                    logging.error(f"Failed to create working directory {working_dir}: {e}")
+                    return
+        else:
+            # Running from source
+            vbs_path = os.path.join(os.path.dirname(__file__), "runIrayServer.vbs")
+            # Set working directory to the source directory for development
+            working_dir = os.path.dirname(__file__)
+        
+        if not os.path.exists(vbs_path):
+            logging.error(f"runIrayServer.vbs not found: {vbs_path}")
+            return
+            
+        # Use subprocess instead of os.startfile to control working directory
+        subprocess.Popen(['cscript', '//NoLogo', vbs_path], cwd=working_dir, 
+                       creationflags=subprocess.CREATE_NO_WINDOW)
+        logging.info(f"Iray Server started automatically from working directory: {working_dir}")
+    except Exception as e:
+        logging.error(f"Failed to start Iray Server automatically: {e}")
+
+def create_splash_screen():
+    """Create and show splash screen during startup"""
+    splash = tk.Tk()
+    splash.title("Overlord")
+    splash.overrideredirect(True)  # Remove window decorations
+    
+    # Center the splash screen
+    splash_width = 400
+    splash_height = 300
+    screen_width = splash.winfo_screenwidth()
+    screen_height = splash.winfo_screenheight()
+    x = (screen_width - splash_width) // 2
+    y = (screen_height - splash_height) // 2
+    splash.geometry(f"{splash_width}x{splash_height}+{x}+{y}")
+    
+    try:
+        # Load splash screen image
+        splash_image = tk.PhotoImage(file=resource_path(os.path.join("images", "splashScreen.png")))
+        splash_label = tk.Label(splash, image=splash_image)
+        splash_label.image = splash_image  # Keep reference
+        splash_label.pack(fill="both", expand=True)
+    except Exception as e:
+        # Fallback to text if image fails to load
+        logging.warning(f"Could not load splash screen image: {e}")
+        splash_label = tk.Label(splash, text=f"Overlord {overlord_version}\nRender Pipeline Manager\n\nStarting up...", 
+                               font=("Arial", 16), bg="#2c2c2c", fg="white")
+        splash_label.pack(fill="both", expand=True)
+    
+    # Add status text
+    status_label = tk.Label(splash, text="Starting Overlord...", font=("Arial", 10), 
+                           bg="#2c2c2c", fg="white")
+    status_label.pack(side="bottom", pady=10)
+    
+    splash.update()
+    return splash, status_label
+
 def main():
     import re
 
@@ -472,8 +591,30 @@ def main():
         else:
             estimated_time_remaining_var.set("Estimated time remaining: --")
             estimated_completion_at_var.set("Estimated completion at: --")
+    
+    # Show splash screen first
+    splash, status_label = create_splash_screen()
+    status_label.config(text="Setting up logger...")
+    splash.update()
+    
     setup_logger()
     register_cleanup()  # Register cleanup functions
+    
+    status_label.config(text="Initializing Iray Server...")
+    splash.update()
+    
+    start_iray_server()  # Start Iray Server automatically
+    
+    status_label.config(text="Loading application...")
+    splash.update()
+    
+    # Give Iray server a moment to start up
+    import time
+    time.sleep(2)
+    
+    # Close splash screen
+    splash.destroy()
+    
     logging.info('Application launched')
     logging.info(f'Windows theme detected: {theme_manager.current_theme} mode')
     # Create the main window
@@ -1398,6 +1539,7 @@ def main():
 
     # Initialize console with startup messages
     update_console(f'Overlord {overlord_version} started')
+    update_console('Iray Server managed automatically')
     update_console('Ready for rendering operations')
     
     # Start monitoring log file
@@ -1477,63 +1619,6 @@ def main():
     )
     zip_button.pack(side="left", padx=10, pady=10)
     theme_manager.register_widget(zip_button, "button")
-
-    # --- Iray Server Button (VBScript) ---
-    def run_iray_server_py():
-        # Reference and execute runIrayServer.vbs from correct location
-        if getattr(sys, 'frozen', False):
-            # Running as PyInstaller executable - look in LocalAppData
-            localappdata = os.environ.get('LOCALAPPDATA', os.path.join(os.path.expanduser('~'), 'AppData', 'Local'))
-            vbs_dir = os.path.join(localappdata, 'Overlord', 'scripts')
-            vbs_path = os.path.join(vbs_dir, 'runIrayServer.vbs')
-            # Set working directory to LocalAppData/Overlord so Iray Server can create files there
-            working_dir = os.path.join(localappdata, 'Overlord')
-            
-            # Ensure the directories exist (backup safety check)
-            if not os.path.exists(vbs_dir):
-                try:
-                    os.makedirs(vbs_dir, exist_ok=True)
-                    update_console(f"Created directory: {vbs_dir}")
-                    logging.info(f"Created directory: {vbs_dir}")
-                except Exception as e:
-                    update_console(f"Failed to create directory {vbs_dir}: {e}")
-                    logging.error(f"Failed to create directory {vbs_dir}: {e}")
-            
-            if not os.path.exists(working_dir):
-                try:
-                    os.makedirs(working_dir, exist_ok=True)
-                except Exception as e:
-                    update_console(f"Failed to create working directory {working_dir}: {e}")
-                    logging.error(f"Failed to create working directory {working_dir}: {e}")
-        else:
-            # Running from source
-            vbs_path = os.path.join(os.path.dirname(__file__), "runIrayServer.vbs")
-            # Set working directory to the source directory for development
-            working_dir = os.path.dirname(__file__)
-        
-        if not os.path.exists(vbs_path):
-            update_console(f"runIrayServer.vbs not found: {vbs_path}")
-            logging.error(f"runIrayServer.vbs not found: {vbs_path}")
-            return
-        try:
-            # Use subprocess instead of os.startfile to control working directory
-            subprocess.Popen(['cscript', '//NoLogo', vbs_path], cwd=working_dir, 
-                           creationflags=subprocess.CREATE_NO_WINDOW)
-            update_console("Iray Server (VBScript) launched.")
-            logging.info(f"Iray Server (VBScript) launched from working directory: {working_dir}")
-        except Exception as e:
-            update_console(f"Failed to launch Iray Server (VBScript): {e}")
-            logging.error(f"Failed to launch Iray Server (VBScript): {e}")
-    iray_py_button = tk.Button(
-        buttons_frame,
-        text="Run Iray Server (VBScript)",
-        command=run_iray_server_py,
-        font=("Arial", 12, "bold"),
-        width=22,
-        height=1
-    )
-    iray_py_button.pack(side="left", padx=(10, 5), pady=10)
-    theme_manager.register_widget(iray_py_button, "button")
 
     # Run the application
     try:
