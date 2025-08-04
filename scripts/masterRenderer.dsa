@@ -162,10 +162,15 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 				setMatte(oSubject, false);
 				if (bIsGear) oActiveCanvasProperty.setValue(1);
 			}
-			while (backgroundProgressIsActive()) processEvents();		// Wait for everything else to finish first, specifically the mesh smoother, then render.
+			// Wait for everything else to finish first, specifically the mesh smoother
+			while (backgroundProgressIsActive()) processEvents();
+
 			
 			// oRenderMgr.doRender();
-			oRenderer.exportRenderToBridgeQueue('notsurewherethiswillshowup', 'png', oCamera, oRenderOptions, 0);
+			oRenderer.exportRenderToBridgeQueue(sSubjectName + '_' + sAnimationName + '_' + nOutputAngle
+				+ '_' + sAnimationName + (bIsShadow ? '_shadow_' : '_') + nOutputAngle+ '_' + ('000' + nFrame).slice(-3),
+			
+			'png', oCamera, oRenderOptions, 0);
 
 			var oCanvasDirectory = DzDir(sFinalFilePath.replace('.png', '_canvases'));
 
