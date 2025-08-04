@@ -1482,12 +1482,24 @@ def main():
     def run_iray_server_py():
         # Reference and execute runIrayServer.vbs from correct location
         if getattr(sys, 'frozen', False):
-            # Running as PyInstaller executable
-            app_dir = os.path.dirname(sys.executable)
-            vbs_path = os.path.join(app_dir, 'src', 'runIrayServer.vbs')
+            # Running as PyInstaller executable - look in LocalAppData
+            localappdata = os.environ.get('LOCALAPPDATA', os.path.join(os.path.expanduser('~'), 'AppData', 'Local'))
+            vbs_dir = os.path.join(localappdata, 'Overlord', 'scripts')
+            vbs_path = os.path.join(vbs_dir, 'runIrayServer.vbs')
+            
+            # Ensure the directory exists (backup safety check)
+            if not os.path.exists(vbs_dir):
+                try:
+                    os.makedirs(vbs_dir, exist_ok=True)
+                    update_console(f"Created directory: {vbs_dir}")
+                    logging.info(f"Created directory: {vbs_dir}")
+                except Exception as e:
+                    update_console(f"Failed to create directory {vbs_dir}: {e}")
+                    logging.error(f"Failed to create directory {vbs_dir}: {e}")
         else:
             # Running from source
             vbs_path = os.path.join(os.path.dirname(__file__), "runIrayServer.vbs")
+        
         if not os.path.exists(vbs_path):
             update_console(f"runIrayServer.vbs not found: {vbs_path}")
             logging.error(f"runIrayServer.vbs not found: {vbs_path}")
