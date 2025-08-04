@@ -1478,56 +1478,44 @@ def main():
     zip_button.pack(side="left", padx=10, pady=10)
     theme_manager.register_widget(zip_button, "button")
 
-    # --- Iray Server Button (Python Direct Launch) ---
+    # --- Iray Server Button (VBScript) ---
     def run_iray_server_py():
-        # Launch Iray Server directly from Python with proper working directory
-        iray_server_path = os.path.join(
-            os.environ.get("ProgramFiles", "C:\\Program Files"),
-            "NVIDIA Corporation", "Iray Server", "server", "iray_server.exe"
-        )
-        iray_install_path = os.path.join(
-            os.environ.get("ProgramFiles", "C:\\Program Files"),
-            "NVIDIA Corporation", "Iray Server"
-        )
-        
-        # Check if Iray Server exists
-        if not os.path.exists(iray_server_path):
-            update_console("Iray Server not found. Please install NVIDIA Iray Server.")
-            logging.error(f"Iray Server not found at: {iray_server_path}")
-            return
-        
-        # Set working directory to LocalAppData/Overlord so Iray Server can create files there
+        # Reference and execute runIrayServer.vbs from correct location
         if getattr(sys, 'frozen', False):
-            # Running as installed executable
+            # Running as PyInstaller executable - look in LocalAppData
             localappdata = os.environ.get('LOCALAPPDATA', os.path.join(os.path.expanduser('~'), 'AppData', 'Local'))
-            working_dir = os.path.join(localappdata, 'Overlord')
+            vbs_dir = os.path.join(localappdata, 'Overlord', 'scripts')
+            vbs_path = os.path.join(vbs_dir, 'runIrayServer.vbs')
+            
+            # Ensure the directory exists (backup safety check)
+            if not os.path.exists(vbs_dir):
+                try:
+                    os.makedirs(vbs_dir, exist_ok=True)
+                    update_console(f"Created directory: {vbs_dir}")
+                    logging.info(f"Created directory: {vbs_dir}")
+                except Exception as e:
+                    update_console(f"Failed to create directory {vbs_dir}: {e}")
+                    logging.error(f"Failed to create directory {vbs_dir}: {e}")
         else:
-            # Running from source - use source directory
-            working_dir = os.path.dirname(__file__)
+            # Running from source
+            vbs_path = os.path.join(os.path.dirname(__file__), "runIrayServer.vbs")
         
-        # Ensure working directory exists
-        try:
-            os.makedirs(working_dir, exist_ok=True)
-        except Exception as e:
-            update_console(f"Failed to create working directory: {e}")
-            logging.error(f"Failed to create working directory {working_dir}: {e}")
+        if not os.path.exists(vbs_path):
+            update_console(f"runIrayServer.vbs not found: {vbs_path}")
+            logging.error(f"runIrayServer.vbs not found: {vbs_path}")
             return
-        
         try:
-            # Launch Iray Server directly with proper working directory and hidden console
-            command = [iray_server_path, "--install-path", iray_install_path]
-            # Use DETACHED_PROCESS to run without a console window
-            subprocess.Popen(command, cwd=working_dir, 
-                           creationflags=subprocess.DETACHED_PROCESS)
-            update_console("Iray Server launched successfully.")
-            logging.info(f"Iray Server launched from working directory: {working_dir}")
+            # Use os.startfile which is less suspicious to antivirus software
+            # The VBS script now handles setting its own working directory
+            os.startfile(vbs_path)
+            update_console("Iray Server (VBScript) launched.")
+            logging.info("Iray Server (VBScript) launched.")
         except Exception as e:
-            update_console(f"Failed to launch Iray Server: {e}")
-            logging.error(f"Failed to launch Iray Server: {e}")
-    
+            update_console(f"Failed to launch Iray Server (VBScript): {e}")
+            logging.error(f"Failed to launch Iray Server (VBScript): {e}")
     iray_py_button = tk.Button(
         buttons_frame,
-        text="Run Iray Server",
+        text="Run Iray Server (VBScript)",
         command=run_iray_server_py,
         font=("Arial", 12, "bold"),
         width=22,

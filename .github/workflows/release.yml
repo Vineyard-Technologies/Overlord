@@ -53,6 +53,10 @@ jobs:
       - name: Build overlord.exe
         run: python scripts/createExecutable.py
 
+      - name: Prepare VBS script for installer
+        run: |
+          # The installer will handle copying to LocalAppData, we just need the source file available
+
       - name: Build Installer
         run: |
           iscc installer.iss
