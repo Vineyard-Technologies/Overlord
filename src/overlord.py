@@ -1486,8 +1486,10 @@ def main():
             localappdata = os.environ.get('LOCALAPPDATA', os.path.join(os.path.expanduser('~'), 'AppData', 'Local'))
             vbs_dir = os.path.join(localappdata, 'Overlord', 'scripts')
             vbs_path = os.path.join(vbs_dir, 'runIrayServer.vbs')
+            # Set working directory to LocalAppData/Overlord so Iray Server can create files there
+            working_dir = os.path.join(localappdata, 'Overlord')
             
-            # Ensure the directory exists (backup safety check)
+            # Ensure the directories exist (backup safety check)
             if not os.path.exists(vbs_dir):
                 try:
                     os.makedirs(vbs_dir, exist_ok=True)
@@ -1496,18 +1498,29 @@ def main():
                 except Exception as e:
                     update_console(f"Failed to create directory {vbs_dir}: {e}")
                     logging.error(f"Failed to create directory {vbs_dir}: {e}")
+            
+            if not os.path.exists(working_dir):
+                try:
+                    os.makedirs(working_dir, exist_ok=True)
+                except Exception as e:
+                    update_console(f"Failed to create working directory {working_dir}: {e}")
+                    logging.error(f"Failed to create working directory {working_dir}: {e}")
         else:
             # Running from source
             vbs_path = os.path.join(os.path.dirname(__file__), "runIrayServer.vbs")
+            # Set working directory to the source directory for development
+            working_dir = os.path.dirname(__file__)
         
         if not os.path.exists(vbs_path):
             update_console(f"runIrayServer.vbs not found: {vbs_path}")
             logging.error(f"runIrayServer.vbs not found: {vbs_path}")
             return
         try:
-            os.startfile(vbs_path)
+            # Use subprocess instead of os.startfile to control working directory
+            subprocess.Popen(['cscript', '//NoLogo', vbs_path], cwd=working_dir, 
+                           creationflags=subprocess.CREATE_NO_WINDOW)
             update_console("Iray Server (VBScript) launched.")
-            logging.info("Iray Server (VBScript) launched.")
+            logging.info(f"Iray Server (VBScript) launched from working directory: {working_dir}")
         except Exception as e:
             update_console(f"Failed to launch Iray Server (VBScript): {e}")
             logging.error(f"Failed to launch Iray Server (VBScript): {e}")
