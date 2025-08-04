@@ -1310,6 +1310,31 @@ def main():
     zip_button.pack(side="left", padx=10, pady=10)
     theme_manager.register_widget(zip_button, "button")
 
+    # Button to run runIrayServer.py
+    def run_iray_server_py():
+        import subprocess
+        exe_path = r"C:\Program Files\NVIDIA Corporation\Iray Server\server\iray_server.exe"
+        install_path = r"C:\Program Files\NVIDIA Corporation\Iray Server"
+        working_dir = r"C:\ProgramData\NVIDIA Corporation\Iray Server"
+        cmd = [exe_path, "--install-path", install_path]
+        try:
+            subprocess.Popen(cmd, cwd=working_dir)
+            update_console("Iray Server (Python) launched.")
+            logging.info("Iray Server (Python) launched.")
+        except Exception as e:
+            update_console(f"Failed to launch Iray Server (Python): {e}")
+            logging.error(f"Failed to launch Iray Server (Python): {e}")
+
+    iray_py_button = tk.Button(
+        buttons_frame,
+        text="Run Iray Server (Python)",
+        command=run_iray_server_py,
+        font=("Arial", 12, "bold"),
+        width=22,
+        height=1
+    )
+    iray_py_button.pack(side="left", padx=(10, 5), pady=10)
+    theme_manager.register_widget(iray_py_button, "button")
     # Run the application
     try:
         root.mainloop()
