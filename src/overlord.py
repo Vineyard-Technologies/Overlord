@@ -1480,8 +1480,14 @@ def main():
 
     # --- Iray Server Button (VBScript) ---
     def run_iray_server_py():
-        # Reference and execute runIrayServer.vbs from src directory
-        vbs_path = os.path.join(os.path.dirname(__file__), "runIrayServer.vbs")
+        # Reference and execute runIrayServer.vbs from correct location
+        if getattr(sys, 'frozen', False):
+            # Running as PyInstaller executable
+            app_dir = os.path.dirname(sys.executable)
+            vbs_path = os.path.join(app_dir, 'src', 'runIrayServer.vbs')
+        else:
+            # Running from source
+            vbs_path = os.path.join(os.path.dirname(__file__), "runIrayServer.vbs")
         if not os.path.exists(vbs_path):
             update_console(f"runIrayServer.vbs not found: {vbs_path}")
             logging.error(f"runIrayServer.vbs not found: {vbs_path}")
