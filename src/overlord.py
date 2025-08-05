@@ -128,6 +128,11 @@ class ThemeManager:
                 if self.ttk_style is None:
                     self.setup_ttk_style()
                 widget.configure(style="Themed.Horizontal.TProgressbar")
+            elif widget_type == "menu":
+                widget.configure(bg=self.get_color("bg"), fg=self.get_color("fg"),
+                               activebackground=self.get_color("select_bg"),
+                               activeforeground=self.get_color("select_fg"),
+                               selectcolor=self.get_color("entry_bg"))
         except Exception:
             # Some widgets might not support all options
             pass
@@ -195,19 +200,33 @@ class SettingsManager:
     
     def get_current_settings(self, value_entries, render_shadows_var, close_after_render_var, close_daz_on_finish_var):
         """Extract current settings from UI widgets"""
-        source_files_text = value_entries["Source Files"].get("1.0", tk.END).strip()
-        source_files = [f.strip() for f in source_files_text.split('\n') if f.strip()]
-        
-        return {
-            "source_files": source_files,
-            "output_directory": value_entries["Output Directory"].get(),
-            "number_of_instances": value_entries["Number of Instances"].get(),
-            "frame_rate": value_entries["Frame Rate"].get(),
-            "log_file_size": value_entries["Log File Size (MBs)"].get(),
-            "render_shadows": render_shadows_var.get(),
-            "close_overlord_after_render": close_after_render_var.get(),
-            "close_daz_on_finish": close_daz_on_finish_var.get()
-        }
+        try:
+            source_files_text = value_entries["Source Files"].get("1.0", tk.END).strip()
+            source_files = [f.strip() for f in source_files_text.split('\n') if f.strip()]
+            
+            return {
+                "source_files": source_files,
+                "output_directory": value_entries["Output Directory"].get(),
+                "number_of_instances": value_entries["Number of Instances"].get(),
+                "frame_rate": value_entries["Frame Rate"].get(),
+                "log_file_size": value_entries["Log File Size (MBs)"].get(),
+                "render_shadows": render_shadows_var.get(),
+                "close_overlord_after_render": close_after_render_var.get(),
+                "close_daz_on_finish": close_daz_on_finish_var.get()
+            }
+        except tk.TclError:
+            # Widgets have been destroyed, return default settings
+            logging.warning("Widgets destroyed during settings save, using defaults")
+            return {
+                "source_files": [],
+                "output_directory": "",
+                "number_of_instances": "1",
+                "frame_rate": "30",
+                "log_file_size": "100",
+                "render_shadows": True,
+                "close_overlord_after_render": False,
+                "close_daz_on_finish": True
+            }
     
     def apply_settings(self, settings, value_entries, render_shadows_var, close_after_render_var, close_daz_on_finish_var):
         """Apply loaded settings to UI widgets"""
@@ -252,6 +271,7 @@ class CleanupManager:
         self.executor = None
         self.cleanup_registered = False
         self.save_settings_callback = None
+        self.settings_saved_on_close = False
     
     def register_temp_file(self, filepath):
         """Register a temporary file for cleanup"""
@@ -268,6 +288,10 @@ class CleanupManager:
     def register_settings_callback(self, callback):
         """Register a callback to save settings on exit"""
         self.save_settings_callback = callback
+    
+    def mark_settings_saved(self):
+        """Mark that settings have been saved to prevent duplicate saves"""
+        self.settings_saved_on_close = True
     
     def stop_iray_server(self):
         """Stop all iray_server.exe and iray_server_worker.exe processes"""
@@ -292,12 +316,13 @@ class CleanupManager:
             # Stop Iray Server processes
             self.stop_iray_server()
             
-            # Save settings before cleanup
-            if self.save_settings_callback:
+            # Only save settings if callback is available, widgets are still valid, and settings haven't been saved already
+            if self.save_settings_callback and not self.settings_saved_on_close:
                 try:
                     self.save_settings_callback()
-                except Exception as e:
-                    logging.error(f"Error saving settings during cleanup: {e}")
+                except (tk.TclError, Exception) as e:
+                    # Widgets may have been destroyed already, this is normal during shutdown
+                    logging.debug(f"Could not save settings during cleanup (widgets may be destroyed): {e}")
             
             # Clear image references first
             for img_ref in self.image_references:
@@ -499,7 +524,7 @@ def create_splash_screen():
     
     # Center the splash screen
     splash_width = 400
-    splash_height = 300
+    splash_height = 400  # Changed from 300 to 400 to match image dimensions
     screen_width = splash.winfo_screenwidth()
     screen_height = splash.winfo_screenheight()
     x = (screen_width - splash_width) // 2
@@ -513,8 +538,11 @@ def create_splash_screen():
         splash_label.image = splash_image  # Keep reference
         splash_label.pack(fill="both", expand=True)
     except Exception as e:
-        logging.error(f"Could not load splash screen image: {e}")
-        raise  # Re-raise the exception since we don't want fallback
+        # Fallback to text if image fails to load
+        logging.warning(f"Could not load splash screen image: {e}")
+        splash_label = tk.Label(splash, text=f"Overlord {overlord_version}\nRender Pipeline Manager\n\nStarting up...", 
+                               font=("Arial", 16), bg="#2c2c2c", fg="white")
+        splash_label.pack(fill="both", expand=True)
     
     # Add status text
     status_label = tk.Label(splash, text="Starting Overlord...", font=("Arial", 10), 
@@ -624,10 +652,36 @@ def main():
     # Setup ttk styles early
     theme_manager.setup_ttk_style()
     
+    # Create menu bar
+    menubar = tk.Menu(root)
+    root.config(menu=menubar)
+    theme_manager.register_widget(menubar, "menu")
+    
+    # File menu
+    file_menu = tk.Menu(menubar, tearoff=0)
+    menubar.add_cascade(label="File", menu=file_menu)
+    theme_manager.register_widget(file_menu, "menu")
+    
+    # Options menu
+    options_menu = tk.Menu(menubar, tearoff=0)
+    menubar.add_cascade(label="Options", menu=options_menu)
+    theme_manager.register_widget(options_menu, "menu")
+    
+    # Help menu
+    help_menu = tk.Menu(menubar, tearoff=0)
+    menubar.add_cascade(label="Help", menu=help_menu)
+    theme_manager.register_widget(help_menu, "menu")
+    
     # Register proper window close handler
     def on_closing():
         """Handle window closing event"""
         logging.info('Application closing...')
+        # Save settings before cleanup to avoid accessing destroyed widgets
+        try:
+            save_current_settings()
+            cleanup_manager.mark_settings_saved()  # Mark that settings have been saved
+        except Exception as e:
+            logging.error(f"Error saving settings before close: {e}")
         cleanup_manager.cleanup_all()
         root.quit()
         root.destroy()
