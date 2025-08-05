@@ -34,7 +34,7 @@ oSettings.setStringValue( 'Server', '127.0.0.1' );
 oSettings.setBoolValue( 'Secure', false );
 oSettings.setIntValue( 'Port', 9090 );
 oSettings.setStringValue( 'Username', 'admin' );
-oSettings.setStringValue( 'Password', 'John3:16' );
+oSettings.setStringValue( 'Password', 'admin' );
 
 function getName(sFileName) // Obtain the desired name out of a filepath or filename.
 {

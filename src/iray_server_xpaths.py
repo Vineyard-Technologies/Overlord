@@ -12,8 +12,13 @@ class IrayServerXPaths:
 
     class loginPage:
         USERNAME_INPUT = "//input[@type='text']"
-        PASSWORD_INPUT = "//input[@type='password']"
-        LOGIN_BUTTON = "//button"
+        PASSWORD_INPUT = "(//input[@type='password'])[1]"
+        LOGIN_BUTTON = "//button[text()='Login']"
+
+        CURRENT_PASSWORD_INPUT = "//input[@name='oldpass']"
+        NEW_PASSWORD_INPUT = "//input[@name='newpass']"
+        CONFIRM_PASSWORD_INPUT = "//input[@name='newpassConfirm']"
+        SAVE_BUTTON = "//button[text()='Save']"
     
     class queuePage:
         REMOVE_BUTTONS = "//button[@title='Remove']"

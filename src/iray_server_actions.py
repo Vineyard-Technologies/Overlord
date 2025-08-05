@@ -83,12 +83,29 @@ class IrayServerActions:
             login_button = self.find_element(IrayServerXPaths.loginPage.LOGIN_BUTTON)
 
             USERNAME = "admin"
-            # This is OK to commit because it's on 127.0.0.1
-            PASSWORD = "John3:16"
+            PASSWORD = "admin"
 
             username_input.send_keys(USERNAME)
             password_input.send_keys(PASSWORD)
             login_button.click()
+
+            # After the first successful login, (or if the 'Require password change' switch is enabled)
+            # the "Please change your password" popup will appear. It can be bypassed by immediately
+            # Browsing to http://127.0.0.1:9090/index.html#queue
+
+            # Navigate to the render queue page after login
+            queue_url = f"{self.base_url}/index.html#queue"
+            self.driver.get(queue_url)
+
+            # Wait for the queue page to load
+            try:
+                WebDriverWait(self.driver, self.default_timeout).until(
+                    EC.presence_of_element_located((By.TAG_NAME, "body"))
+                )
+                logging.info("Navigated to render queue page")
+            except TimeoutException:
+                logging.warning("Render queue page took longer than expected to load")
+                return False
             
             logging.info("Signed in to Iray Server")
             return True
@@ -102,12 +119,6 @@ class IrayServerActions:
         self.clear_queue()
     
     def clear_queue(self):
-
-        # Check if we're on the correct queue page
-        current_url = self.driver.current_url
-        expected_url = f"{self.base_url}/index.html#queue"
-        if current_url != expected_url:
-            raise WebDriverException(f"Not on queue page. Current URL: {current_url}, Expected: {expected_url}")
         """
         Clear all items from the render queue
         
@@ -117,6 +128,12 @@ class IrayServerActions:
         if not self.driver:
             logging.error("Browser not started. Call start_browser() first.")
             return False
+
+        # Check if we're on the correct queue page
+        current_url = self.driver.current_url
+        expected_url = f"{self.base_url}/index.html#queue"
+        if current_url != expected_url:
+            raise WebDriverException(f"Not on queue page. Current URL: {current_url}, Expected: {expected_url}")
             
         try:
             # Find all remove buttons
