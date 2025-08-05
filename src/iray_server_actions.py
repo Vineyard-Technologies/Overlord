@@ -41,16 +41,17 @@ class IrayServerActions:
         
     def start_browser(self):
         """
-        Start Firefox WebDriver and navigate to Iray Server
+        Start Firefox WebDriver, navigate to Iray Server, and sign in
         
         Returns:
-            bool: True if browser started successfully, False otherwise
+            bool: True if browser started successfully and signed in, False otherwise
         """
         try:
             # Configure Firefox options
             firefox_options = FirefoxOptions()
             firefox_options.add_argument("--disable-web-security")
             firefox_options.add_argument("--start-maximized")
+            firefox_options.add_argument("--headless")
             
             # Start Firefox WebDriver
             self.driver = webdriver.Firefox(options=firefox_options)
@@ -72,37 +73,41 @@ class IrayServerActions:
                     EC.presence_of_element_located((By.TAG_NAME, "body"))
                 )
                 logging.info("Iray Server web interface loaded successfully")
-                return True
             except TimeoutException:
                 logging.warning("Iray Server web interface took longer than expected to load")
                 return False
+            
+            # Sign in automatically
+            username_input = self.find_element(IrayServerXPaths.loginPage.USERNAME_INPUT)
+            password_input = self.find_element(IrayServerXPaths.loginPage.PASSWORD_INPUT)
+            login_button = self.find_element(IrayServerXPaths.loginPage.LOGIN_BUTTON)
+
+            USERNAME = "admin"
+            # This is OK to commit because it's on 127.0.0.1
+            PASSWORD = "John3:16"
+
+            username_input.send_keys(USERNAME)
+            password_input.send_keys(PASSWORD)
+            login_button.click()
+            
+            logging.info("Signed in to Iray Server")
+            return True
                 
         except Exception as e:
-            logging.error(f"Failed to start browser and open Iray Server web interface: {e}")
+            logging.error(f"Failed to start browser and sign in to Iray Server: {e}")
             return False
-    
-    def sign_in(self, username="admin", password="admin"):
-        """
-        Sign into the Iray Server web interface
         
-        Args:
-            username (str): Username for login (default: "admin")
-            password (str): Password for login (default: "admin")
-            
-        """
-        username_input = self.find_element(IrayServerXPaths.loginPage.USERNAME_INPUT)
-        password_input = self.find_element(IrayServerXPaths.loginPage.PASSWORD_INPUT)
-        login_button = self.find_element(IrayServerXPaths.loginPage.LOGIN_BUTTON)
-
-        USERNAME = "admin";
-        # This is OK to commit because it's on 127.0.0.1
-        PASSWORD = "John3:16";
-
-        username_input.send_keys(USERNAME)
-        password_input.send_keys(PASSWORD)
-        login_button.click()
+    def setup(self): # , storage_path: str
+        
+        self.clear_queue()
     
     def clear_queue(self):
+
+        # Check if we're on the correct queue page
+        current_url = self.driver.current_url
+        expected_url = f"{self.base_url}/index.html#queue"
+        if current_url != expected_url:
+            raise WebDriverException(f"Not on queue page. Current URL: {current_url}, Expected: {expected_url}")
         """
         Clear all items from the render queue
         
@@ -127,7 +132,7 @@ class IrayServerActions:
                 try:
                     button.click()
                     removed_count += 1
-                    time.sleep(0.5)  # Brief pause between clicks
+                    # time.sleep(0.5)
                 except Exception as e:
                     logging.warning(f"Failed to click remove button: {e}")
                     continue
@@ -149,59 +154,3 @@ class IrayServerActions:
                 logging.error(f"Error closing browser: {e}")
             finally:
                 self.driver = None
-    
-    def is_browser_open(self):
-        """
-        Check if browser is currently open and responsive
-        
-        Returns:
-            bool: True if browser is open and responsive, False otherwise
-        """
-        if not self.driver:
-            return False
-            
-        try:
-            # Try to get current URL to test if browser is responsive
-            _ = self.driver.current_url
-            return True
-        except Exception:
-            return False
-
-
-def demo_iray_server_login(cleanup_manager=None, username="admin", password="admin"):
-    """
-    Demonstration function showing how to use the IrayServerActions class
-    to open browser, sign in, and perform basic operations.
-    
-    Args:
-        cleanup_manager: Optional cleanup manager for browser driver registration
-        username (str): Username for login
-        password (str): Password for login
-        
-    Returns:
-        IrayServerActions: The actions instance for further operations, or None if failed
-    """
-    try:
-        # Create actions instance
-        actions = IrayServerActions(cleanup_manager)
-        
-        # Start browser
-        if not actions.start_browser():
-            logging.error("Failed to start browser")
-            return None
-        
-        # Sign in
-        if not actions.sign_in(username, password):
-            logging.error("Failed to sign in")
-            actions.close_browser()
-            return None
-        
-        # Navigate to queue (optional)
-        if actions.navigate_to_queue():
-            logging.info("Successfully navigated to queue page")
-        
-        return actions
-        
-    except Exception as e:
-        logging.error(f"Demo login failed: {e}")
-        return None

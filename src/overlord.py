@@ -676,7 +676,8 @@ def main():
     # Open Iray Server web interface with Selenium and sign in
     iray_actions = IrayServerActions(cleanup_manager)
     iray_actions.start_browser()
-    iray_actions.sign_in()
+    iray_actions.setup()
+    iray_actions.close_browser()
     
     status_label.config(text="Loading application...")
     splash.update()
