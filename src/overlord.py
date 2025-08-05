@@ -660,6 +660,63 @@ def main():
     options_menu = tk.Menu(menubar, tearoff=0, font=("Arial", 11))
     menubar.add_cascade(label="Options", menu=options_menu)
     theme_manager.register_widget(options_menu, "menu")
+        try:
+            win = tk.Toplevel(root)
+            win.title("Overlord Settings")
+            win.geometry("400x400")
+            win.resizable(False, False)
+            win.iconbitmap(resource_path(os.path.join("images", "favicon.ico")))
+            theme_manager.register_widget(win, "root")
+            frame = tk.Frame(win, padx=20, pady=20)
+            frame.pack(fill="both", expand=True)
+            theme_manager.register_widget(frame, "frame")
+            label = tk.Label(frame, text="Overlord Settings", font=("Arial", 16, "bold"))
+            label.pack(pady=10)
+            theme_manager.register_widget(label, "label")
+        except Exception as e:
+            from tkinter import messagebox
+            messagebox.showerror("Error", f"Failed to open Overlord Settings:\n{e}")
+
+    def show_daz_studio_settings():
+        try:
+            win = tk.Toplevel(root)
+            win.title("Daz Studio Settings")
+            win.geometry("400x400")
+            win.resizable(False, False)
+            win.iconbitmap(resource_path(os.path.join("images", "favicon.ico")))
+            theme_manager.register_widget(win, "root")
+            frame = tk.Frame(win, padx=20, pady=20)
+            frame.pack(fill="both", expand=True)
+            theme_manager.register_widget(frame, "frame")
+            label = tk.Label(frame, text="Daz Studio Settings", font=("Arial", 16, "bold"))
+            label.pack(pady=10)
+            theme_manager.register_widget(label, "label")
+        except Exception as e:
+            from tkinter import messagebox
+            messagebox.showerror("Error", f"Failed to open Daz Studio Settings:\n{e}")
+
+    def show_iray_server_settings():
+        try:
+            win = tk.Toplevel(root)
+            win.title("Iray Server Settings")
+            win.geometry("400x400")
+            win.resizable(False, False)
+            win.iconbitmap(resource_path(os.path.join("images", "favicon.ico")))
+            theme_manager.register_widget(win, "root")
+            frame = tk.Frame(win, padx=20, pady=20)
+            frame.pack(fill="both", expand=True)
+            theme_manager.register_widget(frame, "frame")
+            label = tk.Label(frame, text="Iray Server Settings", font=("Arial", 16, "bold"))
+            label.pack(pady=10)
+            theme_manager.register_widget(label, "label")
+        except Exception as e:
+            from tkinter import messagebox
+            messagebox.showerror("Error", f"Failed to open Iray Server Settings:\n{e}")
+
+    # Add menu items to Options menu
+    options_menu.add_command(label="  Overlord Settings  ", command=show_overlord_settings)
+    options_menu.add_command(label="  Daz Studio Settings  ", command=show_daz_studio_settings)
+    options_menu.add_command(label="  Iray Server Settings  ", command=show_iray_server_settings)
     
     # Help menu
     help_menu = tk.Menu(menubar, tearoff=0, font=("Arial", 11))
@@ -970,6 +1027,159 @@ def main():
     file_menu.add_command(label="  Choose Output Directory...  ", command=menu_choose_output_directory)
     file_menu.add_separator()
     file_menu.add_command(label="  Exit  ", command=on_closing)
+
+    # Add Help menu functions
+    def open_overlord_log():
+        """Open the Overlord log file"""
+        try:
+            appdata = os.environ.get('APPDATA')
+            if appdata:
+                log_dir = os.path.join(appdata, 'Overlord')
+            else:
+                log_dir = os.path.join(os.path.expanduser('~'), 'Overlord')
+            log_path = os.path.join(log_dir, 'log.txt')
+            
+            if os.path.exists(log_path):
+                os.startfile(log_path)
+                logging.info(f'Opened Overlord log file: {log_path}')
+            else:
+                from tkinter import messagebox
+                messagebox.showwarning("Log File Not Found", f"Overlord log file not found at:\n{log_path}")
+                logging.warning(f'Overlord log file not found: {log_path}')
+        except Exception as e:
+            from tkinter import messagebox
+            messagebox.showerror("Error", f"Failed to open Overlord log file:\n{e}")
+            logging.error(f'Failed to open Overlord log file: {e}')
+    
+    def open_daz_studio_log():
+        """Open the Daz Studio log file for the first instance"""
+        try:
+            user_profile = os.environ.get('USERPROFILE') or os.path.expanduser('~')
+            log_path = os.path.join(user_profile, "AppData", "Roaming", "DAZ 3D", "Studio4 [1]", "log.txt")
+            
+            if os.path.exists(log_path):
+                os.startfile(log_path)
+                logging.info(f'Opened Daz Studio log file: {log_path}')
+            else:
+                from tkinter import messagebox
+                messagebox.showwarning("Log File Not Found", f"Daz Studio log file not found at:\n{log_path}")
+                logging.warning(f'Daz Studio log file not found: {log_path}')
+        except Exception as e:
+            from tkinter import messagebox
+            messagebox.showerror("Error", f"Failed to open Daz Studio log file:\n{e}")
+            logging.error(f'Failed to open Daz Studio log file: {e}')
+    
+    def open_iray_server_log():
+        """Open the Iray Server log file"""
+        try:
+            if getattr(sys, 'frozen', False):
+                # Running as installed executable - log in LocalAppData
+                localappdata = os.environ.get('LOCALAPPDATA', os.path.join(os.path.expanduser('~'), 'AppData', 'Local'))
+                log_path = os.path.join(localappdata, 'Overlord', 'iray_server.log')
+            else:
+                # Running from source - log in src directory
+                log_path = os.path.join(os.path.dirname(__file__), 'iray_server.log')
+            
+            if os.path.exists(log_path):
+                os.startfile(log_path)
+                logging.info(f'Opened Iray Server log file: {log_path}')
+            else:
+                from tkinter import messagebox
+                messagebox.showwarning("Log File Not Found", f"Iray Server log file not found at:\n{log_path}")
+                logging.warning(f'Iray Server log file not found: {log_path}')
+        except Exception as e:
+            from tkinter import messagebox
+            messagebox.showerror("Error", f"Failed to open Iray Server log file:\n{e}")
+            logging.error(f'Failed to open Iray Server log file: {e}')
+    
+    def show_about():
+        """Show About dialog with program information"""
+        try:
+            about_window = tk.Toplevel(root)
+            about_window.title("About Overlord")
+            about_window.geometry("400x500")
+            about_window.resizable(False, False)
+            # Set the window icon to match the main window
+            about_window.iconbitmap(resource_path(os.path.join("images", "favicon.ico")))
+            # Center the window on the screen
+            about_window.transient(root)
+            about_window.grab_set()
+            # Apply theme to about window
+            theme_manager.register_widget(about_window, "root")
+            
+            # Create main frame
+            main_frame = tk.Frame(about_window, padx=20, pady=20)
+            main_frame.pack(fill="both", expand=True)
+            theme_manager.register_widget(main_frame, "frame")
+            
+            # Overlord Logo
+            try:
+                overlord_logo = tk.PhotoImage(file=resource_path(os.path.join("images", "overlordLogo.png")))
+                overlord_logo_label = tk.Label(main_frame, image=overlord_logo, cursor="hand2")
+                overlord_logo_label.image = overlord_logo  # Keep reference
+                overlord_logo_label.pack(pady=(0, 10))
+                theme_manager.register_widget(overlord_logo_label, "label")
+                
+                def open_overlord_github(event):
+                    webbrowser.open("https://github.com/Laserwolve-Games/Overlord")
+                overlord_logo_label.bind("<Button-1>", open_overlord_github)
+            except Exception as e:
+                logging.warning(f"Could not load Overlord logo in About dialog: {e}")
+            
+            # Title
+            title_label = tk.Label(main_frame, text=f"Version {overlord_version}", 
+                                 font=("Arial", 18, "bold"))
+            title_label.pack(pady=(0, 10))
+            theme_manager.register_widget(title_label, "label")
+            
+            # Subtitle
+            subtitle_label = tk.Label(main_frame, text="Developed by:",
+                                    font=("Arial", 12))
+            subtitle_label.pack(pady=(0, 15))
+            theme_manager.register_widget(subtitle_label, "label")
+            
+            # Laserwolve Games Logo
+            try:
+                lwg_logo = tk.PhotoImage(file=resource_path(os.path.join("images", "laserwolveGamesLogo.png")))
+                lwg_logo_label = tk.Label(main_frame, image=lwg_logo, cursor="hand2")
+                lwg_logo_label.image = lwg_logo  # Keep reference
+                lwg_logo_label.pack(pady=(10, 15))
+                theme_manager.register_widget(lwg_logo_label, "label")
+                
+                def open_lwg_website(event):
+                    webbrowser.open("https://www.laserwolvegames.com/")
+                lwg_logo_label.bind("<Button-1>", open_lwg_website)
+            except Exception as e:
+                logging.warning(f"Could not load Laserwolve Games logo in About dialog: {e}")
+            
+            # Copyright and links frame
+            info_frame = tk.Frame(main_frame)
+            info_frame.pack(pady=(10, 0))
+            theme_manager.register_widget(info_frame, "frame")
+            
+            # Copyright
+            copyright_label = tk.Label(info_frame, text="© 2025 Laserwolve Games", 
+                                     font=("Arial", 10))
+            copyright_label.pack()
+            theme_manager.register_widget(copyright_label, "label")
+            
+            # Bind Enter and Escape keys to close the dialog
+            about_window.bind('<Return>', lambda e: about_window.destroy())
+            about_window.bind('<Escape>', lambda e: about_window.destroy())
+            
+            logging.info('About dialog opened')
+            
+        except Exception as e:
+            from tkinter import messagebox
+            messagebox.showerror("Error", f"Failed to open About dialog:\n{e}")
+            logging.error(f'Failed to open About dialog: {e}')
+    
+    # Add menu items to Help menu
+    help_menu.add_command(label="  Open Overlord Log  ", command=open_overlord_log)
+    help_menu.add_command(label="  Open Daz Studio Log (first instance)  ", command=open_daz_studio_log)
+    help_menu.add_command(label="  Open Iray Server Log  ", command=open_iray_server_log)
+    help_menu.add_separator()
+    help_menu.add_command(label="  About  ", command=show_about)
 
     # Now that all widgets are created, load and apply saved settings
     saved_settings = settings_manager.load_settings()
