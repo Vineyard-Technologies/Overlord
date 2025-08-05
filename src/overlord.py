@@ -19,13 +19,7 @@ import winreg
 import psutil
 import atexit
 import tempfile
-from selenium import webdriver
-from selenium.webdriver.edge.service import Service
-from selenium.webdriver.edge.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import WebDriverException, TimeoutException
+from iray_server_actions import IrayServerActions
 from version import __version__ as overlord_version
 
 # Constants
@@ -38,6 +32,19 @@ AUTO_SAVE_DELAY = 2000  # milliseconds
 DAZ_STUDIO_STARTUP_DELAY = 5000  # milliseconds
 OVERLORD_CLOSE_DELAY = 2000  # milliseconds
 IRAY_STARTUP_DELAY = 3000  # milliseconds
+
+def get_app_data_path(subfolder='Overlord'):
+    """Get the application data path for the given subfolder"""
+    appdata = os.environ.get('APPDATA')
+    if appdata:
+        return os.path.join(appdata, subfolder)
+    else:
+        return os.path.join(os.path.expanduser('~'), subfolder)
+
+def get_local_app_data_path(subfolder='Overlord'):
+    """Get the local application data path for the given subfolder"""
+    localappdata = os.environ.get('LOCALAPPDATA', os.path.join(os.path.expanduser('~'), 'AppData', 'Local'))
+    return os.path.join(localappdata, subfolder)
 
 def detect_windows_theme():
     """Detect if Windows is using dark or light theme"""
@@ -456,19 +463,6 @@ def format_file_size(size_bytes):
     else:
         return f"{size_bytes / (1024 * 1024 * 1024):.1f} GB"
 
-def get_app_data_path(subfolder='Overlord'):
-    """Get the application data path for the given subfolder"""
-    appdata = os.environ.get('APPDATA')
-    if appdata:
-        return os.path.join(appdata, subfolder)
-    else:
-        return os.path.join(os.path.expanduser('~'), subfolder)
-
-def get_local_app_data_path(subfolder='Overlord'):
-    """Get the local application data path for the given subfolder"""
-    localappdata = os.environ.get('LOCALAPPDATA', os.path.join(os.path.expanduser('~'), 'AppData', 'Local'))
-    return os.path.join(localappdata, subfolder)
-
 def resource_path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """
     try:
@@ -559,41 +553,7 @@ def start_iray_server():
     except Exception as e:
         logging.error(f"Failed to start Iray Server automatically: {e}")
 
-def open_iray_server_web_interface():
-    """Open the Iray Server web interface using Selenium with Firefox"""
-    try:
-        # Configure Firefox options
-        from selenium.webdriver.firefox.options import Options as FirefoxOptions
-        firefox_options = FirefoxOptions()
-        firefox_options.add_argument("--disable-web-security")
-        firefox_options.add_argument("--start-maximized")
-        
-        # Start Firefox WebDriver
-        driver = webdriver.Firefox(options=firefox_options)
-        logging.info("Successfully started Firefox WebDriver")
-        
-        cleanup_manager.register_browser_driver(driver)
-        
-        # Navigate to the Iray Server web interface
-        url = "http://127.0.0.1:9090/index.html#login"
-        driver.get(url)
-        
-        logging.info(f"Opened Iray Server web interface: {url}")
-        
-        # Optional: Wait for the page to load and check if login page is accessible
-        try:
-            WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.TAG_NAME, "body"))
-            )
-            logging.info("Iray Server web interface loaded successfully")
-        except TimeoutException:
-            logging.warning("Iray Server web interface took longer than expected to load")
-        
-        return driver
-        
-    except Exception as e:
-        logging.error(f"Failed to open Iray Server web interface with Firefox: {e}")
-        return None
+# open_iray_server_web_interface function is now provided by iray_server_actions module
 
 def create_splash_screen():
     """Create and show splash screen during startup"""
@@ -713,8 +673,10 @@ def main():
     # Give Iray server a moment to start up before opening web interface
     time.sleep(IRAY_STARTUP_DELAY / 1000)  # Convert to seconds
     
-    # Open Iray Server web interface with Selenium
-    open_iray_server_web_interface()
+    # Open Iray Server web interface with Selenium and sign in
+    iray_actions = IrayServerActions(cleanup_manager)
+    iray_actions.start_browser()
+    iray_actions.sign_in()
     
     status_label.config(text="Loading application...")
     splash.update()
