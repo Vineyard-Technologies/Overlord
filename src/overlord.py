@@ -48,8 +48,6 @@ class ThemeManager:
                 "frame_bg": "#f0f0f0",
                 "text_bg": "#ffffff",
                 "text_fg": "#000000",
-                "console_bg": "#f0f0f0",
-                "console_fg": "#000000",
                 "select_bg": "#0078d4",
                 "select_fg": "#ffffff",
                 "highlight_bg": "#cccccc"
@@ -64,8 +62,6 @@ class ThemeManager:
                 "frame_bg": "#2d2d30",
                 "text_bg": "#1e1e1e",
                 "text_fg": "#ffffff",
-                "console_bg": "#1e1e1e",
-                "console_fg": "#ffffff",
                 "select_bg": "#0078d4",
                 "select_fg": "#ffffff",
                 "highlight_bg": "#404040"
@@ -121,8 +117,6 @@ class ThemeManager:
                                activebackground=self.get_color("bg"),
                                activeforeground=self.get_color("fg"),
                                selectcolor=self.get_color("entry_bg"))
-            elif widget_type == "console":
-                widget.configure(bg=self.get_color("console_bg"), fg=self.get_color("console_fg"))
             elif widget_type == "progressbar":
                 # Apply ttk style to progress bar
                 if self.ttk_style is None:
@@ -957,11 +951,11 @@ def main():
     # Apply the loaded settings to the UI (now that all widgets are created)
     settings_manager.apply_settings(saved_settings, value_entries, render_shadows_var, close_after_render_var, close_daz_on_finish_var)
     
-    # Log settings loading to console
+    # Log settings loading
     if os.path.exists(settings_manager.settings_file):
-        root.after(100, lambda: update_console('Previous settings loaded and applied'))
+        pass  # Settings loaded silently
     else:
-        root.after(100, lambda: update_console('Using default settings (first run)'))
+        pass  # Using default settings silently
     
     # Bind auto-save to key widgets
     value_entries["Output Directory"].bind("<FocusOut>", lambda e: auto_save_settings())
@@ -1294,7 +1288,6 @@ def main():
     # Update image when output directory changes or after render
     def on_output_dir_change(*args):
         logging.info(f'Output Directory changed to: {value_entries["Output Directory"].get()}')
-        update_console(f'Output dir: {os.path.basename(value_entries["Output Directory"].get())}')
         root.after(200, show_last_rendered_image)
         root.after(200, update_output_details)
     value_entries["Output Directory"].bind("<FocusOut>", lambda e: on_output_dir_change())
@@ -1308,13 +1301,11 @@ def main():
         if not source_files:
             from tkinter import messagebox
             messagebox.showerror("Missing Source Files", "Please specify at least one Source File before starting the render.")
-            update_console("Start Render cancelled: No Source Files specified.")
             logging.info("Start Render cancelled: No Source Files specified.")
             return
         if not output_dir:
             from tkinter import messagebox
             messagebox.showerror("Missing Output Directory", "Please specify an Output Directory before starting the render.")
-            update_console("Start Render cancelled: No Output Directory specified.")
             logging.info("Start Render cancelled: No Output Directory specified.")
             return
 
@@ -1378,12 +1369,10 @@ def main():
                 icon="warning"
             )
             if not result:
-                update_console('Start Render cancelled - DAZ Studio running')
                 logging.info('Start Render cancelled by user - DAZ Studio running')
                 return
 
         logging.info('Start Render button clicked')
-        update_console('Start Render button clicked')
         # Hardcoded Daz Studio Executable Path
         daz_executable_path = os.path.join(
             os.environ.get("ProgramFiles", "C:\\Program Files"),
@@ -1403,10 +1392,8 @@ def main():
                     import shutil
                     shutil.copy2(install_script_path, render_script_path)
                     logging.info(f'Copied masterRenderer.dsa to user scripts dir: {render_script_path}')
-                    update_console('Copied masterRenderer.dsa to scripts dir')
             except Exception as e:
                 logging.error(f'Could not copy masterRenderer.dsa to user scripts dir: {e}')
-                update_console(f'Error copying script: {e}')
             # Path to masterTemplate.duf in appData
             template_path = os.path.join(appdata, 'Overlord', 'templates', 'masterTemplate.duf').replace("\\", "/")
         else:
@@ -1446,7 +1433,6 @@ def main():
 
         def run_instance():
             logging.info('Launching Daz Studio render instance')
-            update_console('Launching Daz Studio instance...')
             command = [
                 daz_executable_path,
                 "-scriptArg", json_map,
@@ -1460,17 +1446,14 @@ def main():
             try:
                 subprocess.Popen(command)
                 logging.info('Daz Studio instance started successfully')
-                update_console('Daz Studio instance started')
             except Exception as e:
                 logging.error(f'Failed to start Daz Studio instance: {e}')
-                update_console(f'Failed to start instance: {e}')
         def run_all_instances(i=0):
             if i < num_instances_int:
                 run_instance()
                 root.after(5000, lambda: run_all_instances(i + 1))
             else:
                 logging.info('All render instances launched')
-                update_console(f'All {num_instances_int} instances launched')
                 root.after(1000, show_last_rendered_image)  # Update image after render
 
         run_all_instances()
@@ -1484,7 +1467,6 @@ def main():
 
     def end_all_daz_studio():
         logging.info('End all Daz Studio Instances button clicked')
-        update_console('Ending all Daz Studio instances...')
         killed = 0
         try:
             for proc in psutil.process_iter(['name']):
@@ -1496,105 +1478,14 @@ def main():
                     continue
             main.dazstudio_killed_by_user = True
             logging.info(f'Killed {killed} DAZStudio process(es)')
-            update_console(f'Killed {killed} DAZStudio process(es)')
         except Exception as e:
             logging.error(f'Failed to kill DAZStudio processes: {e}')
-            update_console(f'Failed to kill processes: {e}')
         # Reset progress and time labels, and total images label (always reset regardless of error)
         output_total_images.config(text="Total Images to Render: ")
         images_remaining_var.set("Images remaining: --")
         estimated_time_remaining_var.set("Estimated time remaining: --")
         estimated_completion_at_var.set("Estimated completion at: --")
         progress_var.set(0)
-
-    # --- Console Area Setup (early in the code) ---
-    console_frame = tk.Frame(root)
-    console_frame.place(relx=0.01, rely=0.85, anchor="nw", width=850, height=120)
-    theme_manager.register_widget(console_frame, "frame")
-    
-    console_text = tk.Text(console_frame, width=60, height=6, font=("Consolas", 8), 
-                          state=tk.DISABLED, wrap=tk.WORD)
-    console_text.pack(fill="both", expand=True)
-    theme_manager.register_widget(console_text, "console")
-    
-    # Store console messages
-    console_messages = []
-    
-    # Get log file path (same as setup_logger)
-    appdata = os.environ.get('APPDATA')
-    if appdata:
-        log_dir = os.path.join(appdata, 'Overlord')
-    else:
-        log_dir = os.path.join(os.path.expanduser('~'), 'Overlord')
-    log_file_path = os.path.join(log_dir, 'log.txt')
-    
-    # Track log file reading
-    log_file_position = 0
-    if os.path.exists(log_file_path):
-        # Start from end of existing log file
-        with open(log_file_path, 'r', encoding='utf-8') as f:
-            f.seek(0, 2)  # Seek to end
-            log_file_position = f.tell()
-    
-    def update_console(message):
-        console_messages.append(message)
-        if len(console_messages) > 5:
-            console_messages.pop(0)
-        
-        console_text.config(state=tk.NORMAL)
-        console_text.delete("1.0", tk.END)
-        console_text.insert(tk.END, "\n".join(console_messages))
-        console_text.config(state=tk.DISABLED)
-        console_text.see(tk.END)
-    
-    def extract_message_from_log_line(line):
-        """Extract just the message part from a log line, removing timestamp and level"""
-        line = line.strip()
-        if not line:
-            return None
-        
-        # Format is: "2025-01-08 12:34:56,789 INFO: message"
-        # Find the first colon after the log level
-        parts = line.split(' ', 2)  # Split into at most 3 parts
-        if len(parts) >= 3:
-            # parts[0] = date, parts[1] = time, parts[2] = "LEVEL: message"
-            level_and_msg = parts[2]
-            if ':' in level_and_msg:
-                level, message = level_and_msg.split(':', 1)
-                return message.strip()
-        
-        # Fallback: return the whole line if parsing fails
-        return line
-    
-    def monitor_log_file():
-        """Check for new lines in the log file and add them to console"""
-        nonlocal log_file_position
-        
-        try:
-            if os.path.exists(log_file_path):
-                with open(log_file_path, 'r', encoding='utf-8') as f:
-                    f.seek(log_file_position)
-                    new_lines = f.readlines()
-                    log_file_position = f.tell()
-                    
-                    for line in new_lines:
-                        message = extract_message_from_log_line(line)
-                        if message:
-                            update_console(message)
-        except Exception as e:
-            # Silently handle file reading errors to avoid spam
-            pass
-        
-        # Schedule next check in 1 second
-        root.after(1000, monitor_log_file)
-
-    # Initialize console with startup messages
-    update_console(f'Overlord {overlord_version} started')
-    update_console('Iray Server managed automatically')
-    update_console('Ready for rendering operations')
-    
-    # Start monitoring log file
-    root.after(2000, monitor_log_file)  # Start after 2 seconds to avoid startup spam
 
     # Initial display
     root.after(500, show_last_rendered_image)
@@ -1623,7 +1514,6 @@ def main():
 
     def zip_outputted_files():
         logging.info('Zip Outputted Files button clicked')
-        update_console('Zip Outputted Files button clicked')
         
         # Check if any DAZ Studio instances are running
         daz_running = False
@@ -1647,7 +1537,6 @@ def main():
                 icon="warning"
             )
             if not result:
-                update_console('Archive cancelled - DAZ Studio running')
                 logging.info('Archive cancelled by user - DAZ Studio running')
                 return
         
@@ -1655,10 +1544,8 @@ def main():
             output_dir = value_entries["Output Directory"].get()
             archive_all_inner_folders(output_dir)
             logging.info(f'Archiving completed for: {output_dir}')
-            update_console('Archiving completed successfully')
         except Exception as e:
             logging.error(f'Failed to archive output files: {e}')
-            update_console(f'Failed to archive output files: {e}')
 
     zip_button = tk.Button(
         buttons_frame,
