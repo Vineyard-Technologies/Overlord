@@ -652,17 +652,17 @@ def main():
     theme_manager.register_widget(menubar, "menu")
     
     # File menu
-    file_menu = tk.Menu(menubar, tearoff=0)
+    file_menu = tk.Menu(menubar, tearoff=0, font=("Arial", 11))
     menubar.add_cascade(label="File", menu=file_menu)
     theme_manager.register_widget(file_menu, "menu")
     
     # Options menu
-    options_menu = tk.Menu(menubar, tearoff=0)
+    options_menu = tk.Menu(menubar, tearoff=0, font=("Arial", 11))
     menubar.add_cascade(label="Options", menu=options_menu)
     theme_manager.register_widget(options_menu, "menu")
     
     # Help menu
-    help_menu = tk.Menu(menubar, tearoff=0)
+    help_menu = tk.Menu(menubar, tearoff=0, font=("Arial", 11))
     menubar.add_cascade(label="Help", menu=help_menu)
     theme_manager.register_widget(help_menu, "menu")
     
@@ -930,6 +930,46 @@ def main():
     )
     close_daz_on_finish_checkbox.grid(row=len(param_params)+3, column=1, padx=10, pady=(0, 5), sticky="w")
     theme_manager.register_widget(close_daz_on_finish_checkbox, "checkbutton")
+
+    # Add File menu items now that all widgets are created
+    def menu_choose_source_files():
+        """Menu command to choose source files - same as Browse button for source files"""
+        documents_dir = os.path.join(os.path.expanduser("~"), "Documents")
+        filenames = filedialog.askopenfilenames(
+            initialdir=documents_dir,
+            title="Select Source Files",
+            filetypes=(("DSON User File", "*.duf"),)
+        )
+        if filenames:
+            filenames = [fname.replace('/', '\\') for fname in filenames]
+            text_widget = value_entries["Source Files"]
+            current = text_widget.get("1.0", tk.END).strip().replace('/', '\\')
+            current_files = set(current.split("\n")) if current else set()
+            new_files = [fname for fname in filenames if fname not in current_files]
+            if new_files:
+                # If textbox is not empty, append new files each on a new line
+                if current:
+                    text_widget.insert(tk.END, "\n" + "\n".join(new_files))
+                else:
+                    text_widget.insert(tk.END, "\n".join(new_files))
+    
+    def menu_choose_output_directory():
+        """Menu command to choose output directory - same as Browse button for output directory"""
+        default_img_dir = os.path.join(os.path.expanduser("~"), "Downloads", "output")
+        foldername = filedialog.askdirectory(
+            initialdir=default_img_dir,
+            title="Select Output Directory"
+        )
+        if foldername:
+            output_entry = value_entries["Output Directory"]
+            output_entry.delete(0, tk.END)
+            output_entry.insert(0, foldername)
+    
+    # Add menu items to File menu
+    file_menu.add_command(label="  Choose Source Files...  ", command=menu_choose_source_files)
+    file_menu.add_command(label="  Choose Output Directory...  ", command=menu_choose_output_directory)
+    file_menu.add_separator()
+    file_menu.add_command(label="  Exit  ", command=on_closing)
 
     # Now that all widgets are created, load and apply saved settings
     saved_settings = settings_manager.load_settings()
