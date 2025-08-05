@@ -128,6 +128,7 @@ def build_executable():
         "--add-data", "images/favicon.ico;images",
         "--add-data", "images/overlordLogo.png;images",
         "--add-data", "images/laserwolveGamesLogo.png;images",
+        "--add-data", "images/splashScreen.png;images",
         "src/overlord.py"
     ]
     

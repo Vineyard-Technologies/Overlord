@@ -2,6 +2,9 @@
 *.duf.png
 *tip.png
 
+# Auto-generated version file
+src/version.py
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

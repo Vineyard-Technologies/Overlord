@@ -15,12 +15,14 @@ SolidCompression=yes
 ArchitecturesInstallIn64BitMode=x64
 
 SetupIconFile=images\favicon.ico
+UninstallDisplayIcon={app}\overlord.exe
 VersionInfoVersion=__APP_VERSION__
 VersionInfoDescription=Overlord - Render Pipeline Manager
 
 [Files]
 Source: "dist\overlord.exe"; DestDir: "{app}"; Flags: ignoreversion 64bit
 Source: "scripts\masterRenderer.dsa"; DestDir: "{app}\scripts"; Flags: ignoreversion 64bit
+Source: "images\splashScreen.png"; DestDir: "{app}\images"; Flags: ignoreversion 64bit
 Source: "templates\masterTemplate.duf"; DestDir: "{userappdata}\Overlord\templates"; Flags: ignoreversion
 Source: "src\runIrayServer.vbs"; DestDir: "{localappdata}\Overlord\scripts"; Flags: ignoreversion
 

@@ -9,6 +9,7 @@ import gc
 import re
 import webbrowser
 import zipfile
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from PIL import Image, ImageTk
 import tkinter as tk
@@ -512,11 +513,8 @@ def create_splash_screen():
         splash_label.image = splash_image  # Keep reference
         splash_label.pack(fill="both", expand=True)
     except Exception as e:
-        # Fallback to text if image fails to load
-        logging.warning(f"Could not load splash screen image: {e}")
-        splash_label = tk.Label(splash, text=f"Overlord {overlord_version}\nRender Pipeline Manager\n\nStarting up...", 
-                               font=("Arial", 16), bg="#2c2c2c", fg="white")
-        splash_label.pack(fill="both", expand=True)
+        logging.error(f"Could not load splash screen image: {e}")
+        raise  # Re-raise the exception since we don't want fallback
     
     # Add status text
     status_label = tk.Label(splash, text="Starting Overlord...", font=("Arial", 10), 
@@ -609,7 +607,6 @@ def main():
     splash.update()
     
     # Give Iray server a moment to start up
-    import time
     time.sleep(2)
     
     # Close splash screen
