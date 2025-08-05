@@ -5,6 +5,10 @@
 # Auto-generated version file
 src/version.py
 
+# Cache and database files
+src/cache/
+src/iray_server.db
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
