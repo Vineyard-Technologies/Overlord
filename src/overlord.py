@@ -19,7 +19,25 @@ import winreg
 import psutil
 import atexit
 import tempfile
+from selenium import webdriver
+from selenium.webdriver.edge.service import Service
+from selenium.webdriver.edge.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import WebDriverException, TimeoutException
 from version import __version__ as overlord_version
+
+# Constants
+DEFAULT_MAX_WORKERS = 8
+LOG_SIZE_MB = 100
+RECENT_RENDER_TIMES_LIMIT = 25
+IMAGE_UPDATE_INTERVAL = 1000  # milliseconds
+OUTPUT_UPDATE_INTERVAL = 5000  # milliseconds
+AUTO_SAVE_DELAY = 2000  # milliseconds
+DAZ_STUDIO_STARTUP_DELAY = 5000  # milliseconds
+OVERLORD_CLOSE_DELAY = 2000  # milliseconds
+IRAY_STARTUP_DELAY = 3000  # milliseconds
 
 def detect_windows_theme():
     """Detect if Windows is using dark or light theme"""
@@ -145,11 +163,7 @@ theme_manager = ThemeManager()
 class SettingsManager:
     def __init__(self):
         # Get settings file path in user directory
-        appdata = os.environ.get('APPDATA')
-        if appdata:
-            self.settings_dir = os.path.join(appdata, 'Overlord')
-        else:
-            self.settings_dir = os.path.join(os.path.expanduser('~'), 'Overlord')
+        self.settings_dir = get_app_data_path()
         os.makedirs(self.settings_dir, exist_ok=True)
         self.settings_file = os.path.join(self.settings_dir, 'settings.json')
         
@@ -266,6 +280,7 @@ class CleanupManager:
         self.cleanup_registered = False
         self.save_settings_callback = None
         self.settings_saved_on_close = False
+        self.browser_driver = None
     
     def register_temp_file(self, filepath):
         """Register a temporary file for cleanup"""
@@ -278,6 +293,10 @@ class CleanupManager:
     def register_executor(self, executor):
         """Register a thread pool executor for cleanup"""
         self.executor = executor
+    
+    def register_browser_driver(self, driver):
+        """Register a browser driver for cleanup"""
+        self.browser_driver = driver
     
     def register_settings_callback(self, callback):
         """Register a callback to save settings on exit"""
@@ -294,7 +313,7 @@ class CleanupManager:
             for proc in psutil.process_iter(['name']):
                 try:
                     proc_name = proc.info['name']
-                    if proc_name and (proc_name.lower() == 'iray_server.exe' or proc_name.lower() == 'iray_server_worker.exe'):
+                    if proc_name and any(name.lower() in proc_name.lower() for name in ['iray_server.exe', 'iray_server_worker.exe']):
                         proc.kill()
                         killed_processes.append(proc_name)
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
@@ -307,6 +326,14 @@ class CleanupManager:
     def cleanup_all(self):
         """Clean up all registered resources"""
         try:
+            # Close browser driver if exists
+            if self.browser_driver:
+                try:
+                    self.browser_driver.quit()
+                    logging.info('Browser driver closed')
+                except Exception as e:
+                    logging.error(f'Failed to close browser driver: {e}')
+            
             # Stop Iray Server processes
             self.stop_iray_server()
             
@@ -408,8 +435,7 @@ def archive_all_inner_folders(base_path):
                             archive_path = os.path.join(subfolder_path, f"{inner_name}.zip")
                             if not os.path.exists(archive_path):
                                 to_archive.append((inner_path, archive_path))
-    DEFAULT_MAX_WORKERS = int(os.environ.get('DEFAULT_MAX_WORKERS', 8))
-    max_workers = min(DEFAULT_MAX_WORKERS, os.cpu_count() or 1)
+    max_workers = min(int(os.environ.get('DEFAULT_MAX_WORKERS', DEFAULT_MAX_WORKERS)), os.cpu_count() or 1)
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         cleanup_manager.register_executor(executor)
         futures = [executor.submit(archive_and_delete, inner_path, archive_path) for inner_path, archive_path in to_archive]
@@ -419,26 +445,46 @@ def archive_all_inner_folders(base_path):
             except Exception as e:
                 logging.error(f"An error occurred while processing a future: {e}")
 
+def format_file_size(size_bytes):
+    """Format file size in bytes to human readable format"""
+    if size_bytes < 1024:
+        return f"{size_bytes} B"
+    elif size_bytes < 1024 * 1024:
+        return f"{size_bytes / 1024:.1f} KB"
+    elif size_bytes < 1024 * 1024 * 1024:
+        return f"{size_bytes / (1024 * 1024):.1f} MB"
+    else:
+        return f"{size_bytes / (1024 * 1024 * 1024):.1f} GB"
+
+def get_app_data_path(subfolder='Overlord'):
+    """Get the application data path for the given subfolder"""
+    appdata = os.environ.get('APPDATA')
+    if appdata:
+        return os.path.join(appdata, subfolder)
+    else:
+        return os.path.join(os.path.expanduser('~'), subfolder)
+
+def get_local_app_data_path(subfolder='Overlord'):
+    """Get the local application data path for the given subfolder"""
+    localappdata = os.environ.get('LOCALAPPDATA', os.path.join(os.path.expanduser('~'), 'AppData', 'Local'))
+    return os.path.join(localappdata, subfolder)
+
 def resource_path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """
     try:
         base_path = sys._MEIPASS
     except AttributeError:
-        base_path = os.path.abspath(".")
+        # When running from source, images are in the parent directory
+        base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     return os.path.join(base_path, relative_path)
 
 def setup_logger():
     # Try to write log to %APPDATA%/Overlord/log.txt (user-writable)
-    appdata = os.environ.get('APPDATA')
-    if appdata:
-        log_dir = os.path.join(appdata, 'Overlord')
-    else:
-        # Fallback to user's home directory
-        log_dir = os.path.join(os.path.expanduser('~'), 'Overlord')
+    log_dir = get_app_data_path()
     os.makedirs(log_dir, exist_ok=True)
     log_path = os.path.join(log_dir, 'log.txt')
     from logging.handlers import RotatingFileHandler
-    max_bytes = 100 * 1024 * 1024  # 100 MB
+    max_bytes = LOG_SIZE_MB * 1024 * 1024  # Convert MB to bytes
     file_handler = RotatingFileHandler(log_path, maxBytes=max_bytes, backupCount=1, encoding='utf-8')
     stream_handler = logging.StreamHandler()
     logging.basicConfig(
@@ -446,21 +492,25 @@ def setup_logger():
         format='%(asctime)s %(levelname)s: %(message)s',
         handlers=[file_handler, stream_handler]
     )
-    logging.info(f'--- Overlord started --- (log file: {log_path}, max size: 100 MB)')
+    logging.info(f'--- Overlord started --- (log file: {log_path}, max size: {LOG_SIZE_MB} MB)')
 
-def is_iray_server_running():
-    """Check if Iray Server processes are already running"""
+def check_process_running(process_names):
+    """Check if any processes with the given names are running"""
     try:
         for proc in psutil.process_iter(['name']):
             try:
                 proc_name = proc.info['name']
-                if proc_name and (proc_name.lower() == 'iray_server.exe' or proc_name.lower() == 'iray_server_worker.exe'):
+                if proc_name and any(name.lower() in proc_name.lower() for name in process_names):
                     return True
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
     except Exception:
         pass
     return False
+
+def is_iray_server_running():
+    """Check if Iray Server processes are already running"""
+    return check_process_running(['iray_server.exe', 'iray_server_worker.exe'])
 
 def start_iray_server():
     """Start the Iray Server if it's not already running"""
@@ -472,11 +522,10 @@ def start_iray_server():
         # Reference and execute runIrayServer.vbs from correct location
         if getattr(sys, 'frozen', False):
             # Running as PyInstaller executable - look in LocalAppData
-            localappdata = os.environ.get('LOCALAPPDATA', os.path.join(os.path.expanduser('~'), 'AppData', 'Local'))
-            vbs_dir = os.path.join(localappdata, 'Overlord', 'scripts')
+            vbs_dir = os.path.join(get_local_app_data_path(), 'scripts')
             vbs_path = os.path.join(vbs_dir, 'runIrayServer.vbs')
             # Set working directory to LocalAppData/Overlord so Iray Server can create files there
-            working_dir = os.path.join(localappdata, 'Overlord')
+            working_dir = get_local_app_data_path()
             
             # Ensure the directories exist (backup safety check)
             if not os.path.exists(vbs_dir):
@@ -509,6 +558,42 @@ def start_iray_server():
         logging.info(f"Iray Server started automatically from working directory: {working_dir}")
     except Exception as e:
         logging.error(f"Failed to start Iray Server automatically: {e}")
+
+def open_iray_server_web_interface():
+    """Open the Iray Server web interface using Selenium with Firefox"""
+    try:
+        # Configure Firefox options
+        from selenium.webdriver.firefox.options import Options as FirefoxOptions
+        firefox_options = FirefoxOptions()
+        firefox_options.add_argument("--disable-web-security")
+        firefox_options.add_argument("--start-maximized")
+        
+        # Start Firefox WebDriver
+        driver = webdriver.Firefox(options=firefox_options)
+        logging.info("Successfully started Firefox WebDriver")
+        
+        cleanup_manager.register_browser_driver(driver)
+        
+        # Navigate to the Iray Server web interface
+        url = "http://127.0.0.1:9090/index.html#login"
+        driver.get(url)
+        
+        logging.info(f"Opened Iray Server web interface: {url}")
+        
+        # Optional: Wait for the page to load and check if login page is accessible
+        try:
+            WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.TAG_NAME, "body"))
+            )
+            logging.info("Iray Server web interface loaded successfully")
+        except TimeoutException:
+            logging.warning("Iray Server web interface took longer than expected to load")
+        
+        return driver
+        
+    except Exception as e:
+        logging.error(f"Failed to open Iray Server web interface with Firefox: {e}")
+        return None
 
 def create_splash_screen():
     """Create and show splash screen during startup"""
@@ -547,8 +632,6 @@ def create_splash_screen():
     return splash, status_label
 
 def main():
-    import re
-
     def update_estimated_time_remaining(images_remaining):
         # Get user profile directory
         user_profile = os.environ.get('USERPROFILE') or os.path.expanduser('~')
@@ -576,8 +659,7 @@ def main():
 
         # Use only the 25 most recent render times (from all logs combined)
         if avg_times and len(avg_times) > 0:
-            import datetime
-            recent_times = avg_times[-25:] if len(avg_times) > 25 else avg_times
+            recent_times = avg_times[-RECENT_RENDER_TIMES_LIMIT:] if len(avg_times) > RECENT_RENDER_TIMES_LIMIT else avg_times
             avg_time = sum(recent_times) / len(recent_times)
             total_seconds = int(avg_time * images_remaining)
             # Format as H:MM:SS
@@ -625,11 +707,20 @@ def main():
     
     start_iray_server()  # Start Iray Server automatically
     
+    status_label.config(text="Opening Iray Server web interface...")
+    splash.update()
+    
+    # Give Iray server a moment to start up before opening web interface
+    time.sleep(IRAY_STARTUP_DELAY / 1000)  # Convert to seconds
+    
+    # Open Iray Server web interface with Selenium
+    open_iray_server_web_interface()
+    
     status_label.config(text="Loading application...")
     splash.update()
     
-    # Give Iray server a moment to start up
-    time.sleep(2)
+    # Give browser a moment to open
+    time.sleep(1)
     
     # Close splash screen
     splash.destroy()
@@ -660,6 +751,8 @@ def main():
     options_menu = tk.Menu(menubar, tearoff=0, font=("Arial", 11))
     menubar.add_cascade(label="Options", menu=options_menu)
     theme_manager.register_widget(options_menu, "menu")
+
+    def show_overlord_settings():
         try:
             win = tk.Toplevel(root)
             win.title("Overlord Settings")
@@ -898,7 +991,7 @@ def main():
                 if hasattr(schedule_source_files_save, 'after_id'):
                     root.after_cancel(schedule_source_files_save.after_id)
                 # Schedule save after 2 seconds of inactivity
-                schedule_source_files_save.after_id = root.after(2000, auto_save_settings)
+                schedule_source_files_save.after_id = root.after(AUTO_SAVE_DELAY, auto_save_settings)
             
             text_widget.bind("<KeyRelease>", schedule_source_files_save)
             text_widget.bind("<FocusOut>", lambda e: auto_save_settings())
@@ -1032,11 +1125,7 @@ def main():
     def open_overlord_log():
         """Open the Overlord log file"""
         try:
-            appdata = os.environ.get('APPDATA')
-            if appdata:
-                log_dir = os.path.join(appdata, 'Overlord')
-            else:
-                log_dir = os.path.join(os.path.expanduser('~'), 'Overlord')
+            log_dir = get_app_data_path()
             log_path = os.path.join(log_dir, 'log.txt')
             
             if os.path.exists(log_path):
@@ -1074,8 +1163,7 @@ def main():
         try:
             if getattr(sys, 'frozen', False):
                 # Running as installed executable - log in LocalAppData
-                localappdata = os.environ.get('LOCALAPPDATA', os.path.join(os.path.expanduser('~'), 'AppData', 'Local'))
-                log_path = os.path.join(localappdata, 'Overlord', 'iray_server.log')
+                log_path = os.path.join(get_local_app_data_path(), 'iray_server.log')
             else:
                 # Running from source - log in src directory
                 log_path = os.path.join(os.path.dirname(__file__), 'iray_server.log')
@@ -1201,11 +1289,7 @@ def main():
     # Apply the loaded settings to the UI (now that all widgets are created)
     settings_manager.apply_settings(saved_settings, value_entries, render_shadows_var, close_after_render_var, close_daz_on_finish_var)
     
-    # Log settings loading
-    if os.path.exists(settings_manager.settings_file):
-        pass  # Settings loaded silently
-    else:
-        pass  # Using default settings silently
+    # Log settings loading - settings loaded silently
     
     # Bind auto-save to key widgets
     value_entries["Output Directory"].bind("<FocusOut>", lambda e: auto_save_settings())
@@ -1272,7 +1356,6 @@ def main():
     output_details_frame = tk.Frame(root, width=350)
     output_details_frame.place(relx=0.01, rely=0.6, anchor="nw", width=350, height=200)
     output_details_frame.pack_propagate(False)
-    theme_manager.register_widget(output_details_frame, "frame")
     theme_manager.register_widget(output_details_frame, "frame")
 
     # Progress Bar for Render Completion (directly above Output Details title, not inside output_details_frame)
@@ -1371,14 +1454,8 @@ def main():
                             zip_count += 1
                     except (OSError, IOError):
                         continue
-            if total_size < 1024:
-                size_str = f"{total_size} B"
-            elif total_size < 1024 * 1024:
-                size_str = f"{total_size / 1024:.1f} KB"
-            elif total_size < 1024 * 1024 * 1024:
-                size_str = f"{total_size / (1024 * 1024):.1f} MB"
-            else:
-                size_str = f"{total_size / (1024 * 1024 * 1024):.1f} GB"
+            
+            size_str = format_file_size(total_size)
             output_folder_size.config(text=f"Folder Size: {size_str}")
             output_png_count.config(text=f"PNG Files: {png_count}")
             output_zip_count.config(text=f"ZIP Files: {zip_count}")
@@ -1528,12 +1605,12 @@ def main():
         gc.collect()
         
         # Schedule to check again in 1 second
-        root.after(1000, show_last_rendered_image)
+        root.after(IMAGE_UPDATE_INTERVAL, show_last_rendered_image)
 
     def periodic_update_output_details():
         """Periodically update output details every 5 seconds"""
         update_output_details()
-        root.after(5000, periodic_update_output_details)
+        root.after(OUTPUT_UPDATE_INTERVAL, periodic_update_output_details)
 
     # Update image when output directory changes or after render
     def on_output_dir_change(*args):
@@ -1598,17 +1675,7 @@ def main():
             output_total_images.config(text="Total Images to Render: ")
 
         # Check if any DAZ Studio instances are running
-        daz_running = False
-        try:
-            for proc in psutil.process_iter(['name']):
-                try:
-                    if proc.info['name'] and 'DAZStudio' in proc.info['name']:
-                        daz_running = True
-                        break
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    continue
-        except Exception:
-            pass
+        daz_running = check_process_running(['DAZStudio'])
 
         # Show confirmation dialog if DAZ Studio is running
         if daz_running:
@@ -1631,8 +1698,7 @@ def main():
         # Use local scripts directory if running in VS Code (not frozen), else use user-writable scripts directory
         if getattr(sys, 'frozen', False):
             install_dir = os.path.dirname(sys.executable)
-            appdata = os.environ.get('APPDATA') or os.path.expanduser('~')
-            user_scripts_dir = os.path.join(appdata, 'Overlord', 'scripts')
+            user_scripts_dir = os.path.join(get_app_data_path(), 'scripts')
             os.makedirs(user_scripts_dir, exist_ok=True)
             render_script_path = os.path.join(user_scripts_dir, "masterRenderer.dsa").replace("\\", "/")
             install_script_path = os.path.join(install_dir, "scripts", "masterRenderer.dsa")
@@ -1645,7 +1711,7 @@ def main():
             except Exception as e:
                 logging.error(f'Could not copy masterRenderer.dsa to user scripts dir: {e}')
             # Path to masterTemplate.duf in appData
-            template_path = os.path.join(appdata, 'Overlord', 'templates', 'masterTemplate.duf').replace("\\", "/")
+            template_path = os.path.join(get_app_data_path(), 'templates', 'masterTemplate.duf').replace("\\", "/")
         else:
             # Use scripts directly from the repository for development/VS Code preview
             install_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -1701,10 +1767,10 @@ def main():
         def run_all_instances(i=0):
             if i < num_instances_int:
                 run_instance()
-                root.after(5000, lambda: run_all_instances(i + 1))
+                root.after(DAZ_STUDIO_STARTUP_DELAY, lambda: run_all_instances(i + 1))
             else:
                 logging.info('All render instances launched')
-                root.after(1000, show_last_rendered_image)  # Update image after render
+                root.after(IMAGE_UPDATE_INTERVAL, show_last_rendered_image)  # Update image after render
 
         run_all_instances()
         # If "Close Overlord After Starting Render" is checked, close after 2 seconds
@@ -1713,7 +1779,7 @@ def main():
                 cleanup_manager.cleanup_all()
                 root.quit()
                 root.destroy()
-            root.after(2000, delayed_close)
+            root.after(OVERLORD_CLOSE_DELAY, delayed_close)
 
     def end_all_daz_studio():
         logging.info('End all Daz Studio Instances button clicked')
@@ -1739,8 +1805,8 @@ def main():
 
     # Initial display
     root.after(500, show_last_rendered_image)
-    root.after(1000, update_output_details)  # Initial output details update
-    root.after(2000, periodic_update_output_details)  # Start periodic updates
+    root.after(IMAGE_UPDATE_INTERVAL, update_output_details)  # Initial output details update
+    root.after(OUTPUT_UPDATE_INTERVAL, periodic_update_output_details)  # Start periodic updates
 
     # --- Buttons Section ---
     buttons_frame = tk.Frame(root)
@@ -1766,17 +1832,7 @@ def main():
         logging.info('Zip Outputted Files button clicked')
         
         # Check if any DAZ Studio instances are running
-        daz_running = False
-        try:
-            for proc in psutil.process_iter(['name']):
-                try:
-                    if proc.info['name'] and 'DAZStudio' in proc.info['name']:
-                        daz_running = True
-                        break
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    continue
-        except Exception:
-            pass
+        daz_running = check_process_running(['DAZStudio'])
         
         # Show confirmation dialog if DAZ Studio is running
         if daz_running:
