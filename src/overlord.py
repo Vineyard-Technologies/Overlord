@@ -10,6 +10,7 @@ import re
 import webbrowser
 import zipfile
 import time
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from PIL import Image, ImageTk
 import tkinter as tk
@@ -1253,6 +1254,10 @@ def main():
     value_entries["Output Directory"].bind("<Return>", lambda e: on_output_dir_change())
 
     def start_render():
+        # Prevent multiple render starts
+        if button.cget("state") == "disabled":
+            logging.info("Start Render already in progress, ignoring additional click")
+            return
 
         # Validate Source Files and Output Directory before launching render
         source_files = value_entries["Source Files"].get("1.0", tk.END).strip().replace("\\", "/").split("\n")
@@ -1269,23 +1274,59 @@ def main():
             logging.info("Start Render cancelled: No Output Directory specified.")
             return
         
-        # Start Iray Server if not already running
-        logging.info('Start Render button clicked')
-        logging.info('Starting Iray Server...')
+        # Disable Start Render button and enable Stop Render button
+        button.config(state="disabled")
+        stop_button.config(state="normal")
+        root.update_idletasks()  # Force UI update
         
-        start_iray_server()  # Start Iray Server
+        # Start the render process in a background thread to keep UI responsive
+        def start_render_background():
+            try:
+                # Start Iray Server if not already running
+                logging.info('Start Render button clicked')
+                logging.info('Starting Iray Server...')
+                
+                start_iray_server()  # Start Iray Server
+                
+                # Wait for Iray server to start up (in background thread, so it won't block UI)
+                time.sleep(IRAY_STARTUP_DELAY / 1000)  # Convert to seconds
+                
+                # Open Iray Server web interface with Selenium and sign in
+                iray_actions = IrayServerActions(cleanup_manager)
+                iray_actions.start_browser()
+                iray_actions.setup(output_dir)
+                iray_actions.close_browser()
+                
+                logging.info('Iray Server setup complete')
+                
+                # Continue with the rest of the render setup on UI thread
+                root.after(0, continue_render_setup)
+                
+            except Exception as e:
+                logging.error(f"Failed to start render: {e}")
+                # Re-enable Start Render button and disable Stop Render button on error
+                root.after(0, lambda: (button.config(state="normal"), stop_button.config(state="disabled")))
         
-        # Give Iray server a moment to start up
-        time.sleep(IRAY_STARTUP_DELAY / 1000)  # Convert to seconds
+        def continue_render_setup():
+            try:
+                # Continue with rest of render setup
+                complete_render_setup()
+                
+            except Exception as e:
+                logging.error(f"Failed to continue render setup: {e}")
+                # Re-enable Start Render button and disable Stop Render button on error
+                button.config(state="normal")
+                stop_button.config(state="disabled")
         
-        # Open Iray Server web interface with Selenium and sign in
-        iray_actions = IrayServerActions(cleanup_manager)
-        iray_actions.start_browser()
-        iray_actions.setup(output_dir)
-        iray_actions.close_browser()
+        # Start the background process
+        render_thread = threading.Thread(target=start_render_background, daemon=True)
+        render_thread.start()
         
-        logging.info('Iray Server setup complete')
-
+    def complete_render_setup():
+        # Get source files again (since we're in a different scope now)
+        source_files = value_entries["Source Files"].get("1.0", tk.END).strip().replace("\\", "/").split("\n")
+        source_files = [file for file in source_files if file]
+        
         # Calculate and display total images to render (update label)
         def find_total_images(source_files):
             total_frames = 0
@@ -1337,7 +1378,13 @@ def main():
             )
             if not result:
                 logging.info('Start Render cancelled by user - DAZ Studio running')
+                # Re-enable Start Render button and disable Stop Render button
+                button.config(state="normal")
+                stop_button.config(state="disabled")
                 return
+
+        # Update button to show launching state
+        root.update_idletasks()
 
         # Hardcoded Daz Studio Executable Path
         daz_executable_path = os.path.join(
@@ -1367,9 +1414,7 @@ def main():
             render_script_path = os.path.join(install_dir, "scripts", "masterRenderer.dsa").replace("\\", "/")
             template_path = os.path.join(install_dir, "templates", "masterTemplate.duf").replace("\\", "/")
         # Use "Source Files" and treat as files
-        source_files = value_entries["Source Files"].get("1.0", tk.END).strip().replace("\\", "/").split("\n")
-        source_files = [file for file in source_files if file]  # Remove empty lines
-        source_files = json.dumps(source_files)
+        source_files_json = json.dumps(source_files)
         image_output_dir = value_entries["Output Directory"].get().replace("\\", "/")
         num_instances = value_entries["Number of Instances"].get()
         log_size = value_entries["Log File Size (MBs)"].get()
@@ -1388,7 +1433,7 @@ def main():
             f'"num_instances": "{num_instances}", '
             f'"image_output_dir": "{image_output_dir}", '
             f'"frame_rate": "{frame_rate}", '
-            f'"source_files": {source_files}, '
+            f'"source_files": {source_files_json}, '
             f'"template_path": "{template_path}", '
             f'"render_shadows": {str(render_shadows).lower()}'
             f'}}'
@@ -1411,6 +1456,7 @@ def main():
                 logging.info('Daz Studio instance started successfully')
             except Exception as e:
                 logging.error(f'Failed to start Daz Studio instance: {e}')
+                
         def run_all_instances(i=0):
             if i < num_instances_int:
                 run_instance()
@@ -1466,6 +1512,9 @@ def main():
     def stop_render():
         logging.info('Stop Render button clicked')
         kill_render_related_processes()
+        # Re-enable Start Render button and disable Stop Render button
+        button.config(state="normal")
+        stop_button.config(state="disabled")
 
     # Initial display
     root.after(500, show_last_rendered_image)
@@ -1487,7 +1536,8 @@ def main():
         command=stop_render,
         font=("Arial", 16, "bold"),
         width=26,
-        height=2
+        height=2,
+        state="disabled"  # Initially disabled until Start Render is clicked
     )
     stop_button.pack(side="left", padx=10, pady=10)
     theme_manager.register_widget(stop_button, "button")
