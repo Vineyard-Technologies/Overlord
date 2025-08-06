@@ -23,6 +23,9 @@ class IrayServerXPaths:
     class queuePage:
         REMOVE_BUTTONS = "//button[@title='Remove']"
 
+        DELETE_CONFIRMATION_DIALOG = "//div[@class='modal-content']"
+        DELETE_BUTTON = "//button[text()='Delete']"
+
     # @classmethod
     # def job_by_id(cls, job_id):
     #     """Get XPath for a specific job by its ID"""

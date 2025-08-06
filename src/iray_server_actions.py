@@ -136,23 +136,46 @@ class IrayServerActions:
             raise WebDriverException(f"Not on queue page. Current URL: {current_url}, Expected: {expected_url}")
             
         try:
-            # Find all remove buttons
-            remove_buttons = self.find_elements(IrayServerXPaths.queuePage.REMOVE_BUTTONS)
-            
-            if not remove_buttons:
-                logging.info("No items in queue to remove")
-                return True
-            
             # Click each remove button
             removed_count = 0
-            for button in remove_buttons:
+            
+            # Keep removing until no more buttons are found
+            while True:
+                # Re-find remove buttons on each iteration to avoid stale element references
+                remove_buttons = self.find_elements(IrayServerXPaths.queuePage.REMOVE_BUTTONS)
+                
+                if not remove_buttons:
+                    logging.info("No more items in queue to remove")
+                    break
+                
                 try:
-                    button.click()
+                    # Always click the first button since the list updates after each removal
+                    logging.info(f"Clicking remove button 1 of {len(remove_buttons)} (removed {removed_count} so far)")
+                    # Wait for the remove button to be clickable before clicking
+                    remove_button = WebDriverWait(self.driver, self.default_timeout).until(
+                        EC.element_to_be_clickable(remove_buttons[0])
+                    )
+                    remove_button.click()
+                    logging.info(f"Clicked remove button")
+
+                    delete_button = WebDriverWait(self.driver, self.default_timeout).until(
+                        EC.element_to_be_clickable((By.XPATH, IrayServerXPaths.queuePage.DELETE_BUTTON))
+                    )
+
+                    logging.info(f"Clicking delete button")
+                    delete_button.click()
+                    logging.info(f"Clicked delete button")
+
+                    # Wait for the modal to disappear before continuing to the next button
+                    WebDriverWait(self.driver, self.default_timeout).until(
+                        EC.invisibility_of_element_located((By.XPATH, IrayServerXPaths.queuePage.DELETE_CONFIRMATION_DIALOG))
+                    )
+
                     removed_count += 1
-                    # time.sleep(0.5)
+
                 except Exception as e:
                     logging.warning(f"Failed to click remove button: {e}")
-                    continue
+                    break
             
             logging.info(f"Removed {removed_count} items from queue")
             return True
@@ -165,6 +188,17 @@ class IrayServerActions:
         """Close the browser if it's open"""
         if self.driver:
             try:
+                # Check if driver is still responsive before attempting to quit
+                try:
+                    # Try a simple operation to check if the session is still active
+                    self.driver.current_url
+                except Exception:
+                    # Session is already dead, just set driver to None
+                    logging.info("Browser session already closed")
+                    self.driver = None
+                    return
+                
+                # If we get here, the session is still active, so we can safely quit
                 self.driver.quit()
                 logging.info("Browser closed successfully")
             except Exception as e:
