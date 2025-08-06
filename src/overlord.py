@@ -181,9 +181,7 @@ class SettingsManager:
             "number_of_instances": "1",
             "frame_rate": "30",
             "log_file_size": "100",
-            "render_shadows": True,
-            "close_overlord_after_render": False,
-            "close_daz_on_finish": True
+            "render_shadows": True
         }
     
     def load_settings(self):
@@ -213,7 +211,7 @@ class SettingsManager:
         except Exception as e:
             logging.error(f'Failed to save settings: {e}')
     
-    def get_current_settings(self, value_entries, render_shadows_var, close_after_render_var, close_daz_on_finish_var):
+    def get_current_settings(self, value_entries, render_shadows_var):
         """Extract current settings from UI widgets"""
         try:
             source_files_text = value_entries["Source Files"].get("1.0", tk.END).strip()
@@ -225,9 +223,7 @@ class SettingsManager:
                 "number_of_instances": value_entries["Number of Instances"].get(),
                 "frame_rate": value_entries["Frame Rate"].get(),
                 "log_file_size": value_entries["Log File Size (MBs)"].get(),
-                "render_shadows": render_shadows_var.get(),
-                "close_overlord_after_render": close_after_render_var.get(),
-                "close_daz_on_finish": close_daz_on_finish_var.get()
+                "render_shadows": render_shadows_var.get()
             }
         except tk.TclError:
             # Widgets have been destroyed, return default settings
@@ -238,12 +234,10 @@ class SettingsManager:
                 "number_of_instances": "1",
                 "frame_rate": "30",
                 "log_file_size": "100",
-                "render_shadows": True,
-                "close_overlord_after_render": False,
-                "close_daz_on_finish": True
+                "render_shadows": True
             }
     
-    def apply_settings(self, settings, value_entries, render_shadows_var, close_after_render_var, close_daz_on_finish_var):
+    def apply_settings(self, settings, value_entries, render_shadows_var):
         """Apply loaded settings to UI widgets"""
         try:
             # Source Files (text widget)
@@ -269,8 +263,6 @@ class SettingsManager:
             
             # Checkboxes
             render_shadows_var.set(settings["render_shadows"])
-            close_after_render_var.set(settings["close_overlord_after_render"])
-            close_daz_on_finish_var.set(settings["close_daz_on_finish"])
             
             logging.info('Settings applied to UI')
         except Exception as e:
@@ -662,23 +654,6 @@ def main():
     setup_logger()
     register_cleanup()  # Register cleanup functions
     
-    status_label.config(text="Initializing Iray Server...")
-    splash.update()
-    
-    start_iray_server()  # Start Iray Server automatically
-    
-    status_label.config(text="Opening Iray Server web interface...")
-    splash.update()
-    
-    # Give Iray server a moment to start up before opening web interface
-    time.sleep(IRAY_STARTUP_DELAY / 1000)  # Convert to seconds
-    
-    # Open Iray Server web interface with Selenium and sign in
-    iray_actions = IrayServerActions(cleanup_manager)
-    iray_actions.start_browser()
-    iray_actions.setup()
-    iray_actions.close_browser()
-    
     status_label.config(text="Loading application...")
     splash.update()
     
@@ -789,6 +764,7 @@ def main():
             cleanup_manager.mark_settings_saved()  # Mark that settings have been saved
         except Exception as e:
             logging.error(f"Error saving settings before close: {e}")
+        kill_render_related_processes()
         cleanup_manager.cleanup_all()
         root.quit()
         root.destroy()
@@ -1002,7 +978,7 @@ def main():
         theme_manager.register_widget(value_entry, "entry")
         value_entries[param] = value_entry
 
-    # Add "Render shadows" label and checkbox under Log File Size
+    # --- Only keep Render Shadows checkbox ---
     render_shadows_var = tk.BooleanVar(value=True)
     render_shadows_label = tk.Label(param_table_frame, text="Render shadows", font=("Arial", 10), anchor="w")
     render_shadows_label.grid(row=len(param_params)+1, column=0, padx=10, pady=(0, 0), sticky="w")
@@ -1016,242 +992,16 @@ def main():
     render_shadows_checkbox.grid(row=len(param_params)+1, column=1, padx=10, pady=(0, 5), sticky="w")
     theme_manager.register_widget(render_shadows_checkbox, "checkbutton")
 
-    # Add "Close Overlord After Starting Render" label and checkbox below Render Shadows
-    close_after_render_var = tk.BooleanVar(value=False)
-    close_after_render_label = tk.Label(param_table_frame, text="Close Overlord After Starting Render", font=("Arial", 10), anchor="w")
-    close_after_render_label.grid(row=len(param_params)+2, column=0, padx=10, pady=(0, 0), sticky="w")
-    theme_manager.register_widget(close_after_render_label, "label")
-    close_after_render_checkbox = tk.Checkbutton(
-        param_table_frame,
-        variable=close_after_render_var,
-        width=2,
-        anchor="w"
-    )
-    close_after_render_checkbox.grid(row=len(param_params)+2, column=1, padx=10, pady=(0, 5), sticky="w")
-    theme_manager.register_widget(close_after_render_checkbox, "checkbutton")
-
-    # Add "Close Daz Studio on Finish" label and checkbox below Close Overlord
-    close_daz_on_finish_var = tk.BooleanVar(value=True)
-    close_daz_on_finish_label = tk.Label(param_table_frame, text="Close Daz Studio on Finish", font=("Arial", 10), anchor="w")
-    close_daz_on_finish_label.grid(row=len(param_params)+3, column=0, padx=10, pady=(0, 0), sticky="w")
-    theme_manager.register_widget(close_daz_on_finish_label, "label")
-    close_daz_on_finish_checkbox = tk.Checkbutton(
-        param_table_frame,
-        variable=close_daz_on_finish_var,
-        width=2,
-        anchor="w"
-    )
-    close_daz_on_finish_checkbox.grid(row=len(param_params)+3, column=1, padx=10, pady=(0, 5), sticky="w")
-    theme_manager.register_widget(close_daz_on_finish_checkbox, "checkbutton")
-
-    # Add File menu items now that all widgets are created
-    def menu_choose_source_files():
-        """Menu command to choose source files - same as Browse button for source files"""
-        documents_dir = os.path.join(os.path.expanduser("~"), "Documents")
-        filenames = filedialog.askopenfilenames(
-            initialdir=documents_dir,
-            title="Select Source Files",
-            filetypes=(("DSON User File", "*.duf"),)
-        )
-        if filenames:
-            filenames = [fname.replace('/', '\\') for fname in filenames]
-            text_widget = value_entries["Source Files"]
-            current = text_widget.get("1.0", tk.END).strip().replace('/', '\\')
-            current_files = set(current.split("\n")) if current else set()
-            new_files = [fname for fname in filenames if fname not in current_files]
-            if new_files:
-                # If textbox is not empty, append new files each on a new line
-                if current:
-                    text_widget.insert(tk.END, "\n" + "\n".join(new_files))
-                else:
-                    text_widget.insert(tk.END, "\n".join(new_files))
-    
-    def menu_choose_output_directory():
-        """Menu command to choose output directory - same as Browse button for output directory"""
-        default_img_dir = os.path.join(os.path.expanduser("~"), "Downloads", "output")
-        foldername = filedialog.askdirectory(
-            initialdir=default_img_dir,
-            title="Select Output Directory"
-        )
-        if foldername:
-            output_entry = value_entries["Output Directory"]
-            output_entry.delete(0, tk.END)
-            output_entry.insert(0, foldername)
-    
-    # Add menu items to File menu
-    file_menu.add_command(label="  Choose Source Files...  ", command=menu_choose_source_files)
-    file_menu.add_command(label="  Choose Output Directory...  ", command=menu_choose_output_directory)
-    file_menu.add_separator()
-    file_menu.add_command(label="  Exit  ", command=on_closing)
-
-    # Add Help menu functions
-    def open_overlord_log():
-        """Open the Overlord log file"""
-        try:
-            log_dir = get_app_data_path()
-            log_path = os.path.join(log_dir, 'log.txt')
-            
-            if os.path.exists(log_path):
-                os.startfile(log_path)
-                logging.info(f'Opened Overlord log file: {log_path}')
-            else:
-                from tkinter import messagebox
-                messagebox.showwarning("Log File Not Found", f"Overlord log file not found at:\n{log_path}")
-                logging.warning(f'Overlord log file not found: {log_path}')
-        except Exception as e:
-            from tkinter import messagebox
-            messagebox.showerror("Error", f"Failed to open Overlord log file:\n{e}")
-            logging.error(f'Failed to open Overlord log file: {e}')
-    
-    def open_daz_studio_log():
-        """Open the Daz Studio log file for the first instance"""
-        try:
-            user_profile = os.environ.get('USERPROFILE') or os.path.expanduser('~')
-            log_path = os.path.join(user_profile, "AppData", "Roaming", "DAZ 3D", "Studio4 [1]", "log.txt")
-            
-            if os.path.exists(log_path):
-                os.startfile(log_path)
-                logging.info(f'Opened Daz Studio log file: {log_path}')
-            else:
-                from tkinter import messagebox
-                messagebox.showwarning("Log File Not Found", f"Daz Studio log file not found at:\n{log_path}")
-                logging.warning(f'Daz Studio log file not found: {log_path}')
-        except Exception as e:
-            from tkinter import messagebox
-            messagebox.showerror("Error", f"Failed to open Daz Studio log file:\n{e}")
-            logging.error(f'Failed to open Daz Studio log file: {e}')
-    
-    def open_iray_server_log():
-        """Open the Iray Server log file"""
-        try:
-            if getattr(sys, 'frozen', False):
-                # Running as installed executable - log in LocalAppData
-                log_path = os.path.join(get_local_app_data_path(), 'iray_server.log')
-            else:
-                # Running from source - log in src directory
-                log_path = os.path.join(os.path.dirname(__file__), 'iray_server.log')
-            
-            if os.path.exists(log_path):
-                os.startfile(log_path)
-                logging.info(f'Opened Iray Server log file: {log_path}')
-            else:
-                from tkinter import messagebox
-                messagebox.showwarning("Log File Not Found", f"Iray Server log file not found at:\n{log_path}")
-                logging.warning(f'Iray Server log file not found: {log_path}')
-        except Exception as e:
-            from tkinter import messagebox
-            messagebox.showerror("Error", f"Failed to open Iray Server log file:\n{e}")
-            logging.error(f'Failed to open Iray Server log file: {e}')
-    
-    def show_about():
-        """Show About dialog with program information"""
-        try:
-            about_window = tk.Toplevel(root)
-            about_window.title("About Overlord")
-            about_window.geometry("400x500")
-            about_window.resizable(False, False)
-            # Set the window icon to match the main window
-            about_window.iconbitmap(resource_path(os.path.join("images", "favicon.ico")))
-            # Center the window on the screen
-            about_window.transient(root)
-            about_window.grab_set()
-            # Apply theme to about window
-            theme_manager.register_widget(about_window, "root")
-            
-            # Create main frame
-            main_frame = tk.Frame(about_window, padx=20, pady=20)
-            main_frame.pack(fill="both", expand=True)
-            theme_manager.register_widget(main_frame, "frame")
-            
-            # Overlord Logo
-            try:
-                overlord_logo = tk.PhotoImage(file=resource_path(os.path.join("images", "overlordLogo.png")))
-                overlord_logo_label = tk.Label(main_frame, image=overlord_logo, cursor="hand2")
-                overlord_logo_label.image = overlord_logo  # Keep reference
-                overlord_logo_label.pack(pady=(0, 10))
-                theme_manager.register_widget(overlord_logo_label, "label")
-                
-                def open_overlord_github(event):
-                    webbrowser.open("https://github.com/Laserwolve-Games/Overlord")
-                overlord_logo_label.bind("<Button-1>", open_overlord_github)
-            except Exception as e:
-                logging.warning(f"Could not load Overlord logo in About dialog: {e}")
-            
-            # Title
-            title_label = tk.Label(main_frame, text=f"Version {overlord_version}", 
-                                 font=("Arial", 18, "bold"))
-            title_label.pack(pady=(0, 10))
-            theme_manager.register_widget(title_label, "label")
-            
-            # Subtitle
-            subtitle_label = tk.Label(main_frame, text="Developed by:",
-                                    font=("Arial", 12))
-            subtitle_label.pack(pady=(0, 15))
-            theme_manager.register_widget(subtitle_label, "label")
-            
-            # Laserwolve Games Logo
-            try:
-                lwg_logo = tk.PhotoImage(file=resource_path(os.path.join("images", "laserwolveGamesLogo.png")))
-                lwg_logo_label = tk.Label(main_frame, image=lwg_logo, cursor="hand2")
-                lwg_logo_label.image = lwg_logo  # Keep reference
-                lwg_logo_label.pack(pady=(10, 15))
-                theme_manager.register_widget(lwg_logo_label, "label")
-                
-                def open_lwg_website(event):
-                    webbrowser.open("https://www.laserwolvegames.com/")
-                lwg_logo_label.bind("<Button-1>", open_lwg_website)
-            except Exception as e:
-                logging.warning(f"Could not load Laserwolve Games logo in About dialog: {e}")
-            
-            # Copyright and links frame
-            info_frame = tk.Frame(main_frame)
-            info_frame.pack(pady=(10, 0))
-            theme_manager.register_widget(info_frame, "frame")
-            
-            # Copyright
-            copyright_label = tk.Label(info_frame, text="© 2025 Laserwolve Games", 
-                                     font=("Arial", 10))
-            copyright_label.pack()
-            theme_manager.register_widget(copyright_label, "label")
-            
-            # Bind Enter and Escape keys to close the dialog
-            about_window.bind('<Return>', lambda e: about_window.destroy())
-            about_window.bind('<Escape>', lambda e: about_window.destroy())
-            
-            logging.info('About dialog opened')
-            
-        except Exception as e:
-            from tkinter import messagebox
-            messagebox.showerror("Error", f"Failed to open About dialog:\n{e}")
-            logging.error(f'Failed to open About dialog: {e}')
-    
-    # Add menu items to Help menu
-    help_menu.add_command(label="  Open Overlord Log  ", command=open_overlord_log)
-    help_menu.add_command(label="  Open Daz Studio Log (first instance)  ", command=open_daz_studio_log)
-    help_menu.add_command(label="  Open Iray Server Log  ", command=open_iray_server_log)
-    help_menu.add_separator()
-    help_menu.add_command(label="  About  ", command=show_about)
-
-    # Now that all widgets are created, load and apply saved settings
-    saved_settings = settings_manager.load_settings()
-    
     # Register settings save callback for cleanup
     def save_current_settings():
-        current_settings = settings_manager.get_current_settings(value_entries, render_shadows_var, close_after_render_var, close_daz_on_finish_var)
+        current_settings = settings_manager.get_current_settings(value_entries, render_shadows_var)
         settings_manager.save_settings(current_settings)
-    
     cleanup_manager.register_settings_callback(save_current_settings)
-    
-    # Auto-save settings when important values change
-    def auto_save_settings(*args):
-        try:
-            save_current_settings()
-        except Exception as e:
-            logging.error(f"Auto-save settings failed: {e}")
-    
+
+    saved_settings = settings_manager.load_settings()
     # Apply the loaded settings to the UI (now that all widgets are created)
-    settings_manager.apply_settings(saved_settings, value_entries, render_shadows_var, close_after_render_var, close_daz_on_finish_var)
-    
+    settings_manager.apply_settings(saved_settings, value_entries, render_shadows_var)
+
     # Log settings loading - settings loaded silently
     
     # Bind auto-save to key widgets
@@ -1262,8 +1012,6 @@ def main():
     
     # For checkboxes, bind to the variable change
     render_shadows_var.trace_add('write', auto_save_settings)
-    close_after_render_var.trace_add('write', auto_save_settings)
-    close_daz_on_finish_var.trace_add('write', auto_save_settings)
 
     # --- Last Rendered Image Section ---
     right_frame = tk.Frame(root)
@@ -1584,7 +1332,8 @@ def main():
     value_entries["Output Directory"].bind("<Return>", lambda e: on_output_dir_change())
 
     def start_render():
-        # Validate Source Sets and Output Directory before launching render
+
+        # Validate Source Files and Output Directory before launching render
         source_files = value_entries["Source Files"].get("1.0", tk.END).strip().replace("\\", "/").split("\n")
         source_files = [file for file in source_files if file]
         output_dir = value_entries["Output Directory"].get().strip()
@@ -1598,6 +1347,23 @@ def main():
             messagebox.showerror("Missing Output Directory", "Please specify an Output Directory before starting the render.")
             logging.info("Start Render cancelled: No Output Directory specified.")
             return
+        
+        # Start Iray Server if not already running
+        logging.info('Start Render button clicked')
+        logging.info('Starting Iray Server...')
+        
+        start_iray_server()  # Start Iray Server
+        
+        # Give Iray server a moment to start up
+        time.sleep(IRAY_STARTUP_DELAY / 1000)  # Convert to seconds
+        
+        # Open Iray Server web interface with Selenium and sign in
+        iray_actions = IrayServerActions(cleanup_manager)
+        iray_actions.start_browser()
+        iray_actions.setup()
+        iray_actions.close_browser()
+        
+        logging.info('Iray Server setup complete')
 
         # Calculate and display total images to render (update label)
         def find_total_images(source_files):
@@ -1652,7 +1418,6 @@ def main():
                 logging.info('Start Render cancelled by user - DAZ Studio running')
                 return
 
-        logging.info('Start Render button clicked')
         # Hardcoded Daz Studio Executable Path
         daz_executable_path = os.path.join(
             os.environ.get("ProgramFiles", "C:\\Program Files"),
@@ -1695,9 +1460,8 @@ def main():
         except Exception:
             num_instances_int = 1
 
-        # Add render_shadows and close_daz_on_finish to json_map
+        # Add render_shadows to json_map
         render_shadows = render_shadows_var.get()
-        close_daz_on_finish = close_daz_on_finish_var.get()
         json_map = (
             f'{{'
             f'"num_instances": "{num_instances}", '
@@ -1705,8 +1469,7 @@ def main():
             f'"frame_rate": "{frame_rate}", '
             f'"source_files": {source_files}, '
             f'"template_path": "{template_path}", '
-            f'"render_shadows": {str(render_shadows).lower()}, '
-            f'"close_daz_on_finish": {str(close_daz_on_finish).lower()}'
+            f'"render_shadows": {str(render_shadows).lower()}'
             f'}}'
         )
 
@@ -1737,34 +1500,66 @@ def main():
 
         run_all_instances()
         # If "Close Overlord After Starting Render" is checked, close after 2 seconds
-        if close_after_render_var.get():
-            def delayed_close():
-                cleanup_manager.cleanup_all()
-                root.quit()
-                root.destroy()
-            root.after(OVERLORD_CLOSE_DELAY, delayed_close)
+        # (Removed: if close_after_render_var.get(): ...)
+        # (Removed: any use of close_after_render_var or close_daz_on_finish_var)
 
-    def end_all_daz_studio():
-        logging.info('End all Daz Studio Instances button clicked')
-        killed = 0
+    def kill_render_related_processes():
+        """Kill all Daz Studio, Iray Server, and webdriver/browser processes. Also resets UI progress labels."""
+        logging.info('Killing all render-related processes (DAZStudio, Iray Server, webdriver/browsers)')
+        killed_daz = 0
+        killed_iray = 0
+        killed_webdriver = 0
         try:
+            # Kill all DAZStudio processes
             for proc in psutil.process_iter(['name']):
                 try:
                     if proc.info['name'] and 'DAZStudio' in proc.info['name']:
                         proc.kill()
-                        killed += 1
+                        killed_daz += 1
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+            # Kill Iray Server processes
+            for proc in psutil.process_iter(['name', 'exe', 'cmdline']):
+                try:
+                    name = proc.info.get('name', '')
+                    exe = proc.info.get('exe', '')
+                    cmdline = ' '.join(proc.info.get('cmdline', []))
+                    if (
+                        (name and 'iray_server' in name.lower()) or
+                        (exe and 'iray_server' in exe.lower()) or
+                        ('iray_server' in cmdline.lower())
+                    ):
+                        proc.kill()
+                        killed_iray += 1
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+            # Kill webdriver/browser processes (chromedriver, geckodriver, msedgedriver, chrome, firefox, msedge)
+            webdriver_names = [
+                'chromedriver', 'geckodriver', 'msedgedriver',
+                'chrome', 'firefox', 'msedge', 'opera', 'edge', 'brave', 'chromium'
+            ]
+            for proc in psutil.process_iter(['name']):
+                try:
+                    pname = proc.info['name']
+                    if pname and any(wd in pname.lower() for wd in webdriver_names):
+                        proc.kill()
+                        killed_webdriver += 1
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     continue
             main.dazstudio_killed_by_user = True
-            logging.info(f'Killed {killed} DAZStudio process(es)')
+            logging.info(f'Killed {killed_daz} DAZStudio, {killed_iray} Iray Server, {killed_webdriver} webdriver/browser process(es)')
         except Exception as e:
-            logging.error(f'Failed to kill DAZStudio processes: {e}')
+            logging.error(f'Failed to stop render processes: {e}')
         # Reset progress and time labels, and total images label (always reset regardless of error)
         output_total_images.config(text="Total Images to Render: ")
         images_remaining_var.set("Images remaining: --")
         estimated_time_remaining_var.set("Estimated time remaining: --")
         estimated_completion_at_var.set("Estimated completion at: --")
         progress_var.set(0)
+
+    def stop_render():
+        logging.info('Stop Render button clicked')
+        kill_render_related_processes()
 
     # Initial display
     root.after(500, show_last_rendered_image)
@@ -1780,16 +1575,16 @@ def main():
     button.pack(side="left", padx=(20, 10), pady=10)
     theme_manager.register_widget(button, "button")
 
-    end_button = tk.Button(
+    stop_button = tk.Button(
         buttons_frame,
-        text="End all Daz Studio Instances",
-        command=end_all_daz_studio,
+        text="Stop Render",
+        command=stop_render,
         font=("Arial", 16, "bold"),
         width=26,
         height=2
     )
-    end_button.pack(side="left", padx=10, pady=10)
-    theme_manager.register_widget(end_button, "button")
+    stop_button.pack(side="left", padx=10, pady=10)
+    theme_manager.register_widget(stop_button, "button")
 
     def zip_outputted_files():
         logging.info('Zip Outputted Files button clicked')

@@ -8,6 +8,8 @@ src/version.py
 # Cache and database files
 src/cache/
 src/iray_server.db
+src/results/
+src/preview/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
