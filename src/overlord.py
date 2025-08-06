@@ -675,85 +675,6 @@ def main():
     # Setup ttk styles early
     theme_manager.setup_ttk_style()
     
-    # Create menu bar
-    menubar = tk.Menu(root)
-    root.config(menu=menubar)
-    theme_manager.register_widget(menubar, "menu")
-    
-    # File menu
-    file_menu = tk.Menu(menubar, tearoff=0, font=("Arial", 11))
-    menubar.add_cascade(label="File", menu=file_menu)
-    theme_manager.register_widget(file_menu, "menu")
-    
-    # Options menu
-    options_menu = tk.Menu(menubar, tearoff=0, font=("Arial", 11))
-    menubar.add_cascade(label="Options", menu=options_menu)
-    theme_manager.register_widget(options_menu, "menu")
-
-    def show_overlord_settings():
-        try:
-            win = tk.Toplevel(root)
-            win.title("Overlord Settings")
-            win.geometry("400x400")
-            win.resizable(False, False)
-            win.iconbitmap(resource_path(os.path.join("images", "favicon.ico")))
-            theme_manager.register_widget(win, "root")
-            frame = tk.Frame(win, padx=20, pady=20)
-            frame.pack(fill="both", expand=True)
-            theme_manager.register_widget(frame, "frame")
-            label = tk.Label(frame, text="Overlord Settings", font=("Arial", 16, "bold"))
-            label.pack(pady=10)
-            theme_manager.register_widget(label, "label")
-        except Exception as e:
-            from tkinter import messagebox
-            messagebox.showerror("Error", f"Failed to open Overlord Settings:\n{e}")
-
-    def show_daz_studio_settings():
-        try:
-            win = tk.Toplevel(root)
-            win.title("Daz Studio Settings")
-            win.geometry("400x400")
-            win.resizable(False, False)
-            win.iconbitmap(resource_path(os.path.join("images", "favicon.ico")))
-            theme_manager.register_widget(win, "root")
-            frame = tk.Frame(win, padx=20, pady=20)
-            frame.pack(fill="both", expand=True)
-            theme_manager.register_widget(frame, "frame")
-            label = tk.Label(frame, text="Daz Studio Settings", font=("Arial", 16, "bold"))
-            label.pack(pady=10)
-            theme_manager.register_widget(label, "label")
-        except Exception as e:
-            from tkinter import messagebox
-            messagebox.showerror("Error", f"Failed to open Daz Studio Settings:\n{e}")
-
-    def show_iray_server_settings():
-        try:
-            win = tk.Toplevel(root)
-            win.title("Iray Server Settings")
-            win.geometry("400x400")
-            win.resizable(False, False)
-            win.iconbitmap(resource_path(os.path.join("images", "favicon.ico")))
-            theme_manager.register_widget(win, "root")
-            frame = tk.Frame(win, padx=20, pady=20)
-            frame.pack(fill="both", expand=True)
-            theme_manager.register_widget(frame, "frame")
-            label = tk.Label(frame, text="Iray Server Settings", font=("Arial", 16, "bold"))
-            label.pack(pady=10)
-            theme_manager.register_widget(label, "label")
-        except Exception as e:
-            from tkinter import messagebox
-            messagebox.showerror("Error", f"Failed to open Iray Server Settings:\n{e}")
-
-    # Add menu items to Options menu
-    options_menu.add_command(label="  Overlord Settings  ", command=show_overlord_settings)
-    options_menu.add_command(label="  Daz Studio Settings  ", command=show_daz_studio_settings)
-    options_menu.add_command(label="  Iray Server Settings  ", command=show_iray_server_settings)
-    
-    # Help menu
-    help_menu = tk.Menu(menubar, tearoff=0, font=("Arial", 11))
-    menubar.add_cascade(label="Help", menu=help_menu)
-    theme_manager.register_widget(help_menu, "menu")
-    
     # Register proper window close handler
     def on_closing():
         """Handle window closing event"""
@@ -1360,7 +1281,7 @@ def main():
         # Open Iray Server web interface with Selenium and sign in
         iray_actions = IrayServerActions(cleanup_manager)
         iray_actions.start_browser()
-        iray_actions.setup()
+        iray_actions.setup(output_dir)
         iray_actions.close_browser()
         
         logging.info('Iray Server setup complete')
@@ -1507,7 +1428,6 @@ def main():
         """Kill all Daz Studio, Iray Server, and webdriver/browser processes. Also resets UI progress labels."""
         logging.info('Killing all render-related processes (DAZStudio, Iray Server, webdriver/browsers)')
         killed_daz = 0
-        killed_iray = 0
         killed_webdriver = 0
         try:
             # Kill all DAZStudio processes
@@ -1518,25 +1438,11 @@ def main():
                         killed_daz += 1
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     continue
-            # Kill Iray Server processes
-            for proc in psutil.process_iter(['name', 'exe', 'cmdline']):
-                try:
-                    name = proc.info.get('name', '')
-                    exe = proc.info.get('exe', '')
-                    cmdline = ' '.join(proc.info.get('cmdline', []))
-                    if (
-                        (name and 'iray_server' in name.lower()) or
-                        (exe and 'iray_server' in exe.lower()) or
-                        ('iray_server' in cmdline.lower())
-                    ):
-                        proc.kill()
-                        killed_iray += 1
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    continue
-            # Kill webdriver/browser processes (chromedriver, geckodriver, msedgedriver, chrome, firefox, msedge)
+            # Kill Iray Server processes using cleanup manager
+            cleanup_manager.stop_iray_server()
+            # Kill only webdriver processes (not regular browsers)
             webdriver_names = [
-                'chromedriver', 'geckodriver', 'msedgedriver',
-                'chrome', 'firefox', 'msedge', 'opera', 'edge', 'brave', 'chromium'
+                'geckodriver'
             ]
             for proc in psutil.process_iter(['name']):
                 try:
@@ -1547,7 +1453,7 @@ def main():
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     continue
             main.dazstudio_killed_by_user = True
-            logging.info(f'Killed {killed_daz} DAZStudio, {killed_iray} Iray Server, {killed_webdriver} webdriver/browser process(es)')
+            logging.info(f'Killed {killed_daz} DAZStudio, {killed_webdriver} webdriver process(es). Iray Server stopped via cleanup manager.')
         except Exception as e:
             logging.error(f'Failed to stop render processes: {e}')
         # Reset progress and time labels, and total images label (always reset regardless of error)

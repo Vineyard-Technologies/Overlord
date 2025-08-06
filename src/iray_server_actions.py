@@ -114,9 +114,60 @@ class IrayServerActions:
             logging.error(f"Failed to start browser and sign in to Iray Server: {e}")
             return False
         
-    def setup(self): # , storage_path: str
+    def setup(self, storage_path: str):
         
         self.clear_queue()
+
+        self.configure_settings(storage_path)
+
+    def configure_settings(self, storage_path: str):
+        """
+        Configure Iray Server settings such as image storage path and ZIP generation switch
+        """
+        if not self.driver:
+            logging.error("Browser not started. Call start_browser() first.")
+            return False
+        
+        try:
+            # Navigate to settings page
+            self.find_element(IrayServerXPaths.navBar.SETTINGS).click()
+            logging.info("Navigated to settings page")
+            
+            # Wait for settings page to load
+            WebDriverWait(self.driver, self.default_timeout).until(
+                EC.presence_of_element_located((By.TAG_NAME, "body"))
+            )
+            
+            # Set image storage path
+            storage_path_input = self.find_element(IrayServerXPaths.settingsPage.IMAGE_STORAGE_PATH_INPUT)
+            storage_path_input.clear()
+            storage_path_input.send_keys(storage_path)
+            logging.info(f"Set image storage path to: {storage_path}")
+            
+            # Click save button to apply the storage path change
+            save_button = WebDriverWait(self.driver, self.default_timeout).until(
+                EC.element_to_be_clickable((By.XPATH, IrayServerXPaths.settingsPage.GLOBAL_IMAGE_STORAGE_PATH_SAVE_BUTTON))
+            )
+            save_button.click()
+            logging.info("Saved image storage path settings")
+            
+            # Ensure ZIP generation switch is toggled off
+            zip_switch = self.find_element(IrayServerXPaths.settingsPage.GENERATE_ZIP_FILES_SWITCH)
+            
+            # Check if the switch is currently enabled (we want it disabled)
+            # If switch is on, class will be "switch on", if off, class will be just "switch"
+            switch_class = zip_switch.get_attribute("class")
+            if "switch on" in switch_class:
+                zip_switch.click()
+                logging.info("Turned off ZIP generation switch")
+            else:
+                logging.info("ZIP generation switch already off")
+            
+            return True
+            
+        except Exception as e:
+            logging.error(f"Failed to configure settings: {e}")
+            return False
     
     def clear_queue(self):
         """
