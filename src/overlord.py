@@ -1295,31 +1295,33 @@ def main():
                 logging.info('Start Render button clicked')
                 logging.info('Starting Iray Server...')
                 
+                # delete iray_server.db
+                script_dir = os.path.dirname(os.path.abspath(__file__))
+                iray_db_path = os.path.join(script_dir, "iray_server.db")
+            
+                if os.path.exists(iray_db_path):
+                    os.remove(iray_db_path)
+                    logging.info(f"Successfully deleted iray_server.db at: {iray_db_path}")
+
+                else:
+                    logging.info(f"iray_server.db not found at: {iray_db_path} (nothing to delete)")
+
+                
                 start_iray_server()  # Start Iray Server
                 
                 # Wait for Iray server to start up (in background thread, so it won't block UI)
                 time.sleep(IRAY_STARTUP_DELAY / 1000)  # Convert to seconds
                 
-                # Open Iray Server web interface with Selenium and sign in
                 iray_actions = IrayServerActions(cleanup_manager)
                 
-                # Start browser and check for success
-                if not iray_actions.start_browser():
-                    logging.error('Failed to start browser for Iray Server setup')
-                    iray_actions.close_browser()
-                    raise Exception("Iray Server browser startup failed")
-                
-                # Setup Iray Server and check for success
-                if not iray_actions.setup(output_dir):
-                    logging.error('Failed to setup Iray Server configuration')
-                    iray_actions.close_browser()
-                    # Shutdown Iray Server since setup failed
+                # Configure Iray Server (starts browser, configures settings, closes browser)
+                if not iray_actions.configure_server(output_dir):
+                    logging.error('Failed to configure Iray Server')
+                    # Shutdown Iray Server since configuration failed
                     cleanup_manager.stop_iray_server()
-                    raise Exception("Iray Server setup failed")
+                    raise Exception("Iray Server configuration failed")
                 
-                iray_actions.close_browser()
-                
-                logging.info('Iray Server setup complete')
+                logging.info('Iray Server configuration complete')
                 
                 # Continue with the rest of the render setup on UI thread
                 root.after(0, continue_render_setup)
