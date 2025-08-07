@@ -7,6 +7,9 @@ including browser management, login, and various server operations.
 
 import logging
 import time
+import sys
+import os
+from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.firefox.options import Options as FirefoxOptions
 from selenium.webdriver.common.by import By
@@ -38,6 +41,128 @@ class IrayServerActions:
     def find_elements(self, xpath):
         """Helper method to find multiple elements by XPath"""
         return self.driver.find_elements(By.XPATH, xpath)
+    
+    def log_detailed_error(self, e, operation_description, log_level="error"):
+        """
+        Helper method to log detailed error information and take screenshot in dev mode
+        
+        Args:
+            e: The exception object
+            operation_description: Description of the operation that failed
+            log_level: Logging level ("error" or "warning")
+        """
+        error_type = type(e).__name__
+        error_message = str(e) if str(e) else "No error message"
+        error_args = getattr(e, 'args', ())
+        
+        log_message = f"{operation_description} - Type: {error_type}, Message: '{error_message}', Args: {error_args}"
+        
+        # Take screenshot in development mode only
+        screenshot_path = None
+        if not getattr(sys, 'frozen', False) and self.driver:
+            screenshot_path = self._take_error_screenshot(operation_description)
+            if screenshot_path:
+                log_message += f" - Screenshot saved: {screenshot_path}"
+        
+        if log_level == "warning":
+            logging.warning(log_message)
+        else:
+            logging.error(log_message)
+    
+    def _take_error_screenshot(self, operation_description):
+        """
+        Take a screenshot of the browser window for debugging purposes
+        Only used in development mode
+        
+        Args:
+            operation_description: Description of the operation that failed
+            
+        Returns:
+            str: Path to the saved screenshot, or None if failed
+        """
+        try:
+            # Check if driver is still available for screenshots
+            if not self.driver:
+                logging.warning("Cannot take screenshot: browser driver is None")
+                return None
+                
+            # Create screenshots directory in user's Pictures folder
+            user_profile = os.environ.get('USERPROFILE') or os.path.expanduser('~')
+            screenshots_dir = os.path.join(user_profile, 'Pictures', 'Overlord Error Screenshots')
+            os.makedirs(screenshots_dir, exist_ok=True)
+            
+            # Create filename with timestamp and operation description
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            # Clean operation description for filename
+            clean_operation = "".join(c for c in operation_description if c.isalnum() or c in (' ', '-', '_')).rstrip()
+            clean_operation = clean_operation.replace(' ', '_')
+            
+            filename = f"iray_error_{timestamp}_{clean_operation}.png"
+            screenshot_path = os.path.join(screenshots_dir, filename)
+            
+            # Take screenshot
+            if self.driver.save_screenshot(screenshot_path):
+                logging.info(f"Error screenshot saved to: {screenshot_path}")
+                return screenshot_path
+            else:
+                logging.warning("Failed to save error screenshot")
+                return None
+                
+        except Exception as screenshot_error:
+            error_msg = str(screenshot_error)
+            if "connection broken" in error_msg.lower() or "connection refused" in error_msg.lower():
+                logging.warning("Cannot take screenshot: browser session no longer available")
+            else:
+                logging.warning(f"Failed to take error screenshot: {screenshot_error}")
+            return None
+    
+    def wait_for_page_ready(self):
+        """
+        Wait for the page to be fully loaded and JavaScript to finish executing
+        """
+        try:
+            # First wait for document ready state
+            WebDriverWait(self.driver, self.default_timeout).until(
+                lambda driver: driver.execute_script("return document.readyState") == "complete"
+            )
+            
+            # Wait for jQuery to finish loading if present
+            WebDriverWait(self.driver, self.default_timeout).until(
+                lambda driver: driver.execute_script("return typeof jQuery === 'undefined' || jQuery.active === 0")
+            )
+            
+            # Additional wait to ensure all dynamic content is loaded
+            time.sleep(0.5)
+            
+            logging.info("Page is fully loaded and ready")
+            return True
+            
+        except TimeoutException:
+            logging.warning("Page took longer than expected to fully load")
+            return False
+        except Exception as e:
+            self.log_detailed_error(e, "Error waiting for page to be ready")
+            return False
+
+    def wait_for_saved_message(self, operation_description="operation"):
+        """
+        Wait for the saved message to appear and then disappear
+        
+        Args:
+            operation_description: Description of the operation for logging purposes
+        """
+        try:
+            # Wait for saved message to appear
+            WebDriverWait(self.driver, self.default_timeout).until(
+                EC.presence_of_element_located((By.XPATH, IrayServerXPaths.settingsPage.SAVED_MESSAGE))
+            )
+            # Wait for saved message to disappear
+            WebDriverWait(self.driver, self.default_timeout).until(
+                EC.invisibility_of_element_located((By.XPATH, IrayServerXPaths.settingsPage.SAVED_MESSAGE))
+            )
+            logging.info(f"{operation_description} confirmation message appeared and disappeared")
+        except TimeoutException:
+            logging.warning(f"{operation_description} confirmation message did not appear or disappear as expected")
         
     def start_browser(self):
         """
@@ -68,14 +193,11 @@ class IrayServerActions:
             logging.info(f"Opened Iray Server web interface: {url}")
             
             # Wait for the page to load
-            try:
-                WebDriverWait(self.driver, self.default_timeout).until(
-                    EC.presence_of_element_located((By.TAG_NAME, "body"))
-                )
-                logging.info("Iray Server web interface loaded successfully")
-            except TimeoutException:
+            if not self.wait_for_page_ready():
                 logging.warning("Iray Server web interface took longer than expected to load")
                 return False
+            
+            logging.info("Iray Server web interface loaded successfully")
             
             # Sign in automatically
             username_input = self.find_element(IrayServerXPaths.loginPage.USERNAME_INPUT)
@@ -98,27 +220,37 @@ class IrayServerActions:
             self.driver.get(queue_url)
 
             # Wait for the queue page to load
-            try:
-                WebDriverWait(self.driver, self.default_timeout).until(
-                    EC.presence_of_element_located((By.TAG_NAME, "body"))
-                )
-                logging.info("Navigated to render queue page")
-            except TimeoutException:
+            if not self.wait_for_page_ready():
                 logging.warning("Render queue page took longer than expected to load")
                 return False
+            
+            logging.info("Navigated to render queue page")
             
             logging.info("Signed in to Iray Server")
             return True
                 
         except Exception as e:
-            logging.error(f"Failed to start browser and sign in to Iray Server: {e}")
+            self.log_detailed_error(e, "Failed to start browser and sign in to Iray Server")
             return False
         
     def setup(self, storage_path: str):
+        """
+        Setup Iray Server by clearing queue and configuring settings
         
-        self.clear_queue()
+        Returns:
+            bool: True if setup completed successfully, False otherwise
+        """
+        # Clear the render queue
+        if not self.clear_queue():
+            logging.error("Failed to clear render queue")
+            return False
 
-        self.configure_settings(storage_path)
+        # Configure server settings
+        if not self.configure_settings(storage_path):
+            logging.error("Failed to configure server settings")
+            return False
+        
+        return True
 
     def configure_settings(self, storage_path: str):
         """
@@ -135,9 +267,9 @@ class IrayServerActions:
             logging.info("Navigated to settings page")
             
             # Wait for settings page to load
-            WebDriverWait(self.driver, self.default_timeout).until(
-                EC.presence_of_element_located((By.TAG_NAME, "body"))
-            )
+            if not self.wait_for_page_ready():
+                logging.warning("Settings page took longer than expected to load")
+                return False
             
             # Set image storage path
             storage_path_input = self.find_element(IrayServerXPaths.settingsPage.GLOBAL_IMAGE_STORAGE_PATH_INPUT)
@@ -152,6 +284,9 @@ class IrayServerActions:
             save_button.click()
             logging.info("Saved image storage path settings")
             
+            # Wait for the saved message to appear and then disappear
+            self.wait_for_saved_message("Save")
+            
             # Ensure ZIP generation switch is toggled off
             zip_switch = self.find_element(IrayServerXPaths.settingsPage.GENERATE_ZIP_FILES_SWITCH)
             
@@ -161,13 +296,16 @@ class IrayServerActions:
             if "switch on" in switch_class:
                 zip_switch.click()
                 logging.info("Turned off ZIP generation switch")
+                
+                # Wait for the saved message to appear and then disappear after toggling switch
+                self.wait_for_saved_message("ZIP switch toggle")
             else:
                 logging.info("ZIP generation switch already off")
             
             return True
             
         except Exception as e:
-            logging.error(f"Failed to configure settings: {e}")
+            self.log_detailed_error(e, "Failed to configure settings")
             return False
     
     def clear_queue(self):
@@ -185,7 +323,7 @@ class IrayServerActions:
         current_url = self.driver.current_url
         expected_url = f"{self.base_url}/index.html#queue"
         if current_url != expected_url:
-            raise WebDriverException(f"Not on queue page. Current URL: {current_url}, Expected: {expected_url}")
+            raise WebDriverException(f"Not on queue page. Current URL: {current_url}, Expected: {expected_url}")          
             
         try:
             # Click each remove button
@@ -226,34 +364,34 @@ class IrayServerActions:
                     removed_count += 1
 
                 except Exception as e:
-                    logging.warning(f"Failed to click remove button: {e}")
-                    break
+                    self.log_detailed_error(e, "Failed to click remove button", "warning")
+                    return False
             
             logging.info(f"Removed {removed_count} items from queue")
             return True
             
         except Exception as e:
-            logging.error(f"Failed to clear queue: {e}")
+            self.log_detailed_error(e, "Failed to clear queue")
             return False
     
     def close_browser(self):
         """Close the browser if it's open"""
         if self.driver:
             try:
-                # Check if driver is still responsive before attempting to quit
-                try:
-                    # Try a simple operation to check if the session is still active
-                    self.driver.current_url
-                except Exception:
-                    # Session is already dead, just set driver to None
-                    logging.info("Browser session already closed")
-                    self.driver = None
-                    return
-                
-                # If we get here, the session is still active, so we can safely quit
+                # Try to quit the driver directly without checking responsiveness first
+                # This avoids connection errors when the session is already dead
                 self.driver.quit()
                 logging.info("Browser closed successfully")
             except Exception as e:
-                logging.error(f"Error closing browser: {e}")
+                # Log the error but don't treat it as critical - the browser may already be closed
+                error_msg = str(e)
+                if "connection broken" in error_msg.lower() or "connection refused" in error_msg.lower():
+                    logging.info("Browser session was already closed or unreachable")
+                else:
+                    logging.warning(f"Error during browser cleanup (non-critical): {e}")
             finally:
+                # Always set driver to None regardless of quit() success
                 self.driver = None
+                # Also clear the driver from cleanup manager to prevent double-quit attempts
+                if self.cleanup_manager and hasattr(self.cleanup_manager, 'browser_driver'):
+                    self.cleanup_manager.browser_driver = None

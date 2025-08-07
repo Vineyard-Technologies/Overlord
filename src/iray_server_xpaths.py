@@ -10,6 +10,8 @@ class IrayServerXPaths:
 
         GENERATE_ZIP_FILES_SWITCH = "(//div[@id='zipBox']//div[starts-with(@class, 'switch')])[1]"
 
+        SAVED_MESSAGE = "//div[text()='Saved']"
+
     class loginPage:
         USERNAME_INPUT = "//input[@type='text']"
         PASSWORD_INPUT = "(//input[@type='password'])[1]"

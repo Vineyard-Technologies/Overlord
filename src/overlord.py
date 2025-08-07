@@ -32,7 +32,7 @@ OUTPUT_UPDATE_INTERVAL = 5000  # milliseconds
 AUTO_SAVE_DELAY = 2000  # milliseconds
 DAZ_STUDIO_STARTUP_DELAY = 5000  # milliseconds
 OVERLORD_CLOSE_DELAY = 2000  # milliseconds
-IRAY_STARTUP_DELAY = 3000  # milliseconds
+IRAY_STARTUP_DELAY = 10000  # milliseconds
 
 def get_app_data_path(subfolder='Overlord'):
     """Get the application data path for the given subfolder"""
@@ -330,9 +330,15 @@ class CleanupManager:
             if self.browser_driver:
                 try:
                     self.browser_driver.quit()
-                    logging.info('Browser driver closed')
+                    logging.info('Browser driver closed via cleanup manager')
                 except Exception as e:
-                    logging.error(f'Failed to close browser driver: {e}')
+                    error_msg = str(e)
+                    if "connection broken" in error_msg.lower() or "connection refused" in error_msg.lower():
+                        logging.info('Browser driver was already closed or unreachable')
+                    else:
+                        logging.warning(f'Error during browser driver cleanup (non-critical): {e}')
+                finally:
+                    self.browser_driver = None
             
             # Stop Iray Server processes
             self.stop_iray_server()
@@ -1293,8 +1299,21 @@ def main():
                 
                 # Open Iray Server web interface with Selenium and sign in
                 iray_actions = IrayServerActions(cleanup_manager)
-                iray_actions.start_browser()
-                iray_actions.setup(output_dir)
+                
+                # Start browser and check for success
+                if not iray_actions.start_browser():
+                    logging.error('Failed to start browser for Iray Server setup')
+                    iray_actions.close_browser()
+                    raise Exception("Iray Server browser startup failed")
+                
+                # Setup Iray Server and check for success
+                if not iray_actions.setup(output_dir):
+                    logging.error('Failed to setup Iray Server configuration')
+                    iray_actions.close_browser()
+                    # Shutdown Iray Server since setup failed
+                    cleanup_manager.stop_iray_server()
+                    raise Exception("Iray Server setup failed")
+                
                 iray_actions.close_browser()
                 
                 logging.info('Iray Server setup complete')
