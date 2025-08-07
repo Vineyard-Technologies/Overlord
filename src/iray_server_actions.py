@@ -274,7 +274,7 @@ class IrayServerActions:
             # Set image storage path
             storage_path_input = self.find_element(IrayServerXPaths.settingsPage.GLOBAL_IMAGE_STORAGE_PATH_INPUT)
             storage_path_input.clear()
-            storage_path_input.send_keys(storage_path)
+            storage_path_input.send_keys(storage_path.replace('/', '\\'))
             logging.info(f"Set image storage path to: {storage_path}")
             
             # Click save button to apply the storage path change

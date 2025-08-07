@@ -32,6 +32,9 @@ OUTPUT_UPDATE_INTERVAL = 5000  # milliseconds
 AUTO_SAVE_DELAY = 2000  # milliseconds
 DAZ_STUDIO_STARTUP_DELAY = 5000  # milliseconds
 OVERLORD_CLOSE_DELAY = 2000  # milliseconds
+# A lower number can cause responsiveness issues with the web UI
+# We could read the Iray Server log to see when it's finished instead
+# That might be a lot of code and somewhat of a performance overhead
 IRAY_STARTUP_DELAY = 10000  # milliseconds
 
 def get_app_data_path(subfolder='Overlord'):
