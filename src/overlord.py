@@ -20,6 +20,9 @@ import winreg
 import psutil
 import atexit
 import tempfile
+from pathlib import Path
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
 from iray_server_actions import IrayServerActions
 from version import __version__ as overlord_version
 
@@ -274,6 +277,208 @@ class SettingsManager:
 
 settings_manager = SettingsManager()
 
+# File watcher for .exr to .png conversion
+class ExrFileHandler(FileSystemEventHandler):
+    """Handle new .exr files and convert them to .png"""
+    
+    def __init__(self):
+        self.conversion_queue = []
+        self.conversion_thread = None
+        self.stop_conversion = False
+        
+    def on_created(self, event):
+        """Called when a file is created"""
+        if not event.is_directory and event.src_path.lower().endswith('.exr'):
+            self.add_to_conversion_queue(event.src_path)
+    
+    def on_moved(self, event):
+        """Called when a file is moved/renamed"""
+        if not event.is_directory and event.dest_path.lower().endswith('.exr'):
+            self.add_to_conversion_queue(event.dest_path)
+    
+    def add_to_conversion_queue(self, exr_path):
+        """Add .exr file to conversion queue"""
+        self.conversion_queue.append(exr_path)
+        logging.info(f'Added {exr_path} to EXR conversion queue')
+        
+        # Start conversion thread if not already running
+        if self.conversion_thread is None or not self.conversion_thread.is_alive():
+            self.start_conversion_thread()
+    
+    def start_conversion_thread(self):
+        """Start the conversion thread"""
+        self.stop_conversion = False
+        self.conversion_thread = threading.Thread(target=self.process_conversion_queue, daemon=True)
+        self.conversion_thread.start()
+    
+    def stop_conversion_thread(self):
+        """Stop the conversion thread"""
+        self.stop_conversion = True
+        if self.conversion_thread and self.conversion_thread.is_alive():
+            self.conversion_thread.join(timeout=5.0)  # Wait up to 5 seconds
+    
+    def process_conversion_queue(self):
+        """Process the conversion queue in a background thread"""
+        while not self.stop_conversion:
+            if self.conversion_queue:
+                exr_path = self.conversion_queue.pop(0)
+                try:
+                    self.convert_exr_to_png(exr_path)
+                except Exception as e:
+                    logging.error(f'Failed to convert {exr_path} to PNG: {e}')
+            else:
+                # Sleep briefly if queue is empty
+                time.sleep(0.5)
+    
+    def convert_exr_to_png(self, exr_path):
+        """Convert a single .exr file to .png"""
+        try:
+            # Wait for file to be fully written (DAZ Studio might still be writing)
+            max_wait_time = 30  # seconds
+            wait_time = 0
+            while wait_time < max_wait_time:
+                try:
+                    # Try to get file size twice with a small delay
+                    size1 = os.path.getsize(exr_path)
+                    time.sleep(0.5)
+                    size2 = os.path.getsize(exr_path)
+                    if size1 == size2 and size1 > 0:
+                        break  # File appears to be stable
+                except (OSError, FileNotFoundError):
+                    pass
+                time.sleep(1)
+                wait_time += 1
+            
+            if not os.path.exists(exr_path):
+                logging.warning(f'EXR file no longer exists: {exr_path}')
+                return
+            
+            # Generate PNG path
+            png_path = os.path.splitext(exr_path)[0] + '.png'
+            
+            # Check if PNG already exists
+            if os.path.exists(png_path):
+                logging.info(f'PNG already exists, skipping conversion: {png_path}')
+                return
+            
+            logging.info(f'Converting {exr_path} to {png_path}')
+            
+            # Try multiple methods to read the EXR file
+            img = None
+            
+            # Method 1: Try with imageio (often has better EXR support)
+            try:
+                import imageio.v3 as iio
+                img_array = iio.imread(exr_path)
+                # Convert numpy array to PIL Image
+                if img_array.dtype != 'uint8':
+                    # Normalize float values to 0-255 range, preserving alpha
+                    if img_array.shape[-1] == 4:  # RGBA
+                        # Clamp values to 0-1 range first, then scale to 0-255
+                        img_array = np.clip(img_array, 0, 1)
+                        img_array = (img_array * 255).astype('uint8')
+                        img = Image.fromarray(img_array, 'RGBA')
+                    else:  # RGB
+                        img_array = np.clip(img_array, 0, 1)
+                        img_array = (img_array * 255).astype('uint8')
+                        img = Image.fromarray(img_array, 'RGB')
+                else:
+                    # Already uint8
+                    if img_array.shape[-1] == 4:
+                        img = Image.fromarray(img_array, 'RGBA')
+                    else:
+                        img = Image.fromarray(img_array, 'RGB')
+                logging.info(f'Successfully read EXR with imageio: {exr_path}')
+            except Exception as e:
+                logging.debug(f'imageio failed to read EXR: {e}')
+            
+            # Method 2: Try with OpenEXR
+            if img is None:
+                try:
+                    import OpenEXR
+                    import Imath
+                    
+                    exrfile = OpenEXR.InputFile(exr_path)
+                    header = exrfile.header()
+                    dw = header['dataWindow']
+                    width = dw.max.x - dw.min.x + 1
+                    height = dw.max.y - dw.min.y + 1
+                    
+                    # Read RGB channels
+                    FLOAT = Imath.PixelType(Imath.PixelType.FLOAT)
+                    r_str = exrfile.channel('R', FLOAT)
+                    g_str = exrfile.channel('G', FLOAT)
+                    b_str = exrfile.channel('B', FLOAT)
+                    
+                    # Try to read alpha channel
+                    try:
+                        a_str = exrfile.channel('A', FLOAT)
+                        has_alpha = True
+                    except:
+                        has_alpha = False
+                    
+                    # Convert to numpy arrays
+                    import numpy as np
+                    r = np.frombuffer(r_str, dtype=np.float32).reshape((height, width))
+                    g = np.frombuffer(g_str, dtype=np.float32).reshape((height, width))
+                    b = np.frombuffer(b_str, dtype=np.float32).reshape((height, width))
+                    
+                    if has_alpha:
+                        a = np.frombuffer(a_str, dtype=np.float32).reshape((height, width))
+                        # Stack RGBA and normalize
+                        rgba = np.stack([r, g, b, a], axis=2)
+                        rgba = np.clip(rgba, 0, 1)  # Clamp to 0-1 range
+                        rgba = (rgba * 255).astype(np.uint8)
+                        img = Image.fromarray(rgba, 'RGBA')
+                    else:
+                        # Stack RGB and normalize
+                        rgb = np.stack([r, g, b], axis=2)
+                        rgb = np.clip(rgb, 0, 1)  # Clamp to 0-1 range
+                        rgb = (rgb * 255).astype(np.uint8)
+                        img = Image.fromarray(rgb, 'RGB')
+                    
+                    logging.info(f'Successfully read EXR with OpenEXR: {exr_path}')
+                except Exception as e:
+                    logging.debug(f'OpenEXR failed to read EXR: {e}')
+            
+            # Method 3: Try with PIL directly (sometimes works)
+            if img is None:
+                try:
+                    img = Image.open(exr_path)
+                    # Keep original mode (RGB or RGBA) - don't force convert
+                    logging.info(f'Successfully read EXR with PIL: {exr_path}')
+                except Exception as e:
+                    logging.debug(f'PIL failed to read EXR: {e}')
+            
+            # If all methods failed, log error and return
+            if img is None:
+                logging.error(f'All methods failed to read EXR file: {exr_path}')
+                return
+            
+            # Save as PNG with alpha preservation
+            if img.mode == 'RGBA':
+                # Save with alpha channel preserved
+                img.save(png_path, 'PNG', optimize=True)
+                logging.info(f'Successfully converted {exr_path} to {png_path} (with alpha)')
+            else:
+                # Convert to RGB if not already (for files without alpha)
+                if img.mode != 'RGB':
+                    img = img.convert('RGB')
+                img.save(png_path, 'PNG', optimize=True)
+                logging.info(f'Successfully converted {exr_path} to {png_path} (RGB)')
+            
+            # Delete the original .exr file to save space
+            try:
+                os.remove(exr_path)
+                logging.info(f'Deleted original EXR file: {exr_path}')
+            except Exception as delete_error:
+                logging.warning(f'Failed to delete original EXR file {exr_path}: {delete_error}')
+            
+        except Exception as e:
+            logging.error(f'Error converting {exr_path} to PNG: {e}')
+
+settings_manager = SettingsManager()
+
 # Global cleanup manager
 class CleanupManager:
     def __init__(self):
@@ -284,6 +489,8 @@ class CleanupManager:
         self.save_settings_callback = None
         self.settings_saved_on_close = False
         self.browser_driver = None
+        self.file_observer = None
+        self.exr_handler = None
     
     def register_temp_file(self, filepath):
         """Register a temporary file for cleanup"""
@@ -309,6 +516,39 @@ class CleanupManager:
         """Mark that settings have been saved to prevent duplicate saves"""
         self.settings_saved_on_close = True
     
+    def start_file_monitoring(self, output_dir):
+        """Start monitoring the output directory for new .exr files"""
+        try:
+            if self.file_observer is not None:
+                self.stop_file_monitoring()
+            
+            if not os.path.exists(output_dir):
+                os.makedirs(output_dir, exist_ok=True)
+            
+            self.exr_handler = ExrFileHandler()
+            self.file_observer = Observer()
+            self.file_observer.schedule(self.exr_handler, output_dir, recursive=True)
+            self.file_observer.start()
+            logging.info(f'Started file monitoring for .exr files in: {output_dir}')
+        except Exception as e:
+            logging.error(f'Failed to start file monitoring: {e}')
+    
+    def stop_file_monitoring(self):
+        """Stop monitoring files and clean up the observer"""
+        try:
+            if self.file_observer is not None:
+                self.file_observer.stop()
+                self.file_observer.join(timeout=5.0)  # Wait up to 5 seconds
+                self.file_observer = None
+                logging.info('Stopped file monitoring')
+            
+            if self.exr_handler is not None:
+                self.exr_handler.stop_conversion_thread()
+                self.exr_handler = None
+                logging.info('Stopped EXR conversion handler')
+        except Exception as e:
+            logging.error(f'Error stopping file monitoring: {e}')
+    
     def stop_iray_server(self):
         """Stop all iray_server.exe and iray_server_worker.exe processes"""
         killed_processes = []
@@ -329,6 +569,9 @@ class CleanupManager:
     def cleanup_all(self):
         """Clean up all registered resources"""
         try:
+            # Stop file monitoring first
+            self.stop_file_monitoring()
+            
             # Close browser driver if exists
             if self.browser_driver:
                 try:
@@ -515,6 +758,30 @@ def start_iray_server():
         return
     
     try:
+        # Clean up iray_server.db and cache folder from both possible locations
+        cleanup_locations = []
+        
+        # Add source directory
+        cleanup_locations.append(os.path.dirname(__file__))
+        
+        # Add LocalAppData directory if different
+        local_app_data_dir = get_local_app_data_path()
+        if local_app_data_dir != os.path.dirname(__file__):
+            cleanup_locations.append(local_app_data_dir)
+        
+        for cleanup_dir in cleanup_locations:
+            # Clean up iray_server.db
+            iray_db_path = os.path.join(cleanup_dir, "iray_server.db")
+            if os.path.exists(iray_db_path):
+                os.remove(iray_db_path)
+                logging.info(f"Cleaned up iray_server.db at: {iray_db_path}")
+            
+            # Clean up cache folder
+            cache_dir_path = os.path.join(cleanup_dir, "cache")
+            if os.path.exists(cache_dir_path):
+                shutil.rmtree(cache_dir_path)
+                logging.info(f"Cleaned up cache folder at: {cache_dir_path}")
+        
         # Reference and execute runIrayServer.vbs from correct location
         if getattr(sys, 'frozen', False):
             # Running as PyInstaller executable - look in LocalAppData
@@ -1295,16 +1562,22 @@ def main():
                 logging.info('Start Render button clicked')
                 logging.info('Starting Iray Server...')
                 
-                # delete iray_server.db
+                # delete iray_server.db and cache folder
                 script_dir = os.path.dirname(os.path.abspath(__file__))
                 iray_db_path = os.path.join(script_dir, "iray_server.db")
+                cache_dir_path = os.path.join(script_dir, "cache")
             
                 if os.path.exists(iray_db_path):
                     os.remove(iray_db_path)
                     logging.info(f"Successfully deleted iray_server.db at: {iray_db_path}")
-
                 else:
                     logging.info(f"iray_server.db not found at: {iray_db_path} (nothing to delete)")
+                
+                if os.path.exists(cache_dir_path):
+                    shutil.rmtree(cache_dir_path)
+                    logging.info(f"Successfully deleted cache folder at: {cache_dir_path}")
+                else:
+                    logging.info(f"cache folder not found at: {cache_dir_path} (nothing to delete)")
 
                 
                 start_iray_server()  # Start Iray Server
@@ -1487,6 +1760,8 @@ def main():
                 root.after(DAZ_STUDIO_STARTUP_DELAY, lambda: run_all_instances(i + 1))
             else:
                 logging.info('All render instances launched')
+                # Start file monitoring for .exr files
+                cleanup_manager.start_file_monitoring(image_output_dir)
                 root.after(IMAGE_UPDATE_INTERVAL, show_last_rendered_image)  # Update image after render
 
         run_all_instances()
@@ -1497,6 +1772,8 @@ def main():
     def kill_render_related_processes():
         """Kill all Daz Studio, Iray Server, and webdriver/browser processes. Also resets UI progress labels."""
         logging.info('Killing all render-related processes (DAZStudio, Iray Server, webdriver/browsers)')
+        # Stop file monitoring first
+        cleanup_manager.stop_file_monitoring()
         killed_daz = 0
         killed_webdriver = 0
         try:
@@ -1535,6 +1812,8 @@ def main():
 
     def stop_render():
         logging.info('Stop Render button clicked')
+        # Stop file monitoring first
+        cleanup_manager.stop_file_monitoring()
         kill_render_related_processes()
         # Re-enable Start Render button and disable Stop Render button
         button.config(state="normal")
