@@ -169,8 +169,8 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 
 			
 			// oRenderMgr.doRender();
-			oRenderer.exportRenderToBridgeQueue(sSubjectName + '_' + sAnimationName + '_' + nOutputAngle
-				+ '_' + sAnimationName + (bIsShadow ? '_shadow_' : '_') + nOutputAngle+ '_' + ('000' + nFrame).slice(-3),
+			oRenderer.exportRenderToBridgeQueue(sSubjectName + '_' + sAnimationName + '_'
+				 + (bIsShadow ? '_shadow_' : '_') + nOutputAngle+ '_' + ('000' + nFrame).slice(-3),
 			
 			'png', oCamera, oRenderOptions, 0);
 

@@ -239,29 +239,6 @@ class IrayServerActions:
             else:
                 logging.info("ZIP generation switch already off")
 
-            command_input = self.find_element(IrayServerXPaths.settingsPage.COMMAND_INPUT)
-            command_input.clear()
-            # Temporarily inline the batch commands for debugging
-            # batch_commands = '''set "TARGET_DIR=C:\\Users\\Andrew\\Downloads\\serverOutput\\@user\\@job"
-            #     for %%f in ("%TARGET_DIR%\\*.exr") do (
-            #         magick "%%f" "%%~dpnf.png"
-            #     )'''
-
-            # command_input.send_keys(f'echo @job > "{storage_path}\\helloWorld.txt" && echo @user >> "{storage_path}\\helloWorld.txt" && echo @status >> "{storage_path}\\helloWorld.txt"')
-
-            command_input.send_keys(f'echo {storage_path}\\@user\\@job > "{storage_path}\\helloWorld.txt"')
-            # command_input.send_keys(batch_commands)
-            logging.info("Set command input with inline batch commands")
-
-            command_save_button = WebDriverWait(self.driver, self.default_timeout).until(
-                EC.element_to_be_clickable((By.XPATH, IrayServerXPaths.settingsPage.COMMAND_SAVE_BUTTON))
-            )
-            command_save_button.click()
-            logging.info("Saved command settings")
-
-            # Wait for the saved message to appear and then disappear
-            self.wait_for_saved_message("Save")
-
             logging.info("Iray Server configuration completed successfully")
             return True
             
