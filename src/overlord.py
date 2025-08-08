@@ -277,9 +277,9 @@ class SettingsManager:
 
 settings_manager = SettingsManager()
 
-# File watcher for .exr to .png conversion
+# File watcher for .exr to .webp conversion
 class ExrFileHandler(FileSystemEventHandler):
-    """Handle new .exr files and convert them to .png"""
+    """Handle new .exr files and convert them to .webp"""
     
     def __init__(self):
         self.conversion_queue = []
@@ -299,7 +299,7 @@ class ExrFileHandler(FileSystemEventHandler):
     def add_to_conversion_queue(self, exr_path):
         """Add .exr file to conversion queue"""
         self.conversion_queue.append(exr_path)
-        logging.info(f'Added {exr_path} to EXR conversion queue')
+        logging.info(f'Added {exr_path} to EXR to WEBP conversion queue')
         
         # Start conversion thread if not already running
         if self.conversion_thread is None or not self.conversion_thread.is_alive():
@@ -325,13 +325,13 @@ class ExrFileHandler(FileSystemEventHandler):
                 try:
                     self.convert_exr_to_png(exr_path)
                 except Exception as e:
-                    logging.error(f'Failed to convert {exr_path} to PNG: {e}')
+                    logging.error(f'Failed to convert {exr_path} to WEBP: {e}')
             else:
                 # Sleep briefly if queue is empty
                 time.sleep(0.5)
     
     def convert_exr_to_png(self, exr_path):
-        """Convert a single .exr file to .png"""
+        """Convert a single .exr file to .webp"""
         try:
             # Wait for file to be fully written (DAZ Studio might still be writing)
             max_wait_time = 30  # seconds
@@ -353,15 +353,15 @@ class ExrFileHandler(FileSystemEventHandler):
                 logging.warning(f'EXR file no longer exists: {exr_path}')
                 return
             
-            # Generate PNG path
-            png_path = os.path.splitext(exr_path)[0] + '.png'
+            # Generate WEBP path
+            webp_path = os.path.splitext(exr_path)[0] + '.webp'
             
-            # Check if PNG already exists
-            if os.path.exists(png_path):
-                logging.info(f'PNG already exists, skipping conversion: {png_path}')
+            # Check if WEBP already exists
+            if os.path.exists(webp_path):
+                logging.info(f'WEBP already exists, skipping conversion: {webp_path}')
                 return
             
-            logging.info(f'Converting {exr_path} to {png_path}')
+            logging.info(f'Converting {exr_path} to {webp_path}')
             
             # Try multiple methods to read the EXR file
             img = None
@@ -455,17 +455,17 @@ class ExrFileHandler(FileSystemEventHandler):
                 logging.error(f'All methods failed to read EXR file: {exr_path}')
                 return
             
-            # Save as PNG with alpha preservation
+            # Save as WEBP with alpha preservation
             if img.mode == 'RGBA':
-                # Save with alpha channel preserved
-                img.save(png_path, 'PNG', optimize=True)
-                logging.info(f'Successfully converted {exr_path} to {png_path} (with alpha)')
+                # Save with alpha channel preserved, lossless compression
+                img.save(webp_path, 'WEBP', lossless=True, quality=100)
+                logging.info(f'Successfully converted {exr_path} to {webp_path} (with alpha)')
             else:
                 # Convert to RGB if not already (for files without alpha)
                 if img.mode != 'RGB':
                     img = img.convert('RGB')
-                img.save(png_path, 'PNG', optimize=True)
-                logging.info(f'Successfully converted {exr_path} to {png_path} (RGB)')
+                img.save(webp_path, 'WEBP', lossless=True, quality=100)
+                logging.info(f'Successfully converted {exr_path} to {webp_path} (RGB)')
             
             # Delete the original .exr file to save space
             try:
@@ -475,7 +475,7 @@ class ExrFileHandler(FileSystemEventHandler):
                 logging.warning(f'Failed to delete original EXR file {exr_path}: {delete_error}')
             
         except Exception as e:
-            logging.error(f'Error converting {exr_path} to PNG: {e}')
+            logging.error(f'Error converting {exr_path} to WEBP: {e}')
 
 settings_manager = SettingsManager()
 
@@ -529,7 +529,7 @@ class CleanupManager:
             self.file_observer = Observer()
             self.file_observer.schedule(self.exr_handler, output_dir, recursive=True)
             self.file_observer.start()
-            logging.info(f'Started file monitoring for .exr files in: {output_dir}')
+            logging.info(f'Started file monitoring for .exr to .webp conversion in: {output_dir}')
         except Exception as e:
             logging.error(f'Failed to start file monitoring: {e}')
     
@@ -545,7 +545,7 @@ class CleanupManager:
             if self.exr_handler is not None:
                 self.exr_handler.stop_conversion_thread()
                 self.exr_handler = None
-                logging.info('Stopped EXR conversion handler')
+                logging.info('Stopped EXR to WEBP conversion handler')
         except Exception as e:
             logging.error(f'Error stopping file monitoring: {e}')
     
