@@ -192,44 +192,33 @@ class IrayServerActions:
             username_input.send_keys(USERNAME)
             password_input.send_keys(PASSWORD)
             login_button.click()
+            logging.info("Signed in to Iray Server")
 
             # After the first successful login, (or if the 'Require password change' switch is enabled)
             # the "Please change your password" popup will appear. It can be bypassed by immediately
-            # Browsing to http://127.0.0.1:9090/index.html#queue
+            # browsing to any page
 
-            # Navigate to the render queue page after login
-            queue_url = f"{self.base_url}/index.html#queue"
-            self.driver.get(queue_url)
-
-            # Wait for the queue page to load
-            if not self.wait_for_page_ready():
-                logging.warning("Render queue page took longer than expected to load")
-                return False
-            
-            logging.info("Navigated to render queue page")
-            logging.info("Signed in to Iray Server")
-
-            # Navigate to settings page
+            # Navigate to the settings page after login
             settings_url = f"{self.base_url}/index.html#settings"
             self.driver.get(settings_url)
             logging.info("Navigated to settings page")
-            
-            # Wait for settings page to load
+
+            # Wait for the settings page to load
             if not self.wait_for_page_ready():
                 logging.warning("Settings page took longer than expected to load")
                 return False
             
             # Set image storage path
-            storage_path_input = self.find_element(IrayServerXPaths.settingsPage.GLOBAL_IMAGE_STORAGE_PATH_INPUT)
-            storage_path_input.clear()
-            storage_path_input.send_keys(storage_path.replace('/', '\\'))
+            global_image_storage_path_input = self.find_element(IrayServerXPaths.settingsPage.GLOBAL_IMAGE_STORAGE_PATH_INPUT)
+            global_image_storage_path_input.clear()
+            global_image_storage_path_input.send_keys(storage_path.replace('/', '\\'))
             logging.info(f"Set image storage path to: {storage_path}")
             
             # Click save button to apply the storage path change
-            save_button = WebDriverWait(self.driver, self.default_timeout).until(
+            global_image_storage_path_save_button = WebDriverWait(self.driver, self.default_timeout).until(
                 EC.element_to_be_clickable((By.XPATH, IrayServerXPaths.settingsPage.GLOBAL_IMAGE_STORAGE_PATH_SAVE_BUTTON))
             )
-            save_button.click()
+            global_image_storage_path_save_button.click()
             logging.info("Saved image storage path settings")
             
             # Wait for the saved message to appear and then disappear
@@ -249,7 +238,30 @@ class IrayServerActions:
                 self.wait_for_saved_message("ZIP switch toggle")
             else:
                 logging.info("ZIP generation switch already off")
-            
+
+            command_input = self.find_element(IrayServerXPaths.settingsPage.COMMAND_INPUT)
+            command_input.clear()
+            # Temporarily inline the batch commands for debugging
+            # batch_commands = '''set "TARGET_DIR=C:\\Users\\Andrew\\Downloads\\serverOutput\\@user\\@job"
+            #     for %%f in ("%TARGET_DIR%\\*.exr") do (
+            #         magick "%%f" "%%~dpnf.png"
+            #     )'''
+
+            # command_input.send_keys(f'echo @job > "{storage_path}\\helloWorld.txt" && echo @user >> "{storage_path}\\helloWorld.txt" && echo @status >> "{storage_path}\\helloWorld.txt"')
+
+            command_input.send_keys(f'echo {storage_path}\\@user\\@job > "{storage_path}\\helloWorld.txt"')
+            # command_input.send_keys(batch_commands)
+            logging.info("Set command input with inline batch commands")
+
+            command_save_button = WebDriverWait(self.driver, self.default_timeout).until(
+                EC.element_to_be_clickable((By.XPATH, IrayServerXPaths.settingsPage.COMMAND_SAVE_BUTTON))
+            )
+            command_save_button.click()
+            logging.info("Saved command settings")
+
+            # Wait for the saved message to appear and then disappear
+            self.wait_for_saved_message("Save")
+
             logging.info("Iray Server configuration completed successfully")
             return True
             

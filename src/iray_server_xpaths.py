@@ -10,6 +10,9 @@ class IrayServerXPaths:
 
         GENERATE_ZIP_FILES_SWITCH = "(//div[@id='zipBox']//div[starts-with(@class, 'switch')])[1]"
 
+        COMMAND_INPUT = "//input[@name='command']"
+        COMMAND_SAVE_BUTTON = "//form[@id='commandForm']//button"
+
         SAVED_MESSAGE = "//div[text()='Saved']"
 
     class loginPage:
@@ -17,16 +20,16 @@ class IrayServerXPaths:
         PASSWORD_INPUT = "(//input[@type='password'])[1]"
         LOGIN_BUTTON = "//button[text()='Login']"
 
-        CURRENT_PASSWORD_INPUT = "//input[@name='oldpass']"
-        NEW_PASSWORD_INPUT = "//input[@name='newpass']"
-        CONFIRM_PASSWORD_INPUT = "//input[@name='newpassConfirm']"
-        SAVE_BUTTON = "//button[text()='Save']"
+        # CURRENT_PASSWORD_INPUT = "//input[@name='oldpass']"
+        # NEW_PASSWORD_INPUT = "//input[@name='newpass']"
+        # CONFIRM_PASSWORD_INPUT = "//input[@name='newpassConfirm']"
+        # SAVE_BUTTON = "//button[text()='Save']"
     
-    class queuePage:
-        REMOVE_BUTTONS = "//button[@title='Remove']"
+    # class queuePage:
+    #     REMOVE_BUTTONS = "//button[@title='Remove']"
 
-        DELETE_CONFIRMATION_DIALOG = "//div[@class='modal-content']"
-        DELETE_BUTTON = "//button[text()='Delete']"
+    #     DELETE_CONFIRMATION_DIALOG = "//div[@class='modal-content']"
+    #     DELETE_BUTTON = "//button[text()='Delete']"
 
     # @classmethod
     # def job_by_id(cls, job_id):
