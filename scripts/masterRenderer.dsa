@@ -22,7 +22,7 @@ var oIrayOptions;
 var oRenderer;
 var oEnvironmentOptionsPropertyGroups;
 var oRenderOptions;
-var oActiveCanvasProperty;
+// var oActiveCanvasProperty;
 var oDrawGroundProperty;
 var oEnvironmentModeProperty;
 var oRoot;
@@ -63,7 +63,7 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 	oRenderer.setBridgeConfiguration(oSettings);
 	oEnvironmentOptionsPropertyGroups = oRenderMgr.getRenderElementObjects()[3].getPropertyGroups();
 	oRenderOptions = oRenderMgr.getRenderOptions();
-	oActiveCanvasProperty = oIrayOptions.getPropertyGroups().findProperty('Active Canvas');
+	// oActiveCanvasProperty = oIrayOptions.getPropertyGroups().findProperty('Active Canvas');
 	oDrawGroundProperty = oEnvironmentOptionsPropertyGroups.findProperty('Draw Ground');
 	oEnvironmentModeProperty = oEnvironmentOptionsPropertyGroups.findProperty('Environment Mode');
 	oRoot = Scene.findNodeByLabel('root');
@@ -154,7 +154,7 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 				oEnvironmentModeProperty.setValue(3); // Scene Only
 				oDrawGroundProperty.setValue(true);
 				oShadowPlane.setVisible(true);
-				oActiveCanvasProperty.setValue(0);
+				oIrayOptions.renderToCanvases = false;
 				if (bIsGear) setMatte(oSubject, true);
 			}
 			else {
@@ -162,7 +162,7 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 				oDrawGroundProperty.setValue(false);
 				oShadowPlane.setVisible(false);
 				setMatte(oSubject, false);
-				if (bIsGear) oActiveCanvasProperty.setValue(1);
+				if (bIsGear) oIrayOptions.renderToCanvases = true;
 			}
 			// Wait for everything else to finish first, specifically the mesh smoother
 			while (backgroundProgressIsActive()) processEvents();

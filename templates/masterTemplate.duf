@@ -9,7 +9,7 @@
 			"website" : ""
 		},
 		"revision" : "1.0",
-		"modified" : "2025-07-14T12:39:15Z"
+		"modified" : "2025-08-08T20:03:50Z"
 	},
 	"geometry_library" : [
 		{
@@ -9936,28 +9936,15 @@
 							"extra" : [
 								{
 									"type" : "studio/element_data/iray_settings",
-									"render_to_canvases" : true,
+									"render_to_canvases" : false,
 									"canvases" : [
-										{
-											"id" : "standardCanvas",
-											"type" : "Beauty",
-											"has_alpha" : true,
-											"lpe" : "",
-											"mask" : "None",
-											"param_index" : 0,
-											"param_edge_color" : [ 0, 0, 0, 1 ],
-											"param_bias" : [ 0.3333333, 0.5 ],
-											"param_scale" : 1,
-											"param_upscale" : false,
-											"param_processing_disabled" : false
-										},
 										{
 											"id" : "gearCanvas",
 											"type" : "Beauty",
 											"has_alpha" : true,
 											"lpe" : "",
 											"mask" : "visibleNodes",
-											"param_index" : 1,
+											"param_index" : 0,
 											"param_edge_color" : [ 0, 0, 0, 1 ],
 											"param_bias" : [ 0.3333333, 0.5 ],
 											"param_scale" : 1,

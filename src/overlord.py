@@ -53,6 +53,10 @@ def get_local_app_data_path(subfolder='Overlord'):
     localappdata = os.environ.get('LOCALAPPDATA', os.path.join(os.path.expanduser('~'), 'AppData', 'Local'))
     return os.path.join(localappdata, subfolder)
 
+def get_server_output_directory():
+    """Get the intermediate server output directory path"""
+    return os.path.join(get_local_app_data_path(), "Overlord Server Output")
+
 def detect_windows_theme():
     """Detect if Windows is using dark or light theme"""
     try:
@@ -277,29 +281,124 @@ class SettingsManager:
 
 settings_manager = SettingsManager()
 
-# File watcher for .exr to .webp conversion
+# File watcher for .exr to .png conversion
 class ExrFileHandler(FileSystemEventHandler):
-    """Handle new .exr files and convert them to .webp"""
+    """Handle new .exr files and convert them to .png"""
     
-    def __init__(self):
+    def __init__(self, final_output_directory=None):
         self.conversion_queue = []
         self.conversion_thread = None
         self.stop_conversion = False
+        self.final_output_directory = final_output_directory
+        
+    def set_final_output_directory(self, final_output_directory):
+        """Set the final output directory where processed PNGs should be moved"""
+        self.final_output_directory = final_output_directory
         
     def on_created(self, event):
         """Called when a file is created"""
-        if not event.is_directory and event.src_path.lower().endswith('.exr'):
-            self.add_to_conversion_queue(event.src_path)
+        if not event.is_directory:
+            if event.src_path.lower().endswith('.exr'):
+                self.add_to_conversion_queue(event.src_path)
+            elif event.src_path.lower().endswith('.png'):
+                self.handle_png_file(event.src_path)
     
     def on_moved(self, event):
         """Called when a file is moved/renamed"""
-        if not event.is_directory and event.dest_path.lower().endswith('.exr'):
-            self.add_to_conversion_queue(event.dest_path)
+        if not event.is_directory:
+            if event.dest_path.lower().endswith('.exr'):
+                self.add_to_conversion_queue(event.dest_path)
+            elif event.dest_path.lower().endswith('.png'):
+                self.handle_png_file(event.dest_path)
+    
+    def handle_png_file(self, png_path):
+        """Handle PNG files, removing '-Beauty' or '-gearCanvas' from filename if present, then move to final output directory"""
+        try:
+            # Check if the file still exists before processing
+            if not os.path.exists(png_path):
+                logging.debug(f"PNG file no longer exists, skipping: {png_path}")
+                return
+            
+            # Wait a moment for the file to be fully written
+            max_wait_time = 10  # seconds
+            wait_time = 0
+            while wait_time < max_wait_time:
+                try:
+                    # Try to get file size twice with a small delay to ensure file is stable
+                    size1 = os.path.getsize(png_path)
+                    time.sleep(0.1)
+                    if not os.path.exists(png_path):
+                        logging.debug(f"PNG file disappeared during stability check: {png_path}")
+                        return
+                    size2 = os.path.getsize(png_path)
+                    if size1 == size2 and size1 > 0:
+                        break  # File appears to be stable
+                except (OSError, FileNotFoundError):
+                    logging.debug(f"PNG file not accessible during stability check: {png_path}")
+                    return
+                time.sleep(0.5)
+                wait_time += 0.6
+            
+            # Final check before processing
+            if not os.path.exists(png_path):
+                logging.debug(f"PNG file disappeared after stability check: {png_path}")
+                return
+                
+            directory = os.path.dirname(png_path)
+            filename = os.path.basename(png_path)
+            name, ext = os.path.splitext(filename)
+            
+            new_name = None
+            if name.endswith('-Beauty'):
+                new_name = name[:-7]  # Remove '-Beauty' (7 characters)
+            elif name.endswith('-gearCanvas'):
+                new_name = name[:-11]  # Remove '-gearCanvas' (11 characters)
+            
+            if new_name:
+                new_filename = new_name + ext
+                new_path = os.path.join(directory, new_filename)
+                
+                # Check if source file still exists before renaming
+                if not os.path.exists(png_path):
+                    logging.debug(f"PNG file disappeared before rename: {png_path}")
+                    return
+                
+                # Rename the file
+                try:
+                    os.rename(png_path, new_path)
+                    logging.info(f"Renamed: {filename} → {new_filename}")
+                    png_path = new_path  # Update path for moving
+                except (OSError, FileNotFoundError) as e:
+                    logging.warning(f"Failed to rename PNG file {png_path}: {e}")
+                    return
+                
+            # Move the PNG from server output directory to final output directory
+            if self.final_output_directory and os.path.exists(self.final_output_directory):
+                # Final check before moving
+                if not os.path.exists(png_path):
+                    logging.debug(f"PNG file disappeared before move: {png_path}")
+                    return
+                    
+                final_png_path = os.path.join(self.final_output_directory, os.path.basename(png_path))
+                
+                try:
+                    shutil.move(png_path, final_png_path)
+                    logging.info(f"Moved PNG from server output to final output: {png_path} → {final_png_path}")
+                except (OSError, FileNotFoundError, shutil.Error) as e:
+                    logging.warning(f"Failed to move PNG file from {png_path} to {final_png_path}: {e}")
+            else:
+                if not self.final_output_directory:
+                    logging.warning(f"Final output directory not set, PNG remains in server output: {png_path}")
+                else:
+                    logging.warning(f"Final output directory does not exist: {self.final_output_directory}, PNG remains in server output: {png_path}")
+                
+        except Exception as e:
+            logging.error(f"Error handling PNG file {png_path}: {e}")
     
     def add_to_conversion_queue(self, exr_path):
         """Add .exr file to conversion queue"""
         self.conversion_queue.append(exr_path)
-        logging.info(f'Added {exr_path} to EXR to WEBP conversion queue')
+        logging.info(f'Added {exr_path} to EXR conversion queue')
         
         # Start conversion thread if not already running
         if self.conversion_thread is None or not self.conversion_thread.is_alive():
@@ -325,13 +424,13 @@ class ExrFileHandler(FileSystemEventHandler):
                 try:
                     self.convert_exr_to_png(exr_path)
                 except Exception as e:
-                    logging.error(f'Failed to convert {exr_path} to WEBP: {e}')
+                    logging.error(f'Failed to convert {exr_path} to PNG: {e}')
             else:
                 # Sleep briefly if queue is empty
                 time.sleep(0.5)
     
     def convert_exr_to_png(self, exr_path):
-        """Convert a single .exr file to .webp"""
+        """Convert a single .exr file to .png"""
         try:
             # Wait for file to be fully written (DAZ Studio might still be writing)
             max_wait_time = 30  # seconds
@@ -353,15 +452,15 @@ class ExrFileHandler(FileSystemEventHandler):
                 logging.warning(f'EXR file no longer exists: {exr_path}')
                 return
             
-            # Generate WEBP path
-            webp_path = os.path.splitext(exr_path)[0] + '.webp'
+            # Generate PNG path
+            png_path = os.path.splitext(exr_path)[0] + '.png'
             
-            # Check if WEBP already exists
-            if os.path.exists(webp_path):
-                logging.info(f'WEBP already exists, skipping conversion: {webp_path}')
+            # Check if PNG already exists
+            if os.path.exists(png_path):
+                logging.info(f'PNG already exists, skipping conversion: {png_path}')
                 return
             
-            logging.info(f'Converting {exr_path} to {webp_path}')
+            logging.info(f'Converting {exr_path} to {png_path}')
             
             # Try multiple methods to read the EXR file
             img = None
@@ -455,17 +554,30 @@ class ExrFileHandler(FileSystemEventHandler):
                 logging.error(f'All methods failed to read EXR file: {exr_path}')
                 return
             
-            # Save as WEBP with alpha preservation
+            # Save as PNG with alpha preservation
             if img.mode == 'RGBA':
-                # Save with alpha channel preserved, lossless compression
-                img.save(webp_path, 'WEBP', lossless=True, quality=100)
-                logging.info(f'Successfully converted {exr_path} to {webp_path} (with alpha)')
+                # Save with alpha channel preserved
+                img.save(png_path, 'PNG', optimize=True)
+                logging.info(f'Successfully converted {exr_path} to {png_path} (with alpha)')
             else:
                 # Convert to RGB if not already (for files without alpha)
                 if img.mode != 'RGB':
                     img = img.convert('RGB')
-                img.save(webp_path, 'WEBP', lossless=True, quality=100)
-                logging.info(f'Successfully converted {exr_path} to {webp_path} (RGB)')
+                img.save(png_path, 'PNG', optimize=True)
+                logging.info(f'Successfully converted {exr_path} to {png_path} (RGB)')
+            
+            # Ensure PNG file is fully written before processing
+            try:
+                # Verify the PNG file exists and is accessible
+                if os.path.exists(png_path) and os.path.getsize(png_path) > 0:
+                    # Wait a moment to ensure file is fully written
+                    time.sleep(0.1)
+                    # Handle PNG renaming and moving
+                    self.handle_png_file(png_path)
+                else:
+                    logging.warning(f'PNG file was not created properly: {png_path}')
+            except Exception as png_handle_error:
+                logging.error(f'Error handling PNG file {png_path}: {png_handle_error}')
             
             # Delete the original .exr file to save space
             try:
@@ -475,7 +587,7 @@ class ExrFileHandler(FileSystemEventHandler):
                 logging.warning(f'Failed to delete original EXR file {exr_path}: {delete_error}')
             
         except Exception as e:
-            logging.error(f'Error converting {exr_path} to WEBP: {e}')
+            logging.error(f'Error converting {exr_path} to PNG: {e}')
 
 settings_manager = SettingsManager()
 
@@ -516,20 +628,24 @@ class CleanupManager:
         """Mark that settings have been saved to prevent duplicate saves"""
         self.settings_saved_on_close = True
     
-    def start_file_monitoring(self, output_dir):
-        """Start monitoring the output directory for new .exr files"""
+    def start_file_monitoring(self, server_output_dir, final_output_dir):
+        """Start monitoring the server output directory for new .exr files"""
         try:
             if self.file_observer is not None:
                 self.stop_file_monitoring()
             
-            if not os.path.exists(output_dir):
-                os.makedirs(output_dir, exist_ok=True)
+            if not os.path.exists(server_output_dir):
+                os.makedirs(server_output_dir, exist_ok=True)
             
-            self.exr_handler = ExrFileHandler()
+            if not os.path.exists(final_output_dir):
+                os.makedirs(final_output_dir, exist_ok=True)
+            
+            self.exr_handler = ExrFileHandler(final_output_dir)
             self.file_observer = Observer()
-            self.file_observer.schedule(self.exr_handler, output_dir, recursive=True)
+            self.file_observer.schedule(self.exr_handler, server_output_dir, recursive=True)
             self.file_observer.start()
-            logging.info(f'Started file monitoring for .exr to .webp conversion in: {output_dir}')
+            logging.info(f'Started file monitoring for .exr files in server output: {server_output_dir}')
+            logging.info(f'Processed PNGs will be moved to final output: {final_output_dir}')
         except Exception as e:
             logging.error(f'Failed to start file monitoring: {e}')
     
@@ -545,7 +661,7 @@ class CleanupManager:
             if self.exr_handler is not None:
                 self.exr_handler.stop_conversion_thread()
                 self.exr_handler = None
-                logging.info('Stopped EXR to WEBP conversion handler')
+                logging.info('Stopped EXR conversion handler')
         except Exception as e:
             logging.error(f'Error stopping file monitoring: {e}')
     
@@ -1523,7 +1639,14 @@ def main():
 
     # Update image when output directory changes or after render
     def on_output_dir_change(*args):
-        logging.info(f'Output Directory changed to: {value_entries["Output Directory"].get()}')
+        new_output_dir = value_entries["Output Directory"].get()
+        logging.info(f'Output Directory changed to: {new_output_dir}')
+        
+        # Update the final output directory in the ExrFileHandler if it exists
+        if hasattr(cleanup_manager, 'exr_handler') and cleanup_manager.exr_handler is not None:
+            cleanup_manager.exr_handler.set_final_output_directory(new_output_dir)
+            logging.info(f'Updated ExrFileHandler final output directory to: {new_output_dir}')
+        
         root.after(200, show_last_rendered_image)
         root.after(200, update_output_details)
     value_entries["Output Directory"].bind("<FocusOut>", lambda e: on_output_dir_change())
@@ -1562,6 +1685,9 @@ def main():
                 logging.info('Start Render button clicked')
                 logging.info('Starting Iray Server...')
                 
+                # Get server output directory path
+                server_output_dir = get_server_output_directory()
+                
                 # delete iray_server.db and cache folder
                 script_dir = os.path.dirname(os.path.abspath(__file__))
                 iray_db_path = os.path.join(script_dir, "iray_server.db")
@@ -1579,16 +1705,25 @@ def main():
                 else:
                     logging.info(f"cache folder not found at: {cache_dir_path} (nothing to delete)")
 
+                # Clean up server output directory to start fresh
+                if os.path.exists(server_output_dir):
+                    shutil.rmtree(server_output_dir)
+                    logging.info(f"Successfully deleted server output folder at: {server_output_dir}")
+                os.makedirs(server_output_dir, exist_ok=True)
+                logging.info(f"Created fresh server output directory at: {server_output_dir}")
+
                 
                 start_iray_server()  # Start Iray Server
                 
                 # Wait for Iray server to start up (in background thread, so it won't block UI)
                 time.sleep(IRAY_STARTUP_DELAY / 1000)  # Convert to seconds
                 
+                # Use intermediate server output directory for Iray Server configuration
+                
                 iray_actions = IrayServerActions(cleanup_manager)
                 
                 # Configure Iray Server (starts browser, configures settings, closes browser)
-                if not iray_actions.configure_server(output_dir):
+                if not iray_actions.configure_server(server_output_dir):
                     logging.error('Failed to configure Iray Server')
                     # Shutdown Iray Server since configuration failed
                     cleanup_manager.stop_iray_server()
@@ -1760,8 +1895,9 @@ def main():
                 root.after(DAZ_STUDIO_STARTUP_DELAY, lambda: run_all_instances(i + 1))
             else:
                 logging.info('All render instances launched')
-                # Start file monitoring for .exr files
-                cleanup_manager.start_file_monitoring(image_output_dir)
+                # Start file monitoring for .exr files in server output directory, move processed PNGs to final output
+                server_output_dir = get_server_output_directory()
+                cleanup_manager.start_file_monitoring(server_output_dir, image_output_dir)
                 root.after(IMAGE_UPDATE_INTERVAL, show_last_rendered_image)  # Update image after render
 
         run_all_instances()

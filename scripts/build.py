@@ -4,30 +4,65 @@ import sys
 import os
 import shutil
 import re
+import tempfile
 from pathlib import Path
+
+def get_current_version():
+    """Read the current version from version.py file."""
+    # Get the script directory and navigate to the parent directory
+    script_dir = Path(__file__).parent
+    project_root = script_dir.parent
+    version_file = project_root / "src" / "version.py"
+    
+    if version_file.exists():
+        content = version_file.read_text()
+        # Extract version from __version__ = "x.y.z" line
+        match = re.search(r'__version__\s*=\s*["\']([^"\']+)["\']', content)
+        if match:
+            return match.group(1)
+    return "unknown"
+
+def suggest_next_versions(current_version):
+    """Suggest next version numbers based on current version."""
+    if current_version == "unknown" or current_version == "dev":
+        return "1.0.0 (major), 0.1.0 (minor), 0.0.1 (patch)"
+    
+    try:
+        parts = current_version.split('.')
+        if len(parts) >= 3:
+            major, minor, patch = int(parts[0]), int(parts[1]), int(parts[2])
+            return f"{major}.{minor}.{patch + 1} (patch), {major}.{minor + 1}.0 (minor), {major + 1}.0.0 (major)"
+    except ValueError:
+        pass
+    
+    return f"{current_version}.1 (patch), next.0.0 (minor), next.0.0 (major)"
 
 def get_version():
     """Get version from user input or use 'dev' as default."""
-    print("Latest known version: 1.5.3")
-    print("Suggested next versions: 1.5.4 (patch), 1.6.0 (minor), 2.0.0 (major)")
-    version = input("Enter version (e.g., 1.5.4) or press Enter for 'dev': ").strip()
+    current_version = get_current_version()
+    print(f"Latest known version: {current_version}")
+    suggested_versions = suggest_next_versions(current_version)
+    print(f"Suggested next versions: {suggested_versions}")
+    version = input(f"Enter version (e.g., next version) or press Enter for 'dev': ").strip()
     
     if not version:
         return "dev"
     
     # Basic validation to warn about potentially old versions
-    if version != "dev":
+    if version != "dev" and current_version != "unknown" and current_version != "dev":
         try:
-            parts = version.split('.')
-            if len(parts) >= 3:
-                major, minor, patch = int(parts[0]), int(parts[1]), int(parts[2])
-                latest_major, latest_minor, latest_patch = 1, 5, 3
+            current_parts = current_version.split('.')
+            new_parts = version.split('.')
+            
+            if len(current_parts) >= 3 and len(new_parts) >= 3:
+                current_major, current_minor, current_patch = int(current_parts[0]), int(current_parts[1]), int(current_parts[2])
+                new_major, new_minor, new_patch = int(new_parts[0]), int(new_parts[1]), int(new_parts[2])
                 
-                if (major < latest_major or 
-                    (major == latest_major and minor < latest_minor) or 
-                    (major == latest_major and minor == latest_minor and patch <= latest_patch)):
+                if (new_major < current_major or 
+                    (new_major == current_major and new_minor < current_minor) or 
+                    (new_major == current_major and new_minor == current_minor and new_patch <= current_patch)):
                     
-                    print(f"⚠️  Warning: Version {version} appears to be older than or equal to the latest version 1.5.3")
+                    print(f"⚠️  Warning: Version {version} appears to be older than or equal to the current version {current_version}")
                     confirm = input("Continue anyway? (y/N): ").strip().lower()
                     if confirm != 'y':
                         print("Build cancelled.")
@@ -115,29 +150,88 @@ def install_dependencies():
             return False
     return True
 
+def clean_dist_folder():
+    """Clean out the dist folder before building."""
+    dist_path = Path("dist")
+    if dist_path.exists():
+        print("Cleaning dist folder...")
+        try:
+            shutil.rmtree(dist_path)
+            print("✓ Dist folder cleaned")
+        except Exception as e:
+            print(f"⚠️  Warning: Could not fully clean dist folder: {e}")
+    
+    # Recreate the dist folder
+    dist_path.mkdir(exist_ok=True)
+    print("✓ Dist folder ready")
+
 def build_executable():
-    """Build the executable using PyInstaller."""
+    """Build the executable using PyInstaller in a temporary directory."""
     print("\nBuilding executable...")
-    cmd = [
-        sys.executable, "-m", "PyInstaller",
-        "--onefile",
-        "--windowed",
-        "--noconsole",
-        "--icon", "images/favicon.ico",
-        "--hidden-import=psutil",
-        "--add-data", "images/favicon.ico;images",
-        "--add-data", "images/overlordLogo.png;images",
-        "--add-data", "images/laserwolveGamesLogo.png;images",
-        "--add-data", "images/splashScreen.png;images",
-        "src/overlord.py"
+    
+    # Get absolute paths for all resources
+    current_dir = os.getcwd()
+    favicon_path = os.path.join(current_dir, "images", "favicon.ico")
+    overlord_logo_path = os.path.join(current_dir, "images", "overlordLogo.png")
+    laserwolve_logo_path = os.path.join(current_dir, "images", "laserwolveGamesLogo.png")
+    splash_screen_path = os.path.join(current_dir, "images", "splashScreen.png")
+    main_script_path = os.path.join(current_dir, "src", "overlord.py")
+    
+    # Verify all required files exist
+    required_files = [
+        (favicon_path, "favicon.ico"),
+        (overlord_logo_path, "overlordLogo.png"),
+        (laserwolve_logo_path, "laserwolveGamesLogo.png"),
+        (splash_screen_path, "splashScreen.png"),
+        (main_script_path, "overlord.py")
     ]
     
-    result = subprocess.run(cmd)
-    if result.returncode != 0:
-        print("✗ PyInstaller build failed.", file=sys.stderr)
-        return False
+    for file_path, file_name in required_files:
+        if not os.path.exists(file_path):
+            print(f"✗ Required file not found: {file_name} at {file_path}")
+            return False
     
-    print("✓ Executable built successfully")
+    # Create a temporary directory for PyInstaller output
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_dist = os.path.join(temp_dir, "dist")
+        temp_build = os.path.join(temp_dir, "build")
+        
+        cmd = [
+            sys.executable, "-m", "PyInstaller",
+            "--onefile",
+            "--windowed",
+            "--noconsole",
+            "--icon", favicon_path,
+            "--hidden-import=psutil",
+            "--add-data", f"{favicon_path};images",
+            "--add-data", f"{overlord_logo_path};images",
+            "--add-data", f"{laserwolve_logo_path};images",
+            "--add-data", f"{splash_screen_path};images",
+            "--distpath", temp_dist,
+            "--workpath", temp_build,
+            "--specpath", temp_dir,
+            main_script_path
+        ]
+        
+        result = subprocess.run(cmd)
+        if result.returncode != 0:
+            print("✗ PyInstaller build failed.", file=sys.stderr)
+            return False
+        
+        # Move the executable to the main dist folder for the installer to find
+        temp_exe = os.path.join(temp_dist, "overlord.exe")
+        final_exe = os.path.join("dist", "overlord.exe")
+        
+        if os.path.exists(temp_exe):
+            # Ensure dist directory exists
+            os.makedirs("dist", exist_ok=True)
+            shutil.copy2(temp_exe, final_exe)
+            print(f"✓ Executable temporarily placed at: {final_exe}")
+        else:
+            print("✗ Executable not found in temporary directory")
+            return False
+    
+    print("✓ Executable built successfully (temporary files cleaned)")
     return True
 
 def check_inno_setup():
@@ -185,7 +279,7 @@ def build_installer():
     return True
 
 def cleanup():
-    """Clean up build artifacts."""
+    """Clean up build artifacts and temporary executable."""
     print("\nCleaning up build artifacts...")
     artifacts = ["build", "overlord.spec"]
     
@@ -196,6 +290,19 @@ def cleanup():
             else:
                 os.remove(artifact)
             print(f"✓ Removed {artifact}")
+    
+    # Remove the temporary executable from dist folder (keep only installer)
+    temp_exe = os.path.join("dist", "overlord.exe")
+    if os.path.exists(temp_exe):
+        os.remove(temp_exe)
+        print("✓ Removed temporary executable (keeping only installer)")
+
+def cleanup_executable_only():
+    """Remove just the temporary executable, preserving the installer."""
+    temp_exe = os.path.join("dist", "overlord.exe")
+    if os.path.exists(temp_exe):
+        os.remove(temp_exe)
+        print("✓ Removed temporary executable from dist folder")
 
 def reset_installer_iss():
     """Reset installer.iss back to template state with placeholders."""
@@ -224,7 +331,10 @@ def reset_installer_iss():
 def main():
     """Main build process."""
     print("=== Overlord Build Script ===")
-    print("This script will build both the executable and installer locally.\n")
+    print("This script will build the installer locally.\n")
+    
+    # Clean dist folder first
+    clean_dist_folder()
     
     # Get version from user
     version = get_version()
@@ -238,7 +348,7 @@ def main():
         print("Failed to install dependencies. Exiting.")
         sys.exit(1)
     
-    # Build executable
+    # Build executable (temporarily for installer creation)
     if not build_executable():
         print("Failed to build executable. Exiting.")
         sys.exit(1)
@@ -246,7 +356,7 @@ def main():
     # Build installer
     installer_success = build_installer()
     
-    # Cleanup
+    # Cleanup (this will remove the temporary executable and other artifacts)
     cleanup()
     
     # Reset installer.iss back to template state
@@ -255,15 +365,20 @@ def main():
     # Summary
     print("\n=== Build Summary ===")
     print(f"Version: {version}")
-    print("✓ Executable: dist/overlord.exe")
     
     if installer_success:
         dashed_version = version.replace('.', '-')
-        print(f"✓ Installer: dist/OverlordInstaller{dashed_version}.exe")
+        installer_name = f"OverlordInstaller{dashed_version}.exe"
+        installer_path = os.path.join("dist", installer_name)
+        if os.path.exists(installer_path):
+            print(f"✓ Installer: dist/{installer_name}")
+        else:
+            print(f"⚠️  Installer expected at: dist/{installer_name} (file not found)")
     else:
         print("✗ Installer: Failed to create")
     
-    print("\nBuild process completed!")
+    print(f"\n✓ Dist folder contains only the installer (temporary executable removed)")
+    print("Build process completed!")
 
 if __name__ == "__main__":
     main()
