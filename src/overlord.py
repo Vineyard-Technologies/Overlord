@@ -27,91 +27,553 @@ from watchdog.events import FileSystemEventHandler
 from iray_server_actions import IrayServerActions
 from version import __version__ as overlord_version
 
-# Constants
+# ============================================================================
+# CONSTANTS AND CONFIGURATION
+# ============================================================================
+
+# Application constants
 DEFAULT_MAX_WORKERS = 8
 LOG_SIZE_MB = 100
 RECENT_RENDER_TIMES_LIMIT = 25
-IMAGE_UPDATE_INTERVAL = 1000  # milliseconds
-OUTPUT_UPDATE_INTERVAL = 5000  # milliseconds
-AUTO_SAVE_DELAY = 2000  # milliseconds
-DAZ_STUDIO_STARTUP_DELAY = 5000  # milliseconds
-OVERLORD_CLOSE_DELAY = 2000  # milliseconds
-# A lower number can cause responsiveness issues with the web UI
-# We could read the Iray Server log to see when it's finished instead
-# That might be a lot of code and somewhat of a performance overhead
-IRAY_STARTUP_DELAY = 10000  # milliseconds
 
-def get_app_data_path(subfolder='Overlord'):
-    """Get the application data path for the given subfolder"""
+# UI update intervals (milliseconds)
+IMAGE_UPDATE_INTERVAL = 1000          # Legacy polling interval (deprecated)
+OUTPUT_UPDATE_INTERVAL = 5000
+AUTO_SAVE_DELAY = 2000
+
+# Process startup delays (milliseconds)
+DAZ_STUDIO_STARTUP_DELAY = 5000
+OVERLORD_CLOSE_DELAY = 2000
+IRAY_STARTUP_DELAY = 10000
+
+# File extensions
+IMAGE_EXTENSIONS = ('.png', '.jpg', '.jpeg', '.bmp', '.gif', '.tiff', '.webp')
+SCENE_EXTENSIONS = ('.duf',)
+ARCHIVE_EXTENSIONS = ('.zip', '.7z', '.rar')
+
+# Default paths
+DEFAULT_OUTPUT_SUBDIR = "Downloads/output"
+APPDATA_SUBFOLDER = "Overlord"
+SERVER_OUTPUT_SUBDIR = "Overlord Server Output"
+
+# UI dimensions
+SPLASH_WIDTH = 400
+SPLASH_HEIGHT = 400
+RIGHT_FRAME_SIZE = 1024
+DETAILS_FRAME_WIDTH = 350
+DETAILS_FRAME_HEIGHT = 200
+
+# Theme colors
+THEME_COLORS = {
+    "light": {
+        "bg": "#f0f0f0", "fg": "#000000", "entry_bg": "#ffffff", "entry_fg": "#000000",
+        "button_bg": "#e1e1e1", "button_fg": "#000000", "frame_bg": "#f0f0f0",
+        "text_bg": "#ffffff", "text_fg": "#000000", "select_bg": "#0078d4",
+        "select_fg": "#ffffff", "highlight_bg": "#cccccc", "border": "#cccccc"
+    },
+    "dark": {
+        "bg": "#2d2d30", "fg": "#ffffff", "entry_bg": "#3c3c3c", "entry_fg": "#ffffff",
+        "button_bg": "#404040", "button_fg": "#ffffff", "frame_bg": "#2d2d30",
+        "text_bg": "#1e1e1e", "text_fg": "#ffffff", "select_bg": "#0078d4",
+        "select_fg": "#ffffff", "highlight_bg": "#404040", "border": "#555555"
+    }
+}
+
+# Process names for monitoring
+DAZ_STUDIO_PROCESSES = ['DAZStudio']
+IRAY_SERVER_PROCESSES = ['iray_server.exe', 'iray_server_worker.exe']
+WEBDRIVER_PROCESSES = ['geckodriver']
+
+# Error messages
+ERROR_MESSAGES = {
+    "missing_source_files": "Please specify at least one Source File before starting the render.",
+    "missing_output_dir": "Please specify an Output Directory before starting the render.",
+    "daz_running_warning": "DAZ Studio is already running.\n\nDo you want to continue?",
+    "daz_archive_warning": "DAZ Studio is currently running. Archiving while rendering may cause issues.\n\nDo you want to continue anyway?",
+    "iray_config_failed": "Iray Server configuration failed",
+    "render_start_failed": "Failed to start render",
+}
+
+# Validation limits
+VALIDATION_LIMITS = {
+    "max_instances": 16, "min_instances": 1, "max_frame_rate": 120, "min_frame_rate": 1,
+    "max_log_size": 1000, "min_log_size": 1, "max_file_wait_time": 30, "png_stability_wait": 10,
+}
+
+# UI text constants
+UI_TEXT = {
+    "app_title": "Overlord", "options_header": "Options", "last_image_details": "Last Rendered Image Details",
+    "output_details": "Output Details", "copy_path": "Copy Path", "start_render": "Start Render",
+    "stop_render": "Stop Render", "zip_files": "Zip Outputted Files", "browse": "Browse", "clear": "Clear",
+}
+
+# Image processing constants
+IMAGE_PROCESSING = {
+    "transparent_crop_size": (2, 2), "dark_bg_color": (60, 60, 60, 255),
+    "light_bg_color": (255, 255, 255, 255), "default_mode": "RGBA", "save_optimize": True
+}
+
+# Windows registry paths
+WINDOWS_REGISTRY = {
+    "theme_key": r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
+    "theme_value": "AppsUseLightTheme"
+}
+
+
+# ============================================================================
+# UTILITY FUNCTIONS
+# ============================================================================
+
+def get_app_data_path(subfolder: str = APPDATA_SUBFOLDER) -> str:
+    """Get the application data path for the given subfolder."""
     appdata = os.environ.get('APPDATA')
     if appdata:
         return os.path.join(appdata, subfolder)
     else:
         return os.path.join(os.path.expanduser('~'), subfolder)
 
-def get_local_app_data_path(subfolder='Overlord'):
-    """Get the local application data path for the given subfolder"""
+def get_local_app_data_path(subfolder: str = APPDATA_SUBFOLDER) -> str:
+    """Get the local application data path for the given subfolder."""
     localappdata = os.environ.get('LOCALAPPDATA', os.path.join(os.path.expanduser('~'), 'AppData', 'Local'))
     return os.path.join(localappdata, subfolder)
 
-def get_server_output_directory():
-    """Get the intermediate server output directory path"""
-    return os.path.join(get_local_app_data_path(), "Overlord Server Output")
+def get_server_output_directory() -> str:
+    """Get the intermediate server output directory path."""
+    return os.path.join(get_local_app_data_path(), SERVER_OUTPUT_SUBDIR)
 
-def detect_windows_theme():
-    """Detect if Windows is using dark or light theme"""
+def get_default_output_directory() -> str:
+    """Get the default output directory for user files."""
+    return os.path.join(os.path.expanduser("~"), DEFAULT_OUTPUT_SUBDIR)
+
+def detect_windows_theme() -> str:
+    """Detect if Windows is using dark or light theme."""
     try:
         # Check Windows registry for theme setting
-        registry_key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, 
-                                     r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
-        value, _ = winreg.QueryValueEx(registry_key, "AppsUseLightTheme")
+        registry_key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, WINDOWS_REGISTRY['theme_key'])
+        value, _ = winreg.QueryValueEx(registry_key, WINDOWS_REGISTRY['theme_value'])
         winreg.CloseKey(registry_key)
         return "light" if value else "dark"
     except Exception:
         # Default to light theme if detection fails
         return "light"
 
+def format_file_size(size_bytes: int) -> str:
+    """Format file size in bytes to human readable format."""
+    if size_bytes < 1024:
+        return f"{size_bytes} B"
+    elif size_bytes < 1024 * 1024:
+        return f"{size_bytes / 1024:.1f} KB"
+    elif size_bytes < 1024 * 1024 * 1024:
+        return f"{size_bytes / (1024 * 1024):.1f} MB"
+    else:
+        return f"{size_bytes / (1024 * 1024 * 1024):.1f} GB"
+
+def resource_path(relative_path: str) -> str:
+    """Get absolute path to resource, works for dev and for PyInstaller."""
+    try:
+        base_path = sys._MEIPASS
+    except AttributeError:
+        # When running from source, images are in the parent directory
+        base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base_path, relative_path)
+
+def ensure_directory_exists(directory: str) -> bool:
+    """Ensure a directory exists, create if necessary."""
+    try:
+        os.makedirs(directory, exist_ok=True)
+        return True
+    except Exception as e:
+        logging.error(f"Failed to create directory {directory}: {e}")
+        return False
+
+def validate_file_path(file_path: str, must_exist: bool = True) -> bool:
+    """Validate a file path."""
+    if not file_path or not isinstance(file_path, str):
+        return False
+    
+    if must_exist:
+        return os.path.isfile(file_path)
+    
+    # Check if the directory exists (for new files)
+    directory = os.path.dirname(file_path)
+    return os.path.isdir(directory) if directory else True
+
+def validate_directory_path(dir_path: str, must_exist: bool = True) -> bool:
+    """Validate a directory path."""
+    if not dir_path or not isinstance(dir_path, str):
+        return False
+    
+    if must_exist:
+        return os.path.isdir(dir_path)
+    
+    # For new directories, check if parent exists
+    parent = os.path.dirname(dir_path)
+    return os.path.isdir(parent) if parent else True
+
+def get_directory_stats(directory: str) -> tuple:
+    """Get directory statistics: total_size, png_count, zip_count, folder_count."""
+    if not os.path.exists(directory):
+        return 0, 0, 0, 0
+    
+    total_size = png_count = zip_count = folder_count = 0
+    
+    for rootdir, dirs, files in os.walk(directory):
+        folder_count += len(dirs)
+        for file in files:
+            file_path = os.path.join(rootdir, file)
+            try:
+                file_size = os.path.getsize(file_path)
+                total_size += file_size
+                if file.lower().endswith('.png'):
+                    png_count += 1
+                elif file.lower().endswith('.zip'):
+                    zip_count += 1
+            except (OSError, IOError):
+                continue
+    
+    return total_size, png_count, zip_count, folder_count
+
+def find_newest_image(directory: str) -> list:
+    """Find all images in directory sorted by modification time (newest first)."""
+    image_files = []
+    
+    for rootdir, _, files in os.walk(directory):
+        for fname in files:
+            if fname.lower().endswith(IMAGE_EXTENSIONS):
+                fpath = os.path.join(rootdir, fname)
+                try:
+                    mtime = os.path.getmtime(fpath)
+                    image_files.append((mtime, fpath))
+                except Exception:
+                    continue
+    
+    # Sort by most recent first
+    image_files.sort(reverse=True)
+    return [fpath for mtime, fpath in image_files]
+
+
+# ============================================================================
+# PROCESS MANAGEMENT
+# ============================================================================
+
+def check_process_running(process_names: list) -> bool:
+    """Check if any processes with the given names are running."""
+    try:
+        for proc in psutil.process_iter(['name']):
+            try:
+                proc_name = proc.info['name']
+                if proc_name and any(name.lower() in proc_name.lower() for name in process_names):
+                    return True
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+    except Exception:
+        pass
+    return False
+
+def kill_processes_by_name(process_names: list) -> int:
+    """Kill all processes matching the given names. Returns count of killed processes."""
+    killed_count = 0
+    try:
+        for proc in psutil.process_iter(['name']):
+            try:
+                proc_name = proc.info['name']
+                if proc_name and any(name.lower() in proc_name.lower() for name in process_names):
+                    proc.kill()
+                    killed_count += 1
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+    except Exception as e:
+        logging.error(f'Failed to kill processes {process_names}: {e}')
+    return killed_count
+
+def is_daz_studio_running() -> bool:
+    """Check if DAZ Studio processes are running."""
+    return check_process_running(DAZ_STUDIO_PROCESSES)
+
+def is_iray_server_running() -> bool:
+    """Check if Iray Server processes are already running."""
+    return check_process_running(IRAY_SERVER_PROCESSES)
+
+def stop_iray_server() -> int:
+    """Stop all iray_server.exe and iray_server_worker.exe processes."""
+    killed_count = kill_processes_by_name(IRAY_SERVER_PROCESSES)
+    if killed_count > 0:
+        logging.info(f'Stopped {killed_count} Iray Server process(es)')
+    return killed_count
+
+def stop_all_render_processes() -> dict:
+    """Stop all render-related processes. Returns counts of stopped processes."""
+    logging.info('Stopping all render-related processes (DAZStudio, Iray Server, webdrivers)')
+    
+    results = {
+        'daz_studio': kill_processes_by_name(DAZ_STUDIO_PROCESSES),
+        'iray_server': stop_iray_server(),
+        'webdrivers': kill_processes_by_name(WEBDRIVER_PROCESSES)
+    }
+    
+    total = sum(results.values())
+    logging.info(f'Stopped {total} total process(es): '
+                f'{results["daz_studio"]} DAZ Studio, '
+                f'{results["iray_server"]} Iray Server, '
+                f'{results["webdrivers"]} webdriver')
+    
+    return results
+
+
+# ============================================================================
+# IMAGE PROCESSING
+# ============================================================================
+
+def wait_for_file_stability(file_path: str, max_wait_time: int = None) -> bool:
+    """Wait for a file to be stable (fully written)."""
+    if max_wait_time is None:
+        max_wait_time = VALIDATION_LIMITS['max_file_wait_time']
+    
+    wait_time = 0
+    while wait_time < max_wait_time:
+        try:
+            # Try to get file size twice with a small delay
+            size1 = os.path.getsize(file_path)
+            time.sleep(0.1)
+            if not os.path.exists(file_path):
+                return False
+            size2 = os.path.getsize(file_path)
+            if size1 == size2 and size1 > 0:
+                return True
+        except (OSError, FileNotFoundError):
+            return False
+        time.sleep(0.5)
+        wait_time += 0.6
+    return False
+
+def is_image_transparent(image_path: str) -> bool:
+    """Check if an image is entirely transparent."""
+    try:
+        with Image.open(image_path) as img:
+            # Convert to RGBA if not already
+            if img.mode != 'RGBA':
+                img = img.convert('RGBA')
+            
+            # Get the alpha channel
+            alpha_channel = img.split()[-1]
+            
+            # Check if all alpha values are 0 using numpy for efficiency
+            alpha_array = np.array(alpha_channel)
+            return np.all(alpha_array == 0)
+    except Exception as e:
+        logging.error(f"Error checking transparency for {image_path}: {e}")
+        return False
+
+def crop_transparent_image(image_path: str) -> bool:
+    """Crop entirely transparent image to 2x2 pixels."""
+    try:
+        crop_size = IMAGE_PROCESSING['transparent_crop_size']
+        logging.info(f"Cropping transparent image to {crop_size[0]}x{crop_size[1]}: {image_path}")
+        
+        # Create a new 2x2 transparent image
+        cropped_img = Image.new('RGBA', crop_size, (0, 0, 0, 0))
+        
+        # Save the cropped image, overwriting the original
+        cropped_img.save(image_path, 'PNG')
+        logging.info(f"Successfully cropped transparent image: {image_path}")
+        return True
+    except Exception as e:
+        logging.error(f"Error cropping transparent image {image_path}: {e}")
+        return False
+
+def process_transparent_image(png_path: str) -> str:
+    """Check if image is entirely transparent and crop to 2x2 if needed."""
+    if is_image_transparent(png_path):
+        crop_transparent_image(png_path)
+    return png_path
+
+def remove_filename_suffixes(filename: str) -> tuple:
+    """Remove '-Beauty' or '-gearCanvas' suffixes from filename."""
+    name, ext = os.path.splitext(filename)
+    original_name = name
+    
+    # Remove both '-gearCanvas' and '-Beauty' suffixes if present
+    if name.endswith('-Beauty'):
+        name = name[:-7]  # Remove '-Beauty' (7 characters)
+    if name.endswith('-gearCanvas'):
+        name = name[:-11]  # Remove '-gearCanvas' (11 characters)
+    
+    modified = name != original_name
+    return name + ext if modified else filename, modified
+
+def prepare_image_for_display(image_path: str, theme: str = "light"):
+    """Prepare an image for display in tkinter with proper background handling."""
+    try:
+        # Verify image integrity first
+        with Image.open(image_path) as verify_img:
+            verify_img.verify()
+        
+        # Reopen for processing
+        with Image.open(image_path) as img:
+            img = img.convert("RGBA")
+            
+            # Handle transparency with theme-appropriate background
+            if theme == "dark":
+                bg_color = IMAGE_PROCESSING['dark_bg_color']
+            else:
+                bg_color = IMAGE_PROCESSING['light_bg_color']
+            
+            bg = Image.new("RGBA", img.size, bg_color)
+            img = Image.alpha_composite(bg, img)
+            
+            # Create a copy to avoid keeping file handle open
+            img_copy = img.copy()
+        
+        return ImageTk.PhotoImage(img_copy)
+    except Exception as e:
+        logging.error(f'Failed to prepare image for display {image_path}: {e}')
+        return None
+
+def get_image_info(image_path: str) -> tuple:
+    """Get image dimensions and file size."""
+    try:
+        with Image.open(image_path) as img:
+            width, height = img.size
+        file_size = os.path.getsize(image_path)
+        return width, height, file_size
+    except Exception as e:
+        logging.error(f'Failed to get image info for {image_path}: {e}')
+        return None, None, None
+
+
+# ============================================================================
+# ARCHIVE OPERATIONS
+# ============================================================================
+
+# ============================================================================
+# ARCHIVE OPERATIONS
+# ============================================================================
+
+def archive_and_delete(inner_path: str, archive_path: str) -> None:
+    """Archive a directory to zip and delete the original."""
+    logging.info(f"Archiving {inner_path} to {archive_path}")
+    try:
+        with zipfile.ZipFile(archive_path, 'w', compression=zipfile.ZIP_STORED) as zipf:
+            for root, dirs, files in os.walk(inner_path):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    arcname = os.path.relpath(file_path, inner_path)
+                    zipf.write(file_path, arcname)
+        logging.info(f"Successfully archived {inner_path} to {archive_path}")
+        try:
+            shutil.rmtree(inner_path)
+            logging.info(f"Deleted folder {inner_path}")
+        except Exception as e:
+            logging.error(f"Failed to delete folder {inner_path}: {e}")
+    except Exception as e:
+        logging.error(f"Failed to archive {inner_path}: {e}")
+
+def archive_all_inner_folders(base_path: str) -> None:
+    """Archive all inner folders in the structure base_path/*/*/* to zip, then delete the folder."""
+    to_archive = []
+    for folder_name in os.listdir(base_path):
+        folder_path = os.path.join(base_path, folder_name)
+        if os.path.isdir(folder_path):
+            for subfolder_name in os.listdir(folder_path):
+                subfolder_path = os.path.join(folder_path, subfolder_name)
+                if os.path.isdir(subfolder_path):
+                    for inner_name in os.listdir(subfolder_path):
+                        inner_path = os.path.join(subfolder_path, inner_name)
+                        if os.path.isdir(inner_path):
+                            archive_path = os.path.join(subfolder_path, f"{inner_name}.zip")
+                            if not os.path.exists(archive_path):
+                                to_archive.append((inner_path, archive_path))
+    
+    max_workers = min(int(os.environ.get('DEFAULT_MAX_WORKERS', DEFAULT_MAX_WORKERS)), os.cpu_count() or 1)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        cleanup_manager.register_executor(executor)
+        futures = [executor.submit(archive_and_delete, inner_path, archive_path) 
+                  for inner_path, archive_path in to_archive]
+        for future in as_completed(futures):
+            try:
+                future.result()  # Ensure any exceptions are raised here
+            except Exception as e:
+                logging.error(f"An error occurred while processing a future: {e}")
+
+
+# ============================================================================
+# APPLICATION SETUP AND LOGGING
+# ============================================================================
+
+def setup_logger() -> None:
+    """Set up application logging."""
+    # Try to write log to %APPDATA%/Overlord/log.txt (user-writable)
+    log_dir = get_app_data_path()
+    os.makedirs(log_dir, exist_ok=True)
+    log_path = os.path.join(log_dir, 'log.txt')
+    from logging.handlers import RotatingFileHandler
+    max_bytes = LOG_SIZE_MB * 1024 * 1024  # Convert MB to bytes
+    file_handler = RotatingFileHandler(log_path, maxBytes=max_bytes, backupCount=1, encoding='utf-8')
+    stream_handler = logging.StreamHandler()
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s %(levelname)s: %(message)s',
+        handlers=[file_handler, stream_handler]
+    )
+    logging.info(f'--- Overlord started --- (log file: {log_path}, max size: {LOG_SIZE_MB} MB)')
+
+def create_splash_screen() -> tuple:
+    """Create and show splash screen during startup."""
+    splash = tk.Tk()
+    splash.title(UI_TEXT["app_title"])
+    splash.overrideredirect(True)  # Remove window decorations
+    
+    # Center the splash screen
+    screen_width = splash.winfo_screenwidth()
+    screen_height = splash.winfo_screenheight()
+    x = (screen_width - SPLASH_WIDTH) // 2
+    y = (screen_height - SPLASH_HEIGHT) // 2
+    splash.geometry(f"{SPLASH_WIDTH}x{SPLASH_HEIGHT}+{x}+{y}")
+    
+    try:
+        # Load splash screen image
+        splash_image = tk.PhotoImage(file=resource_path(os.path.join("images", "splashScreen.png")))
+        splash_label = tk.Label(splash, image=splash_image)
+        splash_label.image = splash_image  # Keep reference
+        splash_label.pack(fill="both", expand=True)
+    except Exception as e:
+        # Fallback to text if image fails to load
+        logging.warning(f"Could not load splash screen image: {e}")
+        splash_label = tk.Label(splash, text=f"Overlord {overlord_version}\nRender Pipeline Manager\n\nStarting up...", 
+                               font=("Arial", 16), bg="#2c2c2c", fg="white")
+        splash_label.pack(fill="both", expand=True)
+    
+    # Add status text
+    status_label = tk.Label(splash, text="Starting Overlord...", font=("Arial", 10), 
+                           bg="#2c2c2c", fg="white")
+    status_label.pack(side="bottom", pady=10)
+    
+    splash.update()
+    return splash, status_label
+
+
+# ============================================================================
+# ENHANCED THEME MANAGER
+# ============================================================================
+# ============================================================================
+# ENHANCED THEME MANAGER
+# ============================================================================
+
 class ThemeManager:
+    """Enhanced theme management with better organization and features."""
+    
     def __init__(self):
         self.current_theme = detect_windows_theme()
-        self.themes = {
-            "light": {
-                "bg": "#f0f0f0",
-                "fg": "#000000",
-                "entry_bg": "#ffffff",
-                "entry_fg": "#000000",
-                "button_bg": "#e1e1e1",
-                "button_fg": "#000000",
-                "frame_bg": "#f0f0f0",
-                "text_bg": "#ffffff",
-                "text_fg": "#000000",
-                "select_bg": "#0078d4",
-                "select_fg": "#ffffff",
-                "highlight_bg": "#cccccc"
-            },
-            "dark": {
-                "bg": "#2d2d30",
-                "fg": "#ffffff",
-                "entry_bg": "#3c3c3c",
-                "entry_fg": "#ffffff",
-                "button_bg": "#404040",
-                "button_fg": "#ffffff",
-                "frame_bg": "#2d2d30",
-                "text_bg": "#1e1e1e",
-                "text_fg": "#ffffff",
-                "select_bg": "#0078d4",
-                "select_fg": "#ffffff",
-                "highlight_bg": "#404040"
-            }
-        }
+        self.themes = THEME_COLORS
         self.widgets_to_theme = []
         self.ttk_style = None
         
-    def get_color(self, color_name):
+    def get_color(self, color_name: str) -> str:
+        """Get a color value for the current theme."""
         return self.themes[self.current_theme][color_name]
     
-    def setup_ttk_style(self):
-        """Setup ttk styles for themed widgets"""
+    def setup_ttk_style(self) -> None:
+        """Setup ttk styles for themed widgets."""
         if self.ttk_style is None:
             self.ttk_style = ttk.Style()
         
@@ -123,13 +585,13 @@ class ThemeManager:
                                 lightcolor=self.get_color("select_bg"),
                                 darkcolor=self.get_color("select_bg"))
     
-    def register_widget(self, widget, widget_type="default"):
-        """Register a widget to be themed"""
+    def register_widget(self, widget, widget_type: str = "default") -> None:
+        """Register a widget to be themed."""
         self.widgets_to_theme.append((widget, widget_type))
         self.apply_theme_to_widget(widget, widget_type)
     
-    def apply_theme_to_widget(self, widget, widget_type="default"):
-        """Apply current theme to a specific widget"""
+    def apply_theme_to_widget(self, widget, widget_type: str = "default") -> None:
+        """Apply current theme to a specific widget."""
         try:
             if widget_type == "root":
                 widget.configure(bg=self.get_color("bg"))
@@ -168,18 +630,82 @@ class ThemeManager:
             # Some widgets might not support all options
             pass
     
-    def apply_theme_to_all(self):
-        """Apply current theme to all registered widgets"""
+    def apply_theme_to_all(self) -> None:
+        """Apply current theme to all registered widgets."""
         if self.ttk_style is None:
             self.setup_ttk_style()
         for widget, widget_type in self.widgets_to_theme:
             self.apply_theme_to_widget(widget, widget_type)
+    
+    def get_border_color(self) -> str:
+        """Get the border color for the current theme."""
+        return self.get_color("border")
+    
+    def switch_theme(self, theme_name: str) -> bool:
+        """Switch to a different theme."""
+        if theme_name not in self.themes:
+            logging.warning(f"Unknown theme: {theme_name}")
+            return False
+        
+        self.current_theme = theme_name
+        self.apply_theme_to_all()
+        logging.info(f"Switched to {theme_name} theme")
+        return True
+
 
 # Global theme manager instance
 theme_manager = ThemeManager()
 
-# Settings manager for session persistence
+
+# ============================================================================
+# ENHANCED SETTINGS MANAGER
+# ============================================================================
+
+class SettingsValidator:
+    """Validates settings values."""
+    
+    @staticmethod
+    def validate_number_of_instances(value: str) -> bool:
+        """Validate number of instances setting."""
+        try:
+            num = int(value)
+            return VALIDATION_LIMITS['min_instances'] <= num <= VALIDATION_LIMITS['max_instances']
+        except ValueError:
+            return False
+    
+    @staticmethod
+    def validate_frame_rate(value: str) -> bool:
+        """Validate frame rate setting."""
+        try:
+            rate = int(value)
+            return VALIDATION_LIMITS['min_frame_rate'] <= rate <= VALIDATION_LIMITS['max_frame_rate']
+        except ValueError:
+            return False
+    
+    @staticmethod
+    def validate_log_file_size(value: str) -> bool:
+        """Validate log file size setting."""
+        try:
+            size = int(value)
+            return VALIDATION_LIMITS['min_log_size'] <= size <= VALIDATION_LIMITS['max_log_size']
+        except ValueError:
+            return False
+    
+    @staticmethod
+    def validate_source_files(files: list) -> bool:
+        """Validate source files list."""
+        if not files:
+            return False
+        return all(validate_file_path(f, must_exist=True) for f in files)
+    
+    @staticmethod
+    def validate_output_directory(directory: str) -> bool:
+        """Validate output directory."""
+        return validate_directory_path(directory, must_exist=False)
+
 class SettingsManager:
+    """Enhanced settings management with validation and better error handling."""
+    
     def __init__(self):
         # Get settings file path in user directory
         self.settings_dir = get_app_data_path()
@@ -189,15 +715,15 @@ class SettingsManager:
         # Default settings
         self.default_settings = {
             "source_files": [],
-            "output_directory": os.path.join(os.path.expanduser("~"), "Downloads", "output"),
+            "output_directory": get_default_output_directory(),
             "number_of_instances": "1",
             "frame_rate": "30",
             "log_file_size": "100",
             "render_shadows": True
         }
     
-    def load_settings(self):
-        """Load settings from file, return defaults if file doesn't exist or is corrupted"""
+    def load_settings(self) -> dict:
+        """Load settings from file, return defaults if file doesn't exist or is corrupted."""
         try:
             if os.path.exists(self.settings_file):
                 with open(self.settings_file, 'r', encoding='utf-8') as f:
@@ -214,17 +740,39 @@ class SettingsManager:
         
         return self.default_settings.copy()
     
-    def save_settings(self, settings):
-        """Save settings to file"""
+    def save_settings(self, settings: dict) -> bool:
+        """Save settings to file with validation."""
         try:
+            # Basic validation before saving
+            errors = self._validate_settings(settings)
+            if errors:
+                logging.warning(f'Settings validation warnings: {errors}')
+            
             with open(self.settings_file, 'w', encoding='utf-8') as f:
                 json.dump(settings, f, indent=2)
             logging.info(f'Settings saved to {self.settings_file}')
+            return True
         except Exception as e:
             logging.error(f'Failed to save settings: {e}')
+            return False
     
-    def get_current_settings(self, value_entries, render_shadows_var):
-        """Extract current settings from UI widgets"""
+    def _validate_settings(self, settings: dict) -> list:
+        """Validate settings and return list of issues."""
+        issues = []
+        
+        if not SettingsValidator.validate_number_of_instances(settings.get('number_of_instances', '1')):
+            issues.append("Invalid number of instances")
+        
+        if not SettingsValidator.validate_frame_rate(settings.get('frame_rate', '30')):
+            issues.append("Invalid frame rate")
+        
+        if not SettingsValidator.validate_log_file_size(settings.get('log_file_size', '100')):
+            issues.append("Invalid log file size")
+        
+        return issues
+    
+    def get_current_settings(self, value_entries: dict, render_shadows_var) -> dict:
+        """Extract current settings from UI widgets."""
         try:
             source_files_text = value_entries["Source Files"].get("1.0", tk.END).strip()
             source_files = [f.strip() for f in source_files_text.split('\n') if f.strip()]
@@ -239,18 +787,11 @@ class SettingsManager:
             }
         except tk.TclError:
             # Widgets have been destroyed, return default settings
-            logging.warning("Widgets destroyed during settings save, using defaults")
-            return {
-                "source_files": [],
-                "output_directory": "",
-                "number_of_instances": "1",
-                "frame_rate": "30",
-                "log_file_size": "100",
-                "render_shadows": True
-            }
+            logging.warning("Widgets destroyed during settings extraction, using defaults")
+            return self.default_settings.copy()
     
-    def apply_settings(self, settings, value_entries, render_shadows_var):
-        """Apply loaded settings to UI widgets"""
+    def apply_settings(self, settings: dict, value_entries: dict, render_shadows_var) -> bool:
+        """Apply loaded settings to UI widgets."""
         try:
             # Source Files (text widget)
             value_entries["Source Files"].delete("1.0", tk.END)
@@ -277,64 +818,307 @@ class SettingsManager:
             render_shadows_var.set(settings["render_shadows"])
             
             logging.info('Settings applied to UI')
+            return True
         except Exception as e:
             logging.error(f'Failed to apply some settings: {e}')
+            return False
 
+
+# Global settings manager instance
 settings_manager = SettingsManager()
 
-# File watcher for .exr to .png conversion
+
+# ============================================================================
+# ENHANCED FILE MONITORING AND EXR CONVERSION
+# ============================================================================
+
 class ExrFileHandler(FileSystemEventHandler):
-    """Handle new .exr files and convert them to .png"""
+    """Enhanced EXR to PNG converter with better error handling and progress tracking."""
     
-    def __init__(self, final_output_directory=None):
+    def __init__(self, output_directory: str, update_gui_callback=None):
+        super().__init__()
+        self.output_directory = output_directory
+        self.update_gui_callback = update_gui_callback
+        self.image_update_callback = None  # New callback for UI image updates
+        self.processed_files = set()
         self.conversion_queue = []
         self.conversion_thread = None
         self.stop_conversion = False
+        self.final_output_directory = output_directory
+        self.conversion_stats = {
+            'total': 0,
+            'successful': 0,
+            'failed': 0,
+            'skipped': 0
+        }
+    
+    def set_image_update_callback(self, callback):
+        """Set callback function to update UI when new images are available."""
+        self.image_update_callback = callback
+    
+    def set_final_output_directory(self, final_output_directory: str):
+        """Set the final output directory where processed PNGs should be moved."""
         self.final_output_directory = final_output_directory
-        
-    def set_final_output_directory(self, final_output_directory):
-        """Set the final output directory where processed PNGs should be moved"""
-        self.final_output_directory = final_output_directory
-        
+    
     def on_created(self, event):
-        """Called when a file is created"""
+        """Handle new file creation events."""
         if not event.is_directory:
             if event.src_path.lower().endswith('.exr'):
                 self.add_to_conversion_queue(event.src_path)
-            elif event.src_path.lower().endswith('.png'):
-                self.handle_png_file(event.src_path)
+            elif event.src_path.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif', '.tiff', '.webp')):
+                # Notify UI of new image file
+                self._notify_image_update(event.src_path)
+                if event.src_path.lower().endswith('.png'):
+                    self.handle_png_file(event.src_path)
     
     def on_moved(self, event):
-        """Called when a file is moved/renamed"""
+        """Handle file move events."""
         if not event.is_directory:
             if event.dest_path.lower().endswith('.exr'):
                 self.add_to_conversion_queue(event.dest_path)
-            elif event.dest_path.lower().endswith('.png'):
-                self.handle_png_file(event.dest_path)
+            elif event.dest_path.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif', '.tiff', '.webp')):
+                # Notify UI of new image file
+                self._notify_image_update(event.dest_path)
+                if event.dest_path.lower().endswith('.png'):
+                    self.handle_png_file(event.dest_path)
     
-    def process_transparent_image(self, png_path):
-        """Check if image is entirely transparent and crop to 2x2 if needed. Returns the (possibly modified) path."""
+    def _notify_image_update(self, image_path: str):
+        """Notify the UI that a new image is available."""
+        if self.image_update_callback:
+            try:
+                # Schedule the UI update on the main thread
+                self.image_update_callback(image_path)
+            except Exception as e:
+                logging.error(f"Error notifying UI of image update: {e}")
+    
+    def add_to_conversion_queue(self, exr_path: str):
+        """Add EXR file to conversion queue."""
+        if exr_path not in self.processed_files:
+            self.conversion_queue.append(exr_path)
+            self.processed_files.add(exr_path)
+            logging.info(f'Added {exr_path} to EXR conversion queue')
+            
+            # Start conversion thread if not already running
+            if self.conversion_thread is None or not self.conversion_thread.is_alive():
+                self.start_conversion_thread()
+    
+    def start_conversion_thread(self):
+        """Start the conversion thread."""
+        self.stop_conversion = False
+        self.conversion_thread = threading.Thread(target=self.process_conversion_queue, daemon=True)
+        self.conversion_thread.start()
+    
+    def stop_conversion_thread(self):
+        """Stop the conversion thread."""
+        self.stop_conversion = True
+        if self.conversion_thread and self.conversion_thread.is_alive():
+            self.conversion_thread.join(timeout=5.0)
+    
+    def process_conversion_queue(self):
+        """Process the conversion queue in a background thread."""
+        while not self.stop_conversion:
+            if self.conversion_queue:
+                exr_path = self.conversion_queue.pop(0)
+                try:
+                    self.convert_exr_to_png(exr_path)
+                except Exception as e:
+                    logging.error(f'Failed to convert {exr_path} to PNG: {e}')
+                    self.conversion_stats['failed'] += 1
+            else:
+                time.sleep(0.5)
+    
+    def convert_exr_to_png(self, exr_path: str) -> bool:
+        """Convert a single EXR file to PNG with enhanced error handling."""
         try:
-            # Open the image to check transparency
+            self.conversion_stats['total'] += 1
+            
+            # Wait for file to be fully written
+            if not self._wait_for_file_stability(exr_path):
+                logging.warning(f'EXR file not stable or missing: {exr_path}')
+                self.conversion_stats['skipped'] += 1
+                return False
+            
+            # Generate PNG path
+            png_path = os.path.splitext(exr_path)[0] + '.png'
+            
+            # Check if PNG already exists
+            if os.path.exists(png_path):
+                logging.info(f'PNG already exists, skipping conversion: {png_path}')
+                self.conversion_stats['skipped'] += 1
+                return True
+            
+            logging.info(f'Converting {exr_path} to {png_path}')
+            
+            # Try multiple methods to read the EXR file
+            img = self._read_exr_file(exr_path)
+            
+            if img is None:
+                logging.error(f'All methods failed to read EXR file: {exr_path}')
+                self.conversion_stats['failed'] += 1
+                return False
+            
+            # Save as PNG with optimization
+            self._save_png_file(img, png_path)
+            
+            # Handle PNG post-processing
+            self._post_process_png(png_path)
+            
+            # Delete original EXR file to save space
+            self._cleanup_exr_file(exr_path)
+            
+            self.conversion_stats['successful'] += 1
+            logging.info(f'Successfully converted {exr_path} to {png_path}')
+            return True
+            
+        except Exception as e:
+            logging.error(f'Error converting {exr_path} to PNG: {e}')
+            self.conversion_stats['failed'] += 1
+            return False
+    
+    def _wait_for_file_stability(self, file_path: str, max_wait: int = 30) -> bool:
+        """Wait for file to be stable and fully written."""
+        wait_time = 0
+        while wait_time < max_wait:
+            try:
+                if not os.path.exists(file_path):
+                    return False
+                    
+                size1 = os.path.getsize(file_path)
+                time.sleep(0.5)
+                
+                if not os.path.exists(file_path):
+                    return False
+                    
+                size2 = os.path.getsize(file_path)
+                if size1 == size2 and size1 > 0:
+                    return True
+                    
+            except (OSError, FileNotFoundError):
+                return False
+                
+            time.sleep(1)
+            wait_time += 1
+        
+        return False
+    
+    def _read_exr_file(self, exr_path: str):
+        """Try multiple methods to read EXR file."""
+        # Method 1: imageio
+        try:
+            import imageio.v3 as iio
+            img_array = iio.imread(exr_path)
+            
+            if img_array.dtype != 'uint8':
+                img_array = np.clip(img_array, 0, 1)
+                img_array = (img_array * 255).astype('uint8')
+            
+            if img_array.shape[-1] == 4:
+                return Image.fromarray(img_array, 'RGBA')
+            else:
+                return Image.fromarray(img_array, 'RGB')
+                
+        except Exception as e:
+            logging.debug(f'imageio failed to read EXR: {e}')
+        
+        # Method 2: OpenEXR
+        try:
+            import OpenEXR
+            import Imath
+            
+            exrfile = OpenEXR.InputFile(exr_path)
+            header = exrfile.header()
+            dw = header['dataWindow']
+            width = dw.max.x - dw.min.x + 1
+            height = dw.max.y - dw.min.y + 1
+            
+            FLOAT = Imath.PixelType(Imath.PixelType.FLOAT)
+            r_str = exrfile.channel('R', FLOAT)
+            g_str = exrfile.channel('G', FLOAT)
+            b_str = exrfile.channel('B', FLOAT)
+            
+            # Check for alpha channel
+            try:
+                a_str = exrfile.channel('A', FLOAT)
+                has_alpha = True
+            except:
+                has_alpha = False
+            
+            # Convert to numpy arrays
+            r = np.frombuffer(r_str, dtype=np.float32).reshape((height, width))
+            g = np.frombuffer(g_str, dtype=np.float32).reshape((height, width))
+            b = np.frombuffer(b_str, dtype=np.float32).reshape((height, width))
+            
+            if has_alpha:
+                a = np.frombuffer(a_str, dtype=np.float32).reshape((height, width))
+                rgba = np.stack([r, g, b, a], axis=2)
+                rgba = np.clip(rgba, 0, 1)
+                rgba = (rgba * 255).astype(np.uint8)
+                return Image.fromarray(rgba, 'RGBA')
+            else:
+                rgb = np.stack([r, g, b], axis=2)
+                rgb = np.clip(rgb, 0, 1)
+                rgb = (rgb * 255).astype(np.uint8)
+                return Image.fromarray(rgb, 'RGB')
+                
+        except Exception as e:
+            logging.debug(f'OpenEXR failed to read EXR: {e}')
+        
+        # Method 3: PIL
+        try:
+            return Image.open(exr_path)
+        except Exception as e:
+            logging.debug(f'PIL failed to read EXR: {e}')
+        
+        return None
+    
+    def _save_png_file(self, img, png_path: str):
+        """Save image as PNG with appropriate format."""
+        if img.mode == 'RGBA':
+            img.save(png_path, 'PNG', optimize=True)
+        else:
+            if img.mode != 'RGB':
+                img = img.convert('RGB')
+            img.save(png_path, 'PNG', optimize=True)
+    
+    def _post_process_png(self, png_path: str):
+        """Post-process PNG file including transparency check and moving."""
+        try:
+            # Process transparent images
+            png_path = self.process_transparent_image(png_path)
+            
+            # Wait for file to be fully written
+            time.sleep(0.1)
+            
+            # Handle PNG file (renaming and moving)
+            if os.path.exists(png_path) and os.path.getsize(png_path) > 0:
+                self.handle_png_file(png_path)
+            else:
+                logging.warning(f'PNG file was not created properly: {png_path}')
+                
+        except Exception as e:
+            logging.error(f'Error post-processing PNG file {png_path}: {e}')
+    
+    def _cleanup_exr_file(self, exr_path: str):
+        """Clean up original EXR file."""
+        try:
+            os.remove(exr_path)
+            logging.info(f'Deleted original EXR file: {exr_path}')
+        except Exception as e:
+            logging.warning(f'Failed to delete original EXR file {exr_path}: {e}')
+    
+    def process_transparent_image(self, png_path: str) -> str:
+        """Check if image is entirely transparent and crop to 2x2 if needed."""
+        try:
             with Image.open(png_path) as img:
-                # Convert to RGBA if not already
                 if img.mode != 'RGBA':
                     img = img.convert('RGBA')
                 
-                # Get the alpha channel
-                alpha_channel = img.split()[-1]  # Get the alpha channel (last channel in RGBA)
-                
-                # Check if all alpha values are 0 (completely transparent) using numpy for efficiency
+                alpha_channel = img.split()[-1]
                 alpha_array = np.array(alpha_channel)
-                is_entirely_transparent = np.all(alpha_array == 0)
                 
-                if is_entirely_transparent:
+                if np.all(alpha_array == 0):
                     logging.info(f"Detected entirely transparent image: {png_path}, cropping to 2x2")
-                    
-                    # Create a new 2x2 transparent image
                     cropped_img = Image.new('RGBA', (2, 2), (0, 0, 0, 0))
-                    
-                    # Save the cropped image, overwriting the original
                     cropped_img.save(png_path, 'PNG')
                     logging.info(f"Successfully cropped transparent image to 2x2: {png_path}")
                     
@@ -343,298 +1127,93 @@ class ExrFileHandler(FileSystemEventHandler):
         
         return png_path
     
-    def handle_png_file(self, png_path):
-        """Handle PNG files, removing '-Beauty' or '-gearCanvas' from filename if present, then move to final output directory"""
+    def handle_png_file(self, png_path: str):
+        """Handle PNG files with enhanced stability checks and error handling."""
         try:
-            # Check if the file still exists before processing
-            if not os.path.exists(png_path):
-                logging.debug(f"PNG file no longer exists, skipping: {png_path}")
+            # Enhanced stability check
+            if not self._wait_for_file_stability(png_path, max_wait=10):
+                logging.debug(f"PNG file not stable or missing: {png_path}")
                 return
             
-            # Wait a moment for the file to be fully written
-            max_wait_time = 10  # seconds
-            wait_time = 0
-            while wait_time < max_wait_time:
-                try:
-                    # Try to get file size twice with a small delay to ensure file is stable
-                    size1 = os.path.getsize(png_path)
-                    time.sleep(0.1)
-                    if not os.path.exists(png_path):
-                        logging.debug(f"PNG file disappeared during stability check: {png_path}")
-                        return
-                    size2 = os.path.getsize(png_path)
-                    if size1 == size2 and size1 > 0:
-                        break  # File appears to be stable
-                except (OSError, FileNotFoundError):
-                    logging.debug(f"PNG file not accessible during stability check: {png_path}")
-                    return
-                time.sleep(0.5)
-                wait_time += 0.6
-            
-            # Final check before processing
-            if not os.path.exists(png_path):
-                logging.debug(f"PNG file disappeared after stability check: {png_path}")
-                return
-                
             directory = os.path.dirname(png_path)
             filename = os.path.basename(png_path)
             name, ext = os.path.splitext(filename)
             
+            # Remove suffixes
             new_name = name
-            # Remove both '-gearCanvas' and '-Beauty' suffixes if present
             if new_name.endswith('-Beauty'):
-                new_name = new_name[:-7]  # Remove '-Beauty' (7 characters)
+                new_name = new_name[:-7]
             if new_name.endswith('-gearCanvas'):
-                new_name = new_name[:-11]  # Remove '-gearCanvas' (11 characters)
+                new_name = new_name[:-11]
             
-            # Only proceed if we actually modified the name
-            if new_name == name:
-                new_name = None
-            
-            if new_name:
+            # Rename if necessary
+            if new_name != name:
                 new_filename = new_name + ext
                 new_path = os.path.join(directory, new_filename)
                 
-                # Check if source file still exists before renaming
                 if not os.path.exists(png_path):
                     logging.debug(f"PNG file disappeared before rename: {png_path}")
                     return
                 
-                # Rename the file
                 try:
                     os.rename(png_path, new_path)
                     logging.info(f"Renamed: {filename} → {new_filename}")
-                    png_path = new_path  # Update path for moving
+                    png_path = new_path
                 except (OSError, FileNotFoundError) as e:
                     logging.warning(f"Failed to rename PNG file {png_path}: {e}")
                     return
-                
-            # Check if image is entirely transparent and crop to 2x2 if needed
-            try:
-                png_path = self.process_transparent_image(png_path)
-            except Exception as e:
-                logging.error(f"Error processing transparent image {png_path}: {e}")
             
-            # Move the PNG from server output directory to final output directory
-            if self.final_output_directory and os.path.exists(self.final_output_directory):
-                # Final check before moving
-                if not os.path.exists(png_path):
-                    logging.debug(f"PNG file disappeared before move: {png_path}")
-                    return
-                    
-                final_png_path = os.path.join(self.final_output_directory, os.path.basename(png_path))
-                
-                try:
-                    shutil.move(png_path, final_png_path)
-                    logging.info(f"Moved PNG from server output to final output: {png_path} → {final_png_path}")
-                except (OSError, FileNotFoundError, shutil.Error) as e:
-                    logging.warning(f"Failed to move PNG file from {png_path} to {final_png_path}: {e}")
-            else:
-                if not self.final_output_directory:
-                    logging.warning(f"Final output directory not set, PNG remains in server output: {png_path}")
-                else:
-                    logging.warning(f"Final output directory does not exist: {self.final_output_directory}, PNG remains in server output: {png_path}")
-                
+            # Move to final output directory
+            final_path = self._move_to_final_directory(png_path)
+            
+            # Notify UI of new image after successful processing
+            if final_path:
+                self._notify_image_update(final_path)
+            
         except Exception as e:
             logging.error(f"Error handling PNG file {png_path}: {e}")
     
-    def add_to_conversion_queue(self, exr_path):
-        """Add .exr file to conversion queue"""
-        self.conversion_queue.append(exr_path)
-        logging.info(f'Added {exr_path} to EXR conversion queue')
+    def _move_to_final_directory(self, png_path: str) -> str:
+        """Move PNG file to final output directory. Returns final path if successful."""
+        if not self.final_output_directory or not os.path.exists(self.final_output_directory):
+            if not self.final_output_directory:
+                logging.warning(f"Final output directory not set, PNG remains: {png_path}")
+            else:
+                logging.warning(f"Final output directory does not exist: {self.final_output_directory}")
+            return png_path  # Return original path if can't move
         
-        # Start conversion thread if not already running
-        if self.conversion_thread is None or not self.conversion_thread.is_alive():
-            self.start_conversion_thread()
-    
-    def start_conversion_thread(self):
-        """Start the conversion thread"""
-        self.stop_conversion = False
-        self.conversion_thread = threading.Thread(target=self.process_conversion_queue, daemon=True)
-        self.conversion_thread.start()
-    
-    def stop_conversion_thread(self):
-        """Stop the conversion thread"""
-        self.stop_conversion = True
-        if self.conversion_thread and self.conversion_thread.is_alive():
-            self.conversion_thread.join(timeout=5.0)  # Wait up to 5 seconds
-    
-    def process_conversion_queue(self):
-        """Process the conversion queue in a background thread"""
-        while not self.stop_conversion:
-            if self.conversion_queue:
-                exr_path = self.conversion_queue.pop(0)
-                try:
-                    self.convert_exr_to_png(exr_path)
-                except Exception as e:
-                    logging.error(f'Failed to convert {exr_path} to PNG: {e}')
-            else:
-                # Sleep briefly if queue is empty
-                time.sleep(0.5)
-    
-    def convert_exr_to_png(self, exr_path):
-        """Convert a single .exr file to .png"""
+        if not os.path.exists(png_path):
+            logging.debug(f"PNG file disappeared before move: {png_path}")
+            return None
+        
+        final_png_path = os.path.join(self.final_output_directory, os.path.basename(png_path))
+        
         try:
-            # Wait for file to be fully written (DAZ Studio might still be writing)
-            max_wait_time = 30  # seconds
-            wait_time = 0
-            while wait_time < max_wait_time:
-                try:
-                    # Try to get file size twice with a small delay
-                    size1 = os.path.getsize(exr_path)
-                    time.sleep(0.5)
-                    size2 = os.path.getsize(exr_path)
-                    if size1 == size2 and size1 > 0:
-                        break  # File appears to be stable
-                except (OSError, FileNotFoundError):
-                    pass
-                time.sleep(1)
-                wait_time += 1
-            
-            if not os.path.exists(exr_path):
-                logging.warning(f'EXR file no longer exists: {exr_path}')
-                return
-            
-            # Generate PNG path
-            png_path = os.path.splitext(exr_path)[0] + '.png'
-            
-            # Check if PNG already exists
-            if os.path.exists(png_path):
-                logging.info(f'PNG already exists, skipping conversion: {png_path}')
-                return
-            
-            logging.info(f'Converting {exr_path} to {png_path}')
-            
-            # Try multiple methods to read the EXR file
-            img = None
-            
-            # Method 1: Try with imageio (often has better EXR support)
-            try:
-                import imageio.v3 as iio
-                img_array = iio.imread(exr_path)
-                # Convert numpy array to PIL Image
-                if img_array.dtype != 'uint8':
-                    # Normalize float values to 0-255 range, preserving alpha
-                    if img_array.shape[-1] == 4:  # RGBA
-                        # Clamp values to 0-1 range first, then scale to 0-255
-                        img_array = np.clip(img_array, 0, 1)
-                        img_array = (img_array * 255).astype('uint8')
-                        img = Image.fromarray(img_array, 'RGBA')
-                    else:  # RGB
-                        img_array = np.clip(img_array, 0, 1)
-                        img_array = (img_array * 255).astype('uint8')
-                        img = Image.fromarray(img_array, 'RGB')
-                else:
-                    # Already uint8
-                    if img_array.shape[-1] == 4:
-                        img = Image.fromarray(img_array, 'RGBA')
-                    else:
-                        img = Image.fromarray(img_array, 'RGB')
-                logging.info(f'Successfully read EXR with imageio: {exr_path}')
-            except Exception as e:
-                logging.debug(f'imageio failed to read EXR: {e}')
-            
-            # Method 2: Try with OpenEXR
-            if img is None:
-                try:
-                    import OpenEXR
-                    import Imath
-                    
-                    exrfile = OpenEXR.InputFile(exr_path)
-                    header = exrfile.header()
-                    dw = header['dataWindow']
-                    width = dw.max.x - dw.min.x + 1
-                    height = dw.max.y - dw.min.y + 1
-                    
-                    # Read RGB channels
-                    FLOAT = Imath.PixelType(Imath.PixelType.FLOAT)
-                    r_str = exrfile.channel('R', FLOAT)
-                    g_str = exrfile.channel('G', FLOAT)
-                    b_str = exrfile.channel('B', FLOAT)
-                    
-                    # Try to read alpha channel
-                    try:
-                        a_str = exrfile.channel('A', FLOAT)
-                        has_alpha = True
-                    except:
-                        has_alpha = False
-                    
-                    # Convert to numpy arrays
-                    import numpy as np
-                    r = np.frombuffer(r_str, dtype=np.float32).reshape((height, width))
-                    g = np.frombuffer(g_str, dtype=np.float32).reshape((height, width))
-                    b = np.frombuffer(b_str, dtype=np.float32).reshape((height, width))
-                    
-                    if has_alpha:
-                        a = np.frombuffer(a_str, dtype=np.float32).reshape((height, width))
-                        # Stack RGBA and normalize
-                        rgba = np.stack([r, g, b, a], axis=2)
-                        rgba = np.clip(rgba, 0, 1)  # Clamp to 0-1 range
-                        rgba = (rgba * 255).astype(np.uint8)
-                        img = Image.fromarray(rgba, 'RGBA')
-                    else:
-                        # Stack RGB and normalize
-                        rgb = np.stack([r, g, b], axis=2)
-                        rgb = np.clip(rgb, 0, 1)  # Clamp to 0-1 range
-                        rgb = (rgb * 255).astype(np.uint8)
-                        img = Image.fromarray(rgb, 'RGB')
-                    
-                    logging.info(f'Successfully read EXR with OpenEXR: {exr_path}')
-                except Exception as e:
-                    logging.debug(f'OpenEXR failed to read EXR: {e}')
-            
-            # Method 3: Try with PIL directly (sometimes works)
-            if img is None:
-                try:
-                    img = Image.open(exr_path)
-                    # Keep original mode (RGB or RGBA) - don't force convert
-                    logging.info(f'Successfully read EXR with PIL: {exr_path}')
-                except Exception as e:
-                    logging.debug(f'PIL failed to read EXR: {e}')
-            
-            # If all methods failed, log error and return
-            if img is None:
-                logging.error(f'All methods failed to read EXR file: {exr_path}')
-                return
-            
-            # Save as PNG with alpha preservation
-            if img.mode == 'RGBA':
-                # Save with alpha channel preserved
-                img.save(png_path, 'PNG', optimize=True)
-                logging.info(f'Successfully converted {exr_path} to {png_path} (with alpha)')
-            else:
-                # Convert to RGB if not already (for files without alpha)
-                if img.mode != 'RGB':
-                    img = img.convert('RGB')
-                img.save(png_path, 'PNG', optimize=True)
-                logging.info(f'Successfully converted {exr_path} to {png_path} (RGB)')
-            
-            # Ensure PNG file is fully written before processing
-            try:
-                # Verify the PNG file exists and is accessible
-                if os.path.exists(png_path) and os.path.getsize(png_path) > 0:
-                    # Wait a moment to ensure file is fully written
-                    time.sleep(0.1)
-                    # Handle PNG renaming and moving
-                    self.handle_png_file(png_path)
-                else:
-                    logging.warning(f'PNG file was not created properly: {png_path}')
-            except Exception as png_handle_error:
-                logging.error(f'Error handling PNG file {png_path}: {png_handle_error}')
-            
-            # Delete the original .exr file to save space
-            try:
-                os.remove(exr_path)
-                logging.info(f'Deleted original EXR file: {exr_path}')
-            except Exception as delete_error:
-                logging.warning(f'Failed to delete original EXR file {exr_path}: {delete_error}')
-            
-        except Exception as e:
-            logging.error(f'Error converting {exr_path} to PNG: {e}')
+            shutil.move(png_path, final_png_path)
+            logging.info(f"Moved PNG to final output: {png_path} → {final_png_path}")
+            return final_png_path
+        except (OSError, FileNotFoundError, shutil.Error) as e:
+            logging.warning(f"Failed to move PNG file from {png_path} to {final_png_path}: {e}")
+            return png_path  # Return original path if move failed
+    
+    def get_conversion_stats(self) -> dict:
+        """Get conversion statistics."""
+        return self.conversion_stats.copy()
+    
+    def reset_stats(self):
+        """Reset conversion statistics."""
+        self.conversion_stats = {
+            'total': 0,
+            'successful': 0,
+            'failed': 0,
+            'skipped': 0
+        }
+        self.processed_files.clear()
 
-settings_manager = SettingsManager()
 
-# Global cleanup manager
+# ============================================================================
+# ENHANCED CLEANUP MANAGER
+# ============================================================================
 class CleanupManager:
     def __init__(self):
         self.temp_files = []
@@ -671,7 +1250,7 @@ class CleanupManager:
         """Mark that settings have been saved to prevent duplicate saves"""
         self.settings_saved_on_close = True
     
-    def start_file_monitoring(self, server_output_dir, final_output_dir):
+    def start_file_monitoring(self, server_output_dir, final_output_dir, image_update_callback=None):
         """Start monitoring the server output directory for new .exr files"""
         try:
             if self.file_observer is not None:
@@ -684,8 +1263,15 @@ class CleanupManager:
                 os.makedirs(final_output_dir, exist_ok=True)
             
             self.exr_handler = ExrFileHandler(final_output_dir)
+            
+            # Set up the image update callback for UI notifications
+            if image_update_callback:
+                self.exr_handler.set_image_update_callback(image_update_callback)
+            
             self.file_observer = Observer()
             self.file_observer.schedule(self.exr_handler, server_output_dir, recursive=True)
+            # Also monitor the final output directory for any direct image additions
+            self.file_observer.schedule(self.exr_handler, final_output_dir, recursive=True)
             self.file_observer.start()
             logging.info(f'Started file monitoring for .exr files in server output: {server_output_dir}')
             logging.info(f'Processed PNGs will be moved to final output: {final_output_dir}')
@@ -1585,6 +2171,7 @@ def main():
         return [fpath for mtime, fpath in image_files]
 
     def show_last_rendered_image():
+        """Display the most recent image from the output directory."""
         output_dir = value_entries["Output Directory"].get()
         image_paths = find_newest_image(output_dir)
         displayed = False
@@ -1671,9 +2258,24 @@ def main():
         
         # Force garbage collection to clean up any remaining references
         gc.collect()
+
+    def watchdog_image_update(new_image_path):
+        """Called by watchdog when a new image is detected. Schedules UI update on main thread."""
+        def update_ui():
+            try:
+                output_dir = value_entries["Output Directory"].get()
+                # Only update if the new image is in the current output directory
+                if os.path.dirname(new_image_path) == output_dir or new_image_path.startswith(output_dir):
+                    show_last_rendered_image()
+                    logging.debug(f'UI updated for new image: {new_image_path}')
+            except Exception as e:
+                logging.error(f'Error updating UI for new image {new_image_path}: {e}')
         
-        # Schedule to check again in 1 second
-        root.after(IMAGE_UPDATE_INTERVAL, show_last_rendered_image)
+        # Schedule the update on the main thread
+        try:
+            root.after(100, update_ui)  # Small delay to ensure file is fully written
+        except Exception as e:
+            logging.error(f'Error scheduling UI update for new image: {e}')
 
     def periodic_update_output_details():
         """Periodically update output details every 5 seconds"""
@@ -1689,6 +2291,15 @@ def main():
         if hasattr(cleanup_manager, 'exr_handler') and cleanup_manager.exr_handler is not None:
             cleanup_manager.exr_handler.set_final_output_directory(new_output_dir)
             logging.info(f'Updated ExrFileHandler final output directory to: {new_output_dir}')
+        
+        # Restart file monitoring to include the new output directory
+        if hasattr(cleanup_manager, 'file_observer') and cleanup_manager.file_observer is not None:
+            try:
+                server_output_dir = get_server_output_directory()
+                cleanup_manager.start_file_monitoring(server_output_dir, new_output_dir, watchdog_image_update)
+                logging.info(f'Restarted file monitoring for new output directory: {new_output_dir}')
+            except Exception as e:
+                logging.error(f'Failed to restart file monitoring: {e}')
         
         root.after(200, show_last_rendered_image)
         root.after(200, update_output_details)
@@ -1940,7 +2551,7 @@ def main():
                 logging.info('All render instances launched')
                 # Start file monitoring for .exr files in server output directory, move processed PNGs to final output
                 server_output_dir = get_server_output_directory()
-                cleanup_manager.start_file_monitoring(server_output_dir, image_output_dir)
+                cleanup_manager.start_file_monitoring(server_output_dir, image_output_dir, watchdog_image_update)
                 root.after(IMAGE_UPDATE_INTERVAL, show_last_rendered_image)  # Update image after render
 
         run_all_instances()
@@ -1998,10 +2609,9 @@ def main():
         button.config(state="normal")
         stop_button.config(state="disabled")
 
-    # Initial display
-    root.after(500, show_last_rendered_image)
-    root.after(IMAGE_UPDATE_INTERVAL, update_output_details)  # Initial output details update
-    root.after(OUTPUT_UPDATE_INTERVAL, periodic_update_output_details)  # Start periodic updates
+    # Initial display setup
+    root.after(500, show_last_rendered_image)  # Initial image load
+    root.after(OUTPUT_UPDATE_INTERVAL, periodic_update_output_details)  # Start periodic output updates
 
     # --- Buttons Section ---
     buttons_frame = tk.Frame(root)
