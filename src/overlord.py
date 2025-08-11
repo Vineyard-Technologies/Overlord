@@ -11,6 +11,7 @@ import webbrowser
 import zipfile
 import time
 import threading
+import warnings
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from PIL import Image, ImageTk
@@ -938,6 +939,14 @@ class ExrFileHandler(FileSystemEventHandler):
                 self.conversion_stats['skipped'] += 1
                 return False
             
+            # Validate EXR file before attempting conversion
+            if not self._validate_exr_file(exr_path):
+                logging.warning(f'EXR file appears to be corrupted or incomplete: {exr_path}')
+                self.conversion_stats['failed'] += 1
+                # Still try to clean up the corrupted file
+                self._cleanup_exr_file(exr_path)
+                return False
+            
             # Generate PNG path
             png_path = os.path.splitext(exr_path)[0] + '.png'
             
@@ -955,6 +964,8 @@ class ExrFileHandler(FileSystemEventHandler):
             if img is None:
                 logging.error(f'All methods failed to read EXR file: {exr_path}')
                 self.conversion_stats['failed'] += 1
+                # Clean up the failed EXR file
+                self._cleanup_exr_file(exr_path)
                 return False
             
             # Save as PNG with optimization
@@ -973,6 +984,61 @@ class ExrFileHandler(FileSystemEventHandler):
         except Exception as e:
             logging.error(f'Error converting {exr_path} to PNG: {e}')
             self.conversion_stats['failed'] += 1
+            # Clean up the failed EXR file
+            try:
+                self._cleanup_exr_file(exr_path)
+            except Exception:
+                pass  # Ignore cleanup errors
+            return False
+    
+    def _validate_exr_file(self, exr_path: str) -> bool:
+        """Validate EXR file for basic correctness before attempting conversion."""
+        try:
+            # Check file size - corrupted EXR files often have unusual sizes
+            if not os.path.exists(exr_path):
+                return False
+            
+            file_size = os.path.getsize(exr_path)
+            if file_size < 1024:  # Less than 1KB is likely corrupted
+                logging.warning(f'EXR file too small ({file_size} bytes): {exr_path}')
+                return False
+            
+            # Quick validation using imageio first (fastest method)
+            try:
+                import imageio.v3 as iio
+                # Try to read just the metadata without loading the full image
+                with iio.imopen(exr_path, 'r') as file:
+                    meta = file.metadata()
+                    # Check if we have reasonable dimensions
+                    if hasattr(file, 'shape') and len(file.shape) >= 2:
+                        height, width = file.shape[:2]
+                        if height <= 0 or width <= 0 or height > 32768 or width > 32768:
+                            logging.warning(f'EXR file has invalid dimensions ({width}x{height}): {exr_path}')
+                            return False
+                    return True
+            except Exception as e:
+                logging.debug(f'imageio validation failed for {exr_path}: {e}')
+            
+            # Fallback validation using basic file header check
+            try:
+                with open(exr_path, 'rb') as f:
+                    # Read EXR magic number (first 4 bytes should be 0x762f3101)
+                    magic = f.read(4)
+                    if len(magic) != 4:
+                        return False
+                    
+                    # Check EXR magic number
+                    if magic != b'\x76\x2f\x31\x01':
+                        logging.warning(f'EXR file has invalid magic number: {exr_path}')
+                        return False
+                    
+                    return True
+            except Exception as e:
+                logging.debug(f'File header validation failed for {exr_path}: {e}')
+                return False
+                
+        except Exception as e:
+            logging.warning(f'EXR validation failed for {exr_path}: {e}')
             return False
     
     def _wait_for_file_stability(self, file_path: str, max_wait: int = 30) -> bool:
@@ -1002,25 +1068,47 @@ class ExrFileHandler(FileSystemEventHandler):
         return False
     
     def _read_exr_file(self, exr_path: str):
-        """Try multiple methods to read EXR file."""
-        # Method 1: imageio
+        """Try multiple methods to read EXR file with enhanced error handling."""
+        # Method 1: imageio (with warning suppression for corrupted files)
         try:
             import imageio.v3 as iio
-            img_array = iio.imread(exr_path)
+            import warnings
+            
+            # Suppress specific warnings about corrupted frame headers
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", message=".*claims there are .* frames, but there are actually .* frames.*")
+                warnings.filterwarnings("ignore", message=".*tile cannot extend outside image.*")
+                
+                img_array = iio.imread(exr_path)
+                
+                # Validate the loaded image array
+                if img_array is None or img_array.size == 0:
+                    raise ValueError("Loaded image array is empty")
+                
+                # Check for reasonable dimensions
+                if len(img_array.shape) < 2:
+                    raise ValueError(f"Invalid image shape: {img_array.shape}")
+                
+                height, width = img_array.shape[:2]
+                if height <= 0 or width <= 0:
+                    raise ValueError(f"Invalid image dimensions: {width}x{height}")
             
             if img_array.dtype != 'uint8':
                 img_array = np.clip(img_array, 0, 1)
                 img_array = (img_array * 255).astype('uint8')
             
-            if img_array.shape[-1] == 4:
+            if len(img_array.shape) >= 3 and img_array.shape[-1] == 4:
                 return Image.fromarray(img_array, 'RGBA')
             else:
+                if len(img_array.shape) == 2:
+                    # Grayscale image, convert to RGB
+                    img_array = np.stack([img_array, img_array, img_array], axis=2)
                 return Image.fromarray(img_array, 'RGB')
                 
         except Exception as e:
             logging.debug(f'imageio failed to read EXR: {e}')
         
-        # Method 2: OpenEXR
+        # Method 2: OpenEXR (if available)
         try:
             import OpenEXR
             import Imath
@@ -1030,6 +1118,10 @@ class ExrFileHandler(FileSystemEventHandler):
             dw = header['dataWindow']
             width = dw.max.x - dw.min.x + 1
             height = dw.max.y - dw.min.y + 1
+            
+            # Validate dimensions
+            if width <= 0 or height <= 0 or width > 32768 or height > 32768:
+                raise ValueError(f"Invalid image dimensions: {width}x{height}")
             
             FLOAT = Imath.PixelType(Imath.PixelType.FLOAT)
             r_str = exrfile.channel('R', FLOAT)
@@ -1043,12 +1135,18 @@ class ExrFileHandler(FileSystemEventHandler):
             except:
                 has_alpha = False
             
-            # Convert to numpy arrays
+            # Convert to numpy arrays with validation
+            expected_size = height * width * 4  # 4 bytes per float32
+            if len(r_str) != expected_size or len(g_str) != expected_size or len(b_str) != expected_size:
+                raise ValueError(f"Channel data size mismatch for {width}x{height} image")
+            
             r = np.frombuffer(r_str, dtype=np.float32).reshape((height, width))
             g = np.frombuffer(g_str, dtype=np.float32).reshape((height, width))
             b = np.frombuffer(b_str, dtype=np.float32).reshape((height, width))
             
             if has_alpha:
+                if len(a_str) != expected_size:
+                    raise ValueError(f"Alpha channel data size mismatch for {width}x{height} image")
                 a = np.frombuffer(a_str, dtype=np.float32).reshape((height, width))
                 rgba = np.stack([r, g, b, a], axis=2)
                 rgba = np.clip(rgba, 0, 1)
@@ -1063,9 +1161,13 @@ class ExrFileHandler(FileSystemEventHandler):
         except Exception as e:
             logging.debug(f'OpenEXR failed to read EXR: {e}')
         
-        # Method 3: PIL
+        # Method 3: PIL (as last resort)
         try:
-            return Image.open(exr_path)
+            img = Image.open(exr_path)
+            # Validate the image
+            if img.size[0] <= 0 or img.size[1] <= 0:
+                raise ValueError(f"Invalid image dimensions: {img.size}")
+            return img
         except Exception as e:
             logging.debug(f'PIL failed to read EXR: {e}')
         

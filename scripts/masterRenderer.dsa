@@ -22,7 +22,6 @@ var oIrayOptions;
 var oRenderer;
 var oEnvironmentOptionsPropertyGroups;
 var oRenderOptions;
-// var oActiveCanvasProperty;
 var oDrawGroundProperty;
 var oEnvironmentModeProperty;
 var oRoot;
@@ -63,7 +62,6 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 	oRenderer.setBridgeConfiguration(oSettings);
 	oEnvironmentOptionsPropertyGroups = oRenderMgr.getRenderElementObjects()[3].getPropertyGroups();
 	oRenderOptions = oRenderMgr.getRenderOptions();
-	// oActiveCanvasProperty = oIrayOptions.getPropertyGroups().findProperty('Active Canvas');
 	oDrawGroundProperty = oEnvironmentOptionsPropertyGroups.findProperty('Draw Ground');
 	oEnvironmentModeProperty = oEnvironmentOptionsPropertyGroups.findProperty('Environment Mode');
 	oRoot = Scene.findNodeByLabel('root');
@@ -135,17 +133,21 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 			// Check if the current Daz istance should render this frame.
 			if ((nFrame - (nInstanceNumber - 1)) % nTotalNumberOfInstances != 0) continue;
 
-			// Local only
-			// Example: C:\Users\Andrew\Downloads\output\goblinWarlock\attack\attack_90\attack90_004.png
-			// var sFinalFilePath = sOutputDirectory + '/' + sSubjectName + (bIsShadow ? '_shadow' : '') + '/' + sAnimationName
-			// + '/' + sAnimationName + '_' + nOutputAngle + '/' + sAnimationName + '_' + nOutputAngle + '_' + ('000' + nFrame).slice(-3) + '.png';
+			var sFinalName = sSubjectName + '_' + sAnimationName
+				 + (bIsShadow ? '_shadow_' : '_') + nOutputAngle+ '_' + ('000' + nFrame).slice(-3);
 
-			// If the image we're going to make already exists and isn't the blank image size, skip it if we have flagged as such.
-			// if (oOutputDirectory.exists(sFinalFilePath) && DzFileInfo(sFinalFilePath).size() != nBlankImageSize
-			// 	&& DzFileInfo(sFinalFilePath).size() != nCorruptImageSize && !bOverwriteExistingImages) continue;
 			
-			// Local only
-			// oRenderOptions.renderImgFilename = sFinalFilePath;
+			var sFinalFullPath = sOutputDirectory + '/' + sFinalName + '.png';
+
+			if (oOutputDirectory.exists(sFinalFullPath)) {
+
+				// Skip images that already exist
+				App.log(sFinalFullPath + ' already exists. Skipping render.');
+				continue;
+			}
+			else {
+				App.log(sFinalFullPath + ' does not exist.');
+			}
 
 			Scene.setFrame(nFrame);
 			oRoot.getYRotControl().setValue(nAngle); // Do this every frame, or else it will interpolate.
@@ -166,26 +168,9 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 			}
 			// Wait for everything else to finish first, specifically the mesh smoother
 			while (backgroundProgressIsActive()) processEvents();
-
 			
-			// oRenderMgr.doRender();
-			oRenderer.exportRenderToBridgeQueue(sSubjectName + '_' + sAnimationName
-				 + (bIsShadow ? '_shadow_' : '_') + nOutputAngle+ '_' + ('000' + nFrame).slice(-3),
-			
-			'png', oCamera, oRenderOptions, 0);
-
-			// Only for local renders
-
-			// var oCanvasDirectory = DzDir(sFinalFilePath.replace('.png', '_canvases'));
-
-			// if (oCanvasDirectory.exists())  // If canvases were made, delete all of them, then delete the canvas folder.
-			// {
-			// 	var aCanvases = oCanvasDirectory.getFilesFromDir(['*.exr'], true);
-			// 	for (var i = 0; i != aCanvases.length; i++) oCanvasDirectory.remove(aCanvases[i]);
-			// 	oCanvasDirectory.rmdir();
-			// }
-			// // Looping through all pixels of the output image would be much slower than checking the file size.
-			// if (DzFileInfo(sFinalFilePath).size() == nBlankImageSize) App.warning(sFinalFilePath + ' is ' + nBlankImageSize + ' bytes. It is likely a blank image.');
+			App.log('Sending render to Iray Server...');
+			oRenderer.exportRenderToBridgeQueue(sFinalName, 'png', oCamera, oRenderOptions, 0);
 		}
 	}
 	if (bRenderShadows) if (!bIsShadow) renderCore(sSubjectName, sAnimationName, bIsGear, true);
@@ -206,7 +191,6 @@ var aAnimationFilepaths = filterFilepathsBySuffix(aFilepaths, '_animation.duf');
 var aPropAnimationFilepaths = filterFilepathsBySuffix(aFilepaths, '_propAnimation.duf');
 var aGearFilepaths = filterFilepathsBySuffix(aFilepaths, '_gear.duf');
 var aGearAnimationFilepaths = filterFilepathsBySuffix(aFilepaths, '_gearAnimation.duf');
-print('Subject filepath: ' + sSubjectFilepath);
 var sSubjectName = getName(sSubjectFilepath);
 
 // If there are animations, loop over them
