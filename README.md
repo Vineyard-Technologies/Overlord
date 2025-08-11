@@ -1,12 +1,13 @@
 ![Overlord Logo](images/readmelogo.png)
 ## An Asset Creation Pipeline Management Tool
-#### Overlord uses instances of [Daz Studio](https://www.daz3d.com/) to create assets for [Construct](https://www.construct.net/en) games, like [DaggerQuest](https://www.DaggerQuest.com/).
+#### Overlord uses [Daz Studio](https://www.daz3d.com/) and [NVIDIA Iray](https://www.nvidia.com/en-us/design-visualization/iray/) to create assets for [Construct](https://www.construct.net/en) games, like [DaggerQuest](https://www.DaggerQuest.com/) and [Plains of Shinar](https://PlainsOfShinar.com/).
 ![Overlord Screenshot](images/screenshot.png)
 
 ## Installation
 
 ### Prerequisites
 - **DAZ Studio 4**: Download and install from [Daz3d.com](https://www.daz3d.com/get_studio)
+- **Iray Server**: Download and install from [IrayPlugins.com](https://www.irayplugins.com/)
 - **Python 3.8+**: Required for running from source or building locally. Download and install from [Python.org](https://www.python.org/downloads/).
 
 ### Option 1: Install from Release (Recommended)
