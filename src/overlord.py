@@ -348,11 +348,16 @@ class ExrFileHandler(FileSystemEventHandler):
             filename = os.path.basename(png_path)
             name, ext = os.path.splitext(filename)
             
-            new_name = None
-            if name.endswith('-Beauty'):
-                new_name = name[:-7]  # Remove '-Beauty' (7 characters)
-            elif name.endswith('-gearCanvas'):
-                new_name = name[:-11]  # Remove '-gearCanvas' (11 characters)
+            new_name = name
+            # Remove both '-gearCanvas' and '-Beauty' suffixes if present
+            if new_name.endswith('-Beauty'):
+                new_name = new_name[:-7]  # Remove '-Beauty' (7 characters)
+            if new_name.endswith('-gearCanvas'):
+                new_name = new_name[:-11]  # Remove '-gearCanvas' (11 characters)
+            
+            # Only proceed if we actually modified the name
+            if new_name == name:
+                new_name = None
             
             if new_name:
                 new_filename = new_name + ext
