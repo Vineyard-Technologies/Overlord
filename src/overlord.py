@@ -13,6 +13,7 @@ import time
 import threading
 import warnings
 import numpy as np
+import msvcrt
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from PIL import Image, ImageTk
 import tkinter as tk
@@ -1098,12 +1099,12 @@ class ExrFileHandler(FileSystemEventHandler):
                 img_array = (img_array * 255).astype('uint8')
             
             if len(img_array.shape) >= 3 and img_array.shape[-1] == 4:
-                return Image.fromarray(img_array, 'RGBA')
+                return Image.fromarray(img_array)
             else:
                 if len(img_array.shape) == 2:
                     # Grayscale image, convert to RGB
                     img_array = np.stack([img_array, img_array, img_array], axis=2)
-                return Image.fromarray(img_array, 'RGB')
+                return Image.fromarray(img_array)
                 
         except Exception as e:
             logging.debug(f'imageio failed to read EXR: {e}')
@@ -1151,12 +1152,12 @@ class ExrFileHandler(FileSystemEventHandler):
                 rgba = np.stack([r, g, b, a], axis=2)
                 rgba = np.clip(rgba, 0, 1)
                 rgba = (rgba * 255).astype(np.uint8)
-                return Image.fromarray(rgba, 'RGBA')
+                return Image.fromarray(rgba)
             else:
                 rgb = np.stack([r, g, b], axis=2)
                 rgb = np.clip(rgb, 0, 1)
                 rgb = (rgb * 255).astype(np.uint8)
-                return Image.fromarray(rgb, 'RGB')
+                return Image.fromarray(rgb)
                 
         except Exception as e:
             logging.debug(f'OpenEXR failed to read EXR: {e}')
@@ -1707,6 +1708,160 @@ def create_splash_screen():
     splash.update()
     return splash, status_label
 
+# ============================================================================
+# SINGLE INSTANCE MANAGEMENT
+# ============================================================================
+
+# Global variable to store the lock file handle
+_lock_file_handle = None
+
+def ensure_single_instance():
+    """
+    Ensures only one instance of Overlord can run at a time.
+    Returns True if this is the only instance, False if another instance is already running.
+    """
+    global _lock_file_handle
+    
+    # Get the temporary directory for lock file
+    temp_dir = tempfile.gettempdir()
+    lock_file_path = os.path.join(temp_dir, "overlord_instance.lock")
+    
+    try:
+        # Try to create/open lock file exclusively
+        if os.name == 'nt':  # Windows
+            import msvcrt
+            try:
+                # Open file in exclusive mode
+                _lock_file_handle = open(lock_file_path, 'w')
+                msvcrt.locking(_lock_file_handle.fileno(), msvcrt.LK_NBLCK, 1)
+                
+                # Write current process ID to lock file
+                _lock_file_handle.write(str(os.getpid()))
+                _lock_file_handle.flush()
+                
+                # Register cleanup function to remove lock on exit
+                atexit.register(cleanup_single_instance)
+                
+                return True
+                
+            except (IOError, OSError):
+                # Lock file exists and is locked by another process
+                if _lock_file_handle:
+                    _lock_file_handle.close()
+                    _lock_file_handle = None
+                
+                # Check if the process that created the lock is still running
+                if os.path.exists(lock_file_path):
+                    try:
+                        with open(lock_file_path, 'r') as f:
+                            pid_str = f.read().strip()
+                            if pid_str.isdigit():
+                                pid = int(pid_str)
+                                # Check if process is still running
+                                if psutil.pid_exists(pid):
+                                    try:
+                                        proc = psutil.Process(pid)
+                                        # Check if it's actually an Overlord process
+                                        if 'overlord.py' in ' '.join(proc.cmdline()) or 'overlord' in proc.name().lower():
+                                            # Show a brief notification and exit
+                                            try:
+                                                import tkinter as tk
+                                                from tkinter import messagebox
+                                                root = tk.Tk()
+                                                root.withdraw()  # Hide the main window
+                                                messagebox.showinfo(
+                                                    "Overlord Already Running",
+                                                    "Another instance of Overlord is already running.\n\nOnly one instance can run at a time."
+                                                )
+                                                root.destroy()
+                                            except:
+                                                # If GUI fails, just print to console
+                                                print("Overlord is already running. Only one instance can run at a time.")
+                                            return False  # Another Overlord instance is running
+                                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                        pass
+                                
+                                # Stale lock file, remove it and try again
+                                try:
+                                    os.remove(lock_file_path)
+                                    return ensure_single_instance()  # Recursive call to try again
+                                except OSError:
+                                    pass
+                    except (IOError, ValueError):
+                        # Corrupted lock file, try to remove it
+                        try:
+                            os.remove(lock_file_path)
+                            return ensure_single_instance()  # Recursive call to try again
+                        except OSError:
+                            pass
+                
+                return False
+        else:
+            # Unix/Linux implementation (if needed in the future)
+            import fcntl
+            try:
+                _lock_file_handle = open(lock_file_path, 'w')
+                fcntl.flock(_lock_file_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                
+                _lock_file_handle.write(str(os.getpid()))
+                _lock_file_handle.flush()
+                
+                atexit.register(cleanup_single_instance)
+                return True
+                
+            except (IOError, OSError):
+                if _lock_file_handle:
+                    _lock_file_handle.close()
+                    _lock_file_handle = None
+                return False
+    
+    except Exception as e:
+        # Fallback: if file locking fails, check running processes
+        current_pid = os.getpid()
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+            try:
+                if proc.info['pid'] != current_pid:
+                    cmdline = proc.info['cmdline'] or []
+                    if any('overlord.py' in arg for arg in cmdline) or 'overlord' in proc.info['name'].lower():
+                        # Show notification before returning False
+                        try:
+                            import tkinter as tk
+                            from tkinter import messagebox
+                            root = tk.Tk()
+                            root.withdraw()  # Hide the main window
+                            messagebox.showinfo(
+                                "Overlord Already Running",
+                                "Another instance of Overlord is already running.\n\nOnly one instance can run at a time."
+                            )
+                            root.destroy()
+                        except:
+                            print("Overlord is already running. Only one instance can run at a time.")
+                        return False  # Another Overlord instance found
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+        
+        return True  # No other instance found
+
+def cleanup_single_instance():
+    """Clean up the lock file when the application exits."""
+    global _lock_file_handle
+    
+    if _lock_file_handle:
+        try:
+            _lock_file_handle.close()
+        except:
+            pass
+        _lock_file_handle = None
+    
+    # Remove lock file
+    temp_dir = tempfile.gettempdir()
+    lock_file_path = os.path.join(temp_dir, "overlord_instance.lock")
+    try:
+        if os.path.exists(lock_file_path):
+            os.remove(lock_file_path)
+    except OSError:
+        pass
+
 def main():
     def update_estimated_time_remaining(images_remaining):
         # Get user profile directory
@@ -1769,6 +1924,10 @@ def main():
         else:
             estimated_time_remaining_var.set("Estimated time remaining: --")
             estimated_completion_at_var.set("Estimated completion at: --")
+    
+    # Check for existing instance before showing splash screen
+    if not ensure_single_instance():
+        return  # Exit silently if another instance is already running
     
     # Show splash screen first
     splash, status_label = create_splash_screen()
