@@ -13,8 +13,6 @@ var nFrameRate = oScriptArgs['frame_rate'];
 var bRenderShadows = oScriptArgs['render_shadows'];
 var bCloseDazOnFinish = oScriptArgs['close_daz_on_finish'];
 var nDAZ_TICKS = 4800;
-var nBlankImageSize = 4181;
-var nCorruptImageSize = 0;
 var nTicksPerFrame = nDAZ_TICKS / nFrameRate;
 var bOverwriteExistingImages = false;
 var oRenderMgr;
@@ -28,23 +26,23 @@ var oRoot;
 var oShadowPlane;
 var oSettings = new DzSettings();
 
-oSettings.setIntValue( 'Connection', 0 );
-oSettings.setStringValue( 'Server', '127.0.0.1' );
-oSettings.setBoolValue( 'Secure', false );
-oSettings.setIntValue( 'Port', 9090 );
-oSettings.setStringValue( 'Username', 'admin' );
-oSettings.setStringValue( 'Password', 'admin' );
+oSettings.setIntValue('Connection', 0);
+oSettings.setStringValue('Server', '127.0.0.1');
+oSettings.setBoolValue('Secure', false);
+oSettings.setIntValue('Port', 9090);
+oSettings.setStringValue('Username', 'admin');
+oSettings.setStringValue('Password', 'admin');
 
-function getName(sFileName) // Obtain the desired name out of a filepath or filename.
-{
+// Obtain the desired name out of a filepath or filename.
+function getName(sFileName) {
 	return sFileName.split('/').pop().split('_')[0];
 }
-function setMatte(oSubject, bBool) // Set the Matte Parameter of a subject and its children.
-{
+
+// Set the Matte Parameter of a subject and its children.
+function setMatte(oSubject, bBool) {
 	if (oSubject.matteParameter) oSubject.matteParameter.setValue(bBool);
 
 	for (var nChildCounter = 0; nChildCounter != oSubject.children.length; nChildCounter++) {
-
 		var oChild = oSubject.children[nChildCounter];
 		oChild.matteParameter = oChild.findPropertyByLabel('Enable Iray Matte');
 		if (oChild.matteParameter) oChild.matteParameter.setValue(bBool);
@@ -58,7 +56,7 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 	// These variables have to be determined when we start rendering
 	oRenderMgr = App.getRenderMgr();
 	oIrayOptions = oRenderMgr.getRenderElementObjects()[1];
-	oRenderer = oRenderMgr.findRenderer( 'DzIrayRenderer' );
+	oRenderer = oRenderMgr.findRenderer('DzIrayRenderer');
 	oRenderer.setBridgeConfiguration(oSettings);
 	oEnvironmentOptionsPropertyGroups = oRenderMgr.getRenderElementObjects()[3].getPropertyGroups();
 	oRenderOptions = oRenderMgr.getRenderOptions();
@@ -66,10 +64,10 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 	oEnvironmentModeProperty = oEnvironmentOptionsPropertyGroups.findProperty('Environment Mode');
 	oRoot = Scene.findNodeByLabel('root');
 	oShadowPlane = Scene.findNodeByLabel('shadowPlane');
-	var oCamera = Scene.findCameraByLabel("isometricCamera");
+	var oCamera = Scene.findCameraByLabel('isometricCamera');
 
-	{ // Read the subject's JSON to see how many angles it has
-
+	// Read the subject's JSON to see how many angles it has
+	{
 		var oSubjectFile = new DzFile(sSubjectFilepath);
 		var nAngles = 16;
 
@@ -86,8 +84,9 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 		var nDegrees = nDEGREES_IN_CIRCLE / nAngles;
 	}
 	
-	if (sAnimationName != 'static') { // Read the animation's JSON to see how many frames it has
-		// https://github.com/Laserwolve-Games/Overlord/discussions/4 
+	// Read the animation's JSON to see how many frames it has
+	if (sAnimationName != 'static') {
+		// https://github.com/Laserwolve-Games/Overlord/discussions/4
 		var oAnimationFile = new DzFile(sAnimationFilepath);
 
 		oAnimationFile.open(DzFile.ReadOnly);
@@ -95,11 +94,9 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 		oAnimationFile.close();
 
 		for (var i = 0; i < oAnimationsJson.length; i++) {
-
 			var nNumberOfFrames = oAnimationsJson[i].keys.length;
 
 			if (nNumberOfFrames > 1) {
-
 				// Subtract 1 here to make it 0-based
 				Scene.setAnimRange(DzTimeRange(0, (nNumberOfFrames - 1) * nTicksPerFrame));
 
@@ -109,8 +106,8 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 	} else Scene.setAnimRange(DzTimeRange(0, 0));
 
 	if (bIsGear) {
-
-		oIrayOptions.addNodeToNodeList('visibleNodes', oGear); // Add the gear to the canvas.
+		// Add the gear to the canvas.
+		oIrayOptions.addNodeToNodeList('visibleNodes', oGear);
 
 		// Add all gear children to the canvas as well.
 		for (var nGearChildrenCounter = 0; nGearChildrenCounter != aGearChildren.length; nGearChildrenCounter++)
@@ -123,44 +120,43 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 	// variables that have to be determined when we start rendering
 	var nFramesTotal = Scene.getPlayRange().end / nTicksPerFrame;
 
-	for (var nAngle = 0; nAngle != nDEGREES_IN_CIRCLE; nAngle = nAngle + nDegrees) // Loop through each angle...
-	{
+	// Loop through each angle...
+	for (var nAngle = 0; nAngle != nDEGREES_IN_CIRCLE; nAngle = nAngle + nDegrees) {
 		var nOutputAngle = 90 - nAngle;
 		if (nOutputAngle <= -180) nOutputAngle += 360;
 
-		for (var nFrame = 0; nFrame <= nFramesTotal; nFrame++) // Loop through each frame...
-		{
-			// Check if the current Daz istance should render this frame.
+		// Loop through each frame...
+		for (var nFrame = 0; nFrame <= nFramesTotal; nFrame++) {
+			// Check if the current Daz instance should render this frame.
 			if ((nFrame - (nInstanceNumber - 1)) % nTotalNumberOfInstances != 0) continue;
 
 			var sFinalName = sSubjectName + '_' + sAnimationName
-				 + (bIsShadow ? '_shadow_' : '_') + nOutputAngle+ '_' + ('000' + nFrame).slice(-3);
+				+ (bIsShadow ? '_shadow_' : '_') + nOutputAngle + '_' + ('000' + nFrame).slice(-3);
 
-			
 			var sFinalFullPath = sOutputDirectory + '/' + sFinalName + '.png';
 
 			if (oOutputDirectory.exists(sFinalFullPath)) {
-
 				// Skip images that already exist
 				App.log(sFinalFullPath + ' already exists. Skipping render.');
 				continue;
-			}
-			else {
+			} else {
 				App.log(sFinalFullPath + ' does not exist.');
 			}
 
 			Scene.setFrame(nFrame);
-			oRoot.getYRotControl().setValue(nAngle); // Do this every frame, or else it will interpolate.
+			// Do this every frame, or else it will interpolate.
+			oRoot.getYRotControl().setValue(nAngle);
 
 			if (bIsShadow) {
-				oEnvironmentModeProperty.setValue(3); // Scene Only
+				// Scene Only
+				oEnvironmentModeProperty.setValue(3);
 				oDrawGroundProperty.setValue(true);
 				oShadowPlane.setVisible(true);
 				oIrayOptions.renderToCanvases = false;
 				if (bIsGear) setMatte(oSubject, true);
-			}
-			else {
-				oEnvironmentModeProperty.setValue(2); // Sun-Sky Only
+			} else {
+				// Sun-Sky Only
+				oEnvironmentModeProperty.setValue(2);
 				oDrawGroundProperty.setValue(false);
 				oShadowPlane.setVisible(false);
 				setMatte(oSubject, false);
@@ -168,12 +164,14 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 			}
 			// Wait for everything else to finish first, specifically the mesh smoother
 			while (backgroundProgressIsActive()) processEvents();
-			
+
 			App.log('Sending render to Iray Server...');
 			oRenderer.exportRenderToBridgeQueue(sFinalName, 'png', oCamera, oRenderOptions, 0);
 		}
 	}
-	if (bRenderShadows) if (!bIsShadow) renderCore(sSubjectName, sAnimationName, bIsGear, true);
+	if (bRenderShadows) {
+		if (!bIsShadow) renderCore(sSubjectName, sAnimationName, bIsGear, true);
+	}
 }
 function filterFilepathsBySuffix(aFilepaths, suffix) {
 	var result = [];
@@ -194,11 +192,11 @@ var aGearAnimationFilepaths = filterFilepathsBySuffix(aFilepaths, '_gearAnimatio
 var sSubjectName = getName(sSubjectFilepath);
 
 // If there are animations, loop over them
-if (aAnimationFilepaths.length) for (var nAnimationFilepathsCounter = 0; nAnimationFilepathsCounter != aAnimationFilepaths.length; nAnimationFilepathsCounter++) {
-	
+if (aAnimationFilepaths.length) {
+	for (var nAnimationFilepathsCounter = 0; nAnimationFilepathsCounter != aAnimationFilepaths.length; nAnimationFilepathsCounter++) {
 		var sAnimationFilepath = aAnimationFilepaths[nAnimationFilepathsCounter];
 		var sAnimationName = getName(sAnimationFilepath);
-		
+
 		// Start with a blank scene
 		oContentMgr.openFile(sMasterTemplatePath, false);
 
@@ -206,58 +204,59 @@ if (aAnimationFilepaths.length) for (var nAnimationFilepathsCounter = 0; nAnimat
 		oContentMgr.openFile(sSubjectFilepath, true);
 
 		var oSubject = Scene.findNodeByLabel('subject');
-		
+
 		oContentMgr.openFile(sAnimationFilepath, true);
 
-			// If this animation has corresponding animated props, merge them all in
-		if (aPropAnimationFilepaths.length) for (var nPropAnimationCounter = 0; nPropAnimationCounter != aPropAnimationFilepaths.length; nPropAnimationCounter++) {
+		// If this animation has corresponding animated props, merge them all in
+		if (aPropAnimationFilepaths.length) {
+			for (var nPropAnimationCounter = 0; nPropAnimationCounter != aPropAnimationFilepaths.length; nPropAnimationCounter++) {
+				var sPropAnimationFilepath = aPropAnimationFilepaths[nPropAnimationCounter];
+				// walk-LightningOrb
+				var sPropAnimationFileName = getName(sPropAnimationFilepath);
+				// walk
+				var sAnimationName = getName(sAnimationFilepath);
 
-			var sPropAnimationFilepath = aPropAnimationFilepaths[nPropAnimationCounter];
-			var sPropAnimationFileName = getName(sPropAnimationFilepath); // walk-LightningOrb
-			var sAnimationName = getName(sAnimationFilepath); // walk
+				if (sPropAnimationFileName.indexOf(sAnimationName) !== -1) {
+					// LightningOrb
+					var sNameOfPropToAnimate = sPropAnimationFileName.split('-').pop();
+					var oProp = Scene.findNodeByLabel(sNameOfPropToAnimate);
 
-			if (sPropAnimationFileName.indexOf(sAnimationName) !== -1) {
+					oSubject.select(false);
+					oProp.select(true);
 
-				var sNameOfPropToAnimate = sPropAnimationFileName.split('-').pop(); //LightningOrb
-				var oProp = Scene.findNodeByLabel(sNameOfPropToAnimate);
+					oContentMgr.openFile(sPropAnimationFilepath, true);
 
-				oSubject.select(false);
-				oProp.select(true);
-
-				oContentMgr.openFile(sPropAnimationFilepath, true);
-
-				oProp.select(false);
-				oSubject.select(true);
-
-			} else continue;
+					oProp.select(false);
+					oSubject.select(true);
+				} else continue;
+			}
 		}
 
-		if (aGearFilepaths.length) for (var nGearCounter = 0; nGearCounter != aGearFilepaths.length; nGearCounter++) {
-		
-			var sGearFilepath = aGearFilepaths[nGearCounter];
+		if (aGearFilepaths.length) {
+			for (var nGearCounter = 0; nGearCounter != aGearFilepaths.length; nGearCounter++) {
+				var sGearFilepath = aGearFilepaths[nGearCounter];
 
-			oContentMgr.openFile(sGearFilepath, true);
+				oContentMgr.openFile(sGearFilepath, true);
 
-			var sGearName = getName(sGearFilepath);
-			var oGear = Scene.findNodeByLabel('gear');
+				var sGearName = getName(sGearFilepath);
+				var oGear = Scene.findNodeByLabel('gear');
 
-			var aGearChildren = oGear.getNodeChildren(false);
+				var aGearChildren = oGear.getNodeChildren(false);
 
-			renderCore(sSubjectName + '_' + sGearName, sAnimationName, true, false);
+				renderCore(sSubjectName + '_' + sGearName, sAnimationName, true, false);
 
-			Scene.removeNode(oGear);
-		}
-		else renderCore(sSubjectName, sAnimationName, false, false);
-
-	} else {
-
-		oContentMgr.openFile(sMasterTemplatePath, false);
-
-		oContentMgr.openFile(sSubjectFilepath, true);
-
-		var oSubject = Scene.findNodeByLabel('subject');
-
-		renderCore(sSubjectName, 'static', false, false);
+				Scene.removeNode(oGear);
+			}
+		} else renderCore(sSubjectName, sAnimationName, false, false);
 	}
+} else {
+	oContentMgr.openFile(sMasterTemplatePath, false);
+
+	oContentMgr.openFile(sSubjectFilepath, true);
+
+	var oSubject = Scene.findNodeByLabel('subject');
+
+	renderCore(sSubjectName, 'static', false, false);
+}
 
 if (bCloseDazOnFinish) App.delayedExit();
