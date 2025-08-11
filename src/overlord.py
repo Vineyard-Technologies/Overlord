@@ -11,6 +11,7 @@ import webbrowser
 import zipfile
 import time
 import threading
+import numpy as np
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from PIL import Image, ImageTk
 import tkinter as tk
@@ -311,6 +312,37 @@ class ExrFileHandler(FileSystemEventHandler):
             elif event.dest_path.lower().endswith('.png'):
                 self.handle_png_file(event.dest_path)
     
+    def process_transparent_image(self, png_path):
+        """Check if image is entirely transparent and crop to 2x2 if needed. Returns the (possibly modified) path."""
+        try:
+            # Open the image to check transparency
+            with Image.open(png_path) as img:
+                # Convert to RGBA if not already
+                if img.mode != 'RGBA':
+                    img = img.convert('RGBA')
+                
+                # Get the alpha channel
+                alpha_channel = img.split()[-1]  # Get the alpha channel (last channel in RGBA)
+                
+                # Check if all alpha values are 0 (completely transparent) using numpy for efficiency
+                alpha_array = np.array(alpha_channel)
+                is_entirely_transparent = np.all(alpha_array == 0)
+                
+                if is_entirely_transparent:
+                    logging.info(f"Detected entirely transparent image: {png_path}, cropping to 2x2")
+                    
+                    # Create a new 2x2 transparent image
+                    cropped_img = Image.new('RGBA', (2, 2), (0, 0, 0, 0))
+                    
+                    # Save the cropped image, overwriting the original
+                    cropped_img.save(png_path, 'PNG')
+                    logging.info(f"Successfully cropped transparent image to 2x2: {png_path}")
+                    
+        except Exception as e:
+            logging.error(f"Error checking/processing transparency for {png_path}: {e}")
+        
+        return png_path
+    
     def handle_png_file(self, png_path):
         """Handle PNG files, removing '-Beauty' or '-gearCanvas' from filename if present, then move to final output directory"""
         try:
@@ -377,6 +409,12 @@ class ExrFileHandler(FileSystemEventHandler):
                     logging.warning(f"Failed to rename PNG file {png_path}: {e}")
                     return
                 
+            # Check if image is entirely transparent and crop to 2x2 if needed
+            try:
+                png_path = self.process_transparent_image(png_path)
+            except Exception as e:
+                logging.error(f"Error processing transparent image {png_path}: {e}")
+            
             # Move the PNG from server output directory to final output directory
             if self.final_output_directory and os.path.exists(self.final_output_directory):
                 # Final check before moving
