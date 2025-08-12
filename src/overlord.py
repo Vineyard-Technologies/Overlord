@@ -842,7 +842,8 @@ class ExrFileHandler(FileSystemEventHandler):
         self.output_directory = output_directory
         self.update_gui_callback = update_gui_callback
         self.image_update_callback = None  # New callback for UI image updates
-        self.processed_files = set()
+        self.processed_files = set()  # Track processed EXR files
+        self.processed_png_files = set()  # Track PNG files that have been transparency-processed
         self.conversion_queue = []
         self.conversion_thread = None
         self.stop_conversion = False
@@ -871,7 +872,9 @@ class ExrFileHandler(FileSystemEventHandler):
                 # Notify UI of new image file
                 self._notify_image_update(event.src_path)
                 if event.src_path.lower().endswith('.png'):
-                    self.handle_png_file(event.src_path)
+                    # Process PNG with transparency check before handling
+                    processed_path = self.process_transparent_image(event.src_path)
+                    self.handle_png_file(processed_path)
     
     def on_moved(self, event):
         """Handle file move events."""
@@ -882,7 +885,9 @@ class ExrFileHandler(FileSystemEventHandler):
                 # Notify UI of new image file
                 self._notify_image_update(event.dest_path)
                 if event.dest_path.lower().endswith('.png'):
-                    self.handle_png_file(event.dest_path)
+                    # Process PNG with transparency check before handling
+                    processed_path = self.process_transparent_image(event.dest_path)
+                    self.handle_png_file(processed_path)
     
     def _notify_image_update(self, image_path: str):
         """Notify the UI that a new image is available."""
@@ -1211,6 +1216,10 @@ class ExrFileHandler(FileSystemEventHandler):
     
     def process_transparent_image(self, png_path: str) -> str:
         """Check if image is entirely transparent and crop to 2x2 if needed."""
+        # Skip if already processed to avoid double processing
+        if png_path in self.processed_png_files:
+            return png_path
+            
         try:
             with Image.open(png_path) as img:
                 if img.mode != 'RGBA':
@@ -1224,6 +1233,9 @@ class ExrFileHandler(FileSystemEventHandler):
                     cropped_img = Image.new('RGBA', (2, 2), (0, 0, 0, 0))
                     cropped_img.save(png_path, 'PNG')
                     logging.info(f"Successfully cropped transparent image to 2x2: {png_path}")
+            
+            # Mark as processed regardless of whether it was transparent or not
+            self.processed_png_files.add(png_path)
                     
         except Exception as e:
             logging.error(f"Error checking/processing transparency for {png_path}: {e}")
@@ -1261,6 +1273,10 @@ class ExrFileHandler(FileSystemEventHandler):
                 try:
                     os.rename(png_path, new_path)
                     logging.info(f"Renamed: {filename} → {new_filename}")
+                    # Update processed files tracking for the new path
+                    if png_path in self.processed_png_files:
+                        self.processed_png_files.remove(png_path)
+                        self.processed_png_files.add(new_path)
                     png_path = new_path
                 except (OSError, FileNotFoundError) as e:
                     logging.warning(f"Failed to rename PNG file {png_path}: {e}")
@@ -1312,6 +1328,7 @@ class ExrFileHandler(FileSystemEventHandler):
             'skipped': 0
         }
         self.processed_files.clear()
+        self.processed_png_files.clear()
 
 
 # ============================================================================
