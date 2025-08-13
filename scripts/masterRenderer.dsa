@@ -130,8 +130,8 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 			// Check if the current Daz instance should render this frame.
 			if ((nFrame - (nInstanceNumber - 1)) % nTotalNumberOfInstances != 0) continue;
 
-			var sFinalName = sSubjectName + '_' + sAnimationName
-				+ (bIsShadow ? '_shadow_' : '_') + nOutputAngle + '_' + ('000' + nFrame).slice(-3);
+			var sFinalName = sSubjectName + (bIsShadow ? ' shadow_' : '_')
+			+ sAnimationName + '_' + nOutputAngle + '_' + ('000' + nFrame).slice(-3);
 
 			var sFinalFullPath = sOutputDirectory + '/' + sFinalName + '.png';
 
@@ -243,7 +243,7 @@ if (aAnimationFilepaths.length) {
 
 				var aGearChildren = oGear.getNodeChildren(false);
 
-				renderCore(sSubjectName + '_' + sGearName, sAnimationName, true, false);
+				renderCore(sSubjectName + ' ' + sGearName, sAnimationName, true, false);
 
 				Scene.removeNode(oGear);
 			}

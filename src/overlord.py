@@ -14,7 +14,6 @@ import threading
 import warnings
 import numpy as np
 import msvcrt
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from PIL import Image, ImageTk
 import tkinter as tk
 from tkinter import filedialog
@@ -51,7 +50,6 @@ IRAY_STARTUP_DELAY = 10000
 # File extensions
 IMAGE_EXTENSIONS = ('.png', '.jpg', '.jpeg', '.bmp', '.gif', '.tiff', '.webp')
 SCENE_EXTENSIONS = ('.duf',)
-ARCHIVE_EXTENSIONS = ('.zip', '.7z', '.rar')
 
 # Default paths
 DEFAULT_OUTPUT_SUBDIR = "Downloads/output"
@@ -91,7 +89,6 @@ ERROR_MESSAGES = {
     "missing_source_files": "Please specify at least one Source File before starting the render.",
     "missing_output_dir": "Please specify an Output Directory before starting the render.",
     "daz_running_warning": "DAZ Studio is already running.\n\nDo you want to continue?",
-    "daz_archive_warning": "DAZ Studio is currently running. Archiving while rendering may cause issues.\n\nDo you want to continue anyway?",
     "iray_config_failed": "Iray Server configuration failed",
     "render_start_failed": "Failed to start render",
 }
@@ -106,7 +103,7 @@ VALIDATION_LIMITS = {
 UI_TEXT = {
     "app_title": "Overlord", "options_header": "Options", "last_image_details": "Last Rendered Image Details",
     "output_details": "Output Details", "copy_path": "Copy Path", "start_render": "Start Render",
-    "stop_render": "Stop Render", "zip_files": "Zip Outputted Files", "browse": "Browse", "clear": "Clear",
+    "stop_render": "Stop Render", "browse": "Browse", "clear": "Clear",
 }
 
 # Image processing constants
@@ -441,61 +438,6 @@ def get_image_info(image_path: str) -> tuple:
     except Exception as e:
         logging.error(f'Failed to get image info for {image_path}: {e}')
         return None, None, None
-
-
-# ============================================================================
-# ARCHIVE OPERATIONS
-# ============================================================================
-
-# ============================================================================
-# ARCHIVE OPERATIONS
-# ============================================================================
-
-def archive_and_delete(inner_path: str, archive_path: str) -> None:
-    """Archive a directory to zip and delete the original."""
-    logging.info(f"Archiving {inner_path} to {archive_path}")
-    try:
-        with zipfile.ZipFile(archive_path, 'w', compression=zipfile.ZIP_STORED) as zipf:
-            for root, dirs, files in os.walk(inner_path):
-                for file in files:
-                    file_path = os.path.join(root, file)
-                    arcname = os.path.relpath(file_path, inner_path)
-                    zipf.write(file_path, arcname)
-        logging.info(f"Successfully archived {inner_path} to {archive_path}")
-        try:
-            shutil.rmtree(inner_path)
-            logging.info(f"Deleted folder {inner_path}")
-        except Exception as e:
-            logging.error(f"Failed to delete folder {inner_path}: {e}")
-    except Exception as e:
-        logging.error(f"Failed to archive {inner_path}: {e}")
-
-def archive_all_inner_folders(base_path: str) -> None:
-    """Archive all inner folders in the structure base_path/*/*/* to zip, then delete the folder."""
-    to_archive = []
-    for folder_name in os.listdir(base_path):
-        folder_path = os.path.join(base_path, folder_name)
-        if os.path.isdir(folder_path):
-            for subfolder_name in os.listdir(folder_path):
-                subfolder_path = os.path.join(folder_path, subfolder_name)
-                if os.path.isdir(subfolder_path):
-                    for inner_name in os.listdir(subfolder_path):
-                        inner_path = os.path.join(subfolder_path, inner_name)
-                        if os.path.isdir(inner_path):
-                            archive_path = os.path.join(subfolder_path, f"{inner_name}.zip")
-                            if not os.path.exists(archive_path):
-                                to_archive.append((inner_path, archive_path))
-    
-    max_workers = min(int(os.environ.get('DEFAULT_MAX_WORKERS', DEFAULT_MAX_WORKERS)), os.cpu_count() or 1)
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        cleanup_manager.register_executor(executor)
-        futures = [executor.submit(archive_and_delete, inner_path, archive_path) 
-                  for inner_path, archive_path in to_archive]
-        for future in as_completed(futures):
-            try:
-                future.result()  # Ensure any exceptions are raised here
-            except Exception as e:
-                logging.error(f"An error occurred while processing a future: {e}")
 
 
 # ============================================================================
@@ -1292,8 +1234,38 @@ class ExrFileHandler(FileSystemEventHandler):
         except Exception as e:
             logging.error(f"Error handling PNG file {png_path}: {e}")
     
+    def _parse_filename_for_organization(self, filename: str) -> tuple:
+        """
+        Parse filename to extract organization components.
+        Example: "man simpleMace shadow_idle_0_000.png" -> ("man simpleMace shadow", "idle", "0")
+        Returns: (base_name, animation, frame_group) or (None, None, None) if parsing fails
+        """
+        try:
+            # Remove file extension
+            name_without_ext = os.path.splitext(filename)[0]
+            
+            # Split by underscores
+            parts = name_without_ext.split('_')
+            
+            if len(parts) < 4:
+                # Not enough parts for expected format, use simple organization
+                return (None, None, None)
+            
+            # Expected format: "basename_animation_framegroup_framenumber"
+            # Join all parts except the last 3 as the base name
+            base_name = '_'.join(parts[:-3])
+            animation = parts[-3]
+            frame_group = parts[-2]
+            # frame_number = parts[-1]  # We don't need this for folder structure
+            
+            return (base_name, animation, frame_group)
+            
+        except Exception as e:
+            logging.debug(f"Failed to parse filename for organization: {filename}, error: {e}")
+            return (None, None, None)
+
     def _move_to_final_directory(self, png_path: str) -> str:
-        """Move PNG file to final output directory. Returns final path if successful."""
+        """Move PNG file to final output directory with organized zip archive structure. Returns final path if successful."""
         if not self.final_output_directory or not os.path.exists(self.final_output_directory):
             if not self.final_output_directory:
                 logging.warning(f"Final output directory not set, PNG remains: {png_path}")
@@ -1305,8 +1277,41 @@ class ExrFileHandler(FileSystemEventHandler):
             logging.debug(f"PNG file disappeared before move: {png_path}")
             return None
         
-        final_png_path = os.path.join(self.final_output_directory, os.path.basename(png_path))
+        filename = os.path.basename(png_path)
+        base_name, animation, frame_group = self._parse_filename_for_organization(filename)
         
+        # Create organized structure with zip archives if parsing succeeded
+        if base_name and animation and frame_group:
+            # Create folder structure: final_output_directory/base_name/animation/
+            animation_dir = os.path.join(self.final_output_directory, base_name, animation)
+            try:
+                os.makedirs(animation_dir, exist_ok=True)
+                
+                # Create zip archive name: animation_framegroup.zip (e.g., "idle_0.zip")
+                zip_filename = f"{animation}_{frame_group}.zip"
+                zip_path = os.path.join(animation_dir, zip_filename)
+                
+                # Add file to zip archive
+                final_png_path = self._add_to_zip_archive(png_path, zip_path, filename)
+                
+                if final_png_path:
+                    logging.debug(f"Organized path: {base_name}/{animation}/{zip_filename}")
+                    return final_png_path
+                else:
+                    # If zip creation failed, fall back to root directory
+                    logging.warning(f"Failed to add to zip archive, falling back to root directory")
+                    final_png_path = os.path.join(self.final_output_directory, filename)
+                    
+            except OSError as e:
+                logging.warning(f"Failed to create organized directory structure: {e}, falling back to root directory")
+                # Fall back to root directory if folder creation fails
+                final_png_path = os.path.join(self.final_output_directory, filename)
+        else:
+            # If parsing fails, use root directory
+            final_png_path = os.path.join(self.final_output_directory, filename)
+            logging.debug(f"Using root directory for file: {filename}")
+        
+        # For fallback cases, use regular file move
         try:
             shutil.move(png_path, final_png_path)
             logging.info(f"Moved PNG to final output: {png_path} → {final_png_path}")
@@ -1314,6 +1319,34 @@ class ExrFileHandler(FileSystemEventHandler):
         except (OSError, FileNotFoundError, shutil.Error) as e:
             logging.warning(f"Failed to move PNG file from {png_path} to {final_png_path}: {e}")
             return png_path  # Return original path if move failed
+
+    def _add_to_zip_archive(self, png_path: str, zip_path: str, filename: str) -> str:
+        """Add PNG file to zip archive. Returns the zip path if successful, None if failed."""
+        try:
+            # Determine the mode: 'a' (append) if zip exists, 'w' (write) if new
+            mode = 'a' if os.path.exists(zip_path) else 'w'
+            
+            with zipfile.ZipFile(zip_path, mode, compression=zipfile.ZIP_STORED) as zipf:
+                # Check if file already exists in zip
+                existing_files = zipf.namelist()
+                if filename not in existing_files:
+                    zipf.write(png_path, filename)
+                    logging.info(f"Added {filename} to zip archive: {zip_path}")
+                else:
+                    logging.info(f"File {filename} already exists in zip archive: {zip_path}")
+            
+            # Remove the original PNG file after successful addition to zip
+            try:
+                os.remove(png_path)
+                logging.debug(f"Removed original PNG file: {png_path}")
+            except OSError as e:
+                logging.warning(f"Failed to remove original PNG file {png_path}: {e}")
+            
+            return zip_path
+            
+        except Exception as e:
+            logging.error(f"Failed to add {png_path} to zip archive {zip_path}: {e}")
+            return None
     
     def get_conversion_stats(self) -> dict:
         """Get conversion statistics."""
@@ -1518,49 +1551,6 @@ def register_cleanup():
     if not cleanup_manager.cleanup_registered:
         atexit.register(cleanup_manager.cleanup_all)
         cleanup_manager.cleanup_registered = True
-
-def archive_and_delete(inner_path, archive_path):
-    logging.info(f"Archiving {inner_path} to {archive_path}")
-    try:
-        with zipfile.ZipFile(archive_path, 'w', compression=zipfile.ZIP_STORED) as zipf:
-            for root, dirs, files in os.walk(inner_path):
-                for file in files:
-                    file_path = os.path.join(root, file)
-                    arcname = os.path.relpath(file_path, inner_path)
-                    zipf.write(file_path, arcname)
-        logging.info(f"Successfully archived {inner_path} to {archive_path}")
-        try:
-            shutil.rmtree(inner_path)
-            logging.info(f"Deleted folder {inner_path}")
-        except Exception as e:
-            logging.error(f"Failed to delete folder {inner_path}: {e}")
-    except Exception as e:
-        logging.error(f"Failed to archive {inner_path}: {e}")
-
-def archive_all_inner_folders(base_path):
-    """Archive all inner folders in the structure base_path/*/*/* to zip, then delete the folder."""
-    to_archive = []
-    for folder_name in os.listdir(base_path):
-        folder_path = os.path.join(base_path, folder_name)
-        if os.path.isdir(folder_path):
-            for subfolder_name in os.listdir(folder_path):
-                subfolder_path = os.path.join(folder_path, subfolder_name)
-                if os.path.isdir(subfolder_path):
-                    for inner_name in os.listdir(subfolder_path):
-                        inner_path = os.path.join(subfolder_path, inner_name)
-                        if os.path.isdir(inner_path):
-                            archive_path = os.path.join(subfolder_path, f"{inner_name}.zip")
-                            if not os.path.exists(archive_path):
-                                to_archive.append((inner_path, archive_path))
-    max_workers = min(int(os.environ.get('DEFAULT_MAX_WORKERS', DEFAULT_MAX_WORKERS)), os.cpu_count() or 1)
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        cleanup_manager.register_executor(executor)
-        futures = [executor.submit(archive_and_delete, inner_path, archive_path) for inner_path, archive_path in to_archive]
-        for future in as_completed(futures):
-            try:
-                future.result()  # Ensure any exceptions are raised here
-            except Exception as e:
-                logging.error(f"An error occurred while processing a future: {e}")
 
 def format_file_size(size_bytes):
     """Format file size in bytes to human readable format"""
@@ -2911,42 +2901,6 @@ def main():
     )
     stop_button.pack(side="left", padx=10, pady=10)
     theme_manager.register_widget(stop_button, "button")
-
-    def zip_outputted_files():
-        logging.info('Zip Outputted Files button clicked')
-        
-        # Check if any DAZ Studio instances are running
-        daz_running = check_process_running(['DAZStudio'])
-        
-        # Show confirmation dialog if DAZ Studio is running
-        if daz_running:
-            from tkinter import messagebox
-            result = messagebox.askyesno(
-                "DAZ Studio Running", 
-                "DAZ Studio is currently running. Archiving while rendering may cause issues.\n\nDo you want to continue anyway?",
-                icon="warning"
-            )
-            if not result:
-                logging.info('Archive cancelled by user - DAZ Studio running')
-                return
-        
-        try:
-            output_dir = value_entries["Output Directory"].get()
-            archive_all_inner_folders(output_dir)
-            logging.info(f'Archiving completed for: {output_dir}')
-        except Exception as e:
-            logging.error(f'Failed to archive output files: {e}')
-
-    zip_button = tk.Button(
-        buttons_frame,
-        text="Zip Outputted Files",
-        command=zip_outputted_files,
-        font=("Arial", 16, "bold"),
-        width=18,
-        height=2
-    )
-    zip_button.pack(side="left", padx=10, pady=10)
-    theme_manager.register_widget(zip_button, "button")
 
     # Run the application
     try:
