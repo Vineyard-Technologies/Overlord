@@ -1224,12 +1224,11 @@ class ExrFileHandler(FileSystemEventHandler):
                     logging.warning(f"Failed to rename PNG file {png_path}: {e}")
                     return
             
+            # Notify UI of new image before moving to archive (while file is still accessible)
+            self._notify_image_update(png_path)
+            
             # Move to final output directory
             final_path = self._move_to_final_directory(png_path)
-            
-            # Notify UI of new image after successful processing
-            if final_path:
-                self._notify_image_update(final_path)
             
         except Exception as e:
             logging.error(f"Error handling PNG file {png_path}: {e}")
@@ -2527,15 +2526,86 @@ def main():
         # Force garbage collection to clean up any remaining references
         gc.collect()
 
+    def display_specific_image(image_path):
+        """Display a specific image in the UI."""
+        if not os.path.exists(image_path):
+            return
+        
+        try:
+            # Clean up previous image reference if it exists
+            if hasattr(img_label, 'image') and img_label.image:
+                try:
+                    old_img = img_label.image
+                    if hasattr(old_img, 'close'):
+                        old_img.close()
+                    del old_img
+                except Exception:
+                    pass
+            
+            # First, verify the image integrity
+            with Image.open(image_path) as verify_img:
+                verify_img.verify()  # Will raise if the image is incomplete or corrupt
+            
+            # If verification passes, reopen for display
+            with Image.open(image_path) as img:
+                img = img.convert("RGBA")  # Ensure image is in RGBA mode
+                # Handle transparency by adding a theme-appropriate background
+                if theme_manager.current_theme == "dark":
+                    # Dark grey background for dark theme
+                    bg_color = (60, 60, 60, 255)  # Dark grey
+                else:
+                    # White background for light theme
+                    bg_color = (255, 255, 255, 255)  # White
+                bg = Image.new("RGBA", img.size, bg_color)
+                img = Image.alpha_composite(bg, img)
+                
+                # Create a copy to avoid keeping the file handle open
+                img_copy = img.copy()
+                width, height = img.size
+            
+            with Image.open(image_path) as orig_img:
+                width, height = orig_img.size
+            
+            file_size = os.path.getsize(image_path)
+            # Always display path with Windows separators
+            details_path.config(text=image_path.replace('/', '\\'))  # No "Path: " prefix
+            details_dim.config(text=f"Dimensions: {width} x {height}")
+            details_size.config(text=f"Size: {file_size/1024:.1f} KB")
+            
+            tk_img = ImageTk.PhotoImage(img_copy)
+            cleanup_manager.register_image_reference(tk_img)  # Register for cleanup
+            img_label.config(image=tk_img)
+            img_label.image = tk_img
+            no_img_label.lower()
+            
+            # Only log if the image path has changed
+            if getattr(display_specific_image, 'last_logged_img_path', None) != image_path:
+                logging.info(f'Displaying image: {image_path}')
+                display_specific_image.last_logged_img_path = image_path
+            
+        except Exception as e:
+            logging.error(f'Error displaying specific image {image_path}: {e}')
+        
+        # Force garbage collection to clean up any remaining references
+        gc.collect()
+
     def watchdog_image_update(new_image_path):
         """Called by watchdog when a new image is detected. Schedules UI update on main thread."""
         def update_ui():
             try:
                 output_dir = value_entries["Output Directory"].get()
-                # Only update if the new image is in the current output directory
-                if os.path.dirname(new_image_path) == output_dir or new_image_path.startswith(output_dir):
+                server_output_dir = get_server_output_directory()
+                
+                # Update if the new image is in either the final output directory OR the server temp directory
+                if (os.path.dirname(new_image_path) == output_dir or 
+                    new_image_path.startswith(output_dir)):
+                    # Image is in final output directory, use regular update
                     show_last_rendered_image()
-                    logging.debug(f'UI updated for new image: {new_image_path}')
+                    logging.debug(f'UI updated for new image in output directory: {new_image_path}')
+                elif new_image_path.startswith(server_output_dir):
+                    # Image is in temp directory, display it directly
+                    display_specific_image(new_image_path)
+                    logging.debug(f'UI updated for new image in temp directory: {new_image_path}')
             except Exception as e:
                 logging.error(f'Error updating UI for new image {new_image_path}: {e}')
         
