@@ -814,9 +814,11 @@ class ExrFileHandler(FileSystemEventHandler):
                 # Notify UI of new image file
                 self._notify_image_update(event.src_path)
                 if event.src_path.lower().endswith('.png'):
-                    # Process PNG with transparency check before handling
-                    processed_path = self.process_transparent_image(event.src_path)
-                    self.handle_png_file(processed_path)
+                    # Only process if not already processed
+                    if event.src_path not in self.processed_png_files:
+                        # Process PNG with transparency check before handling
+                        processed_path = self.process_transparent_image(event.src_path)
+                        self.handle_png_file(processed_path)
     
     def on_moved(self, event):
         """Handle file move events."""
@@ -826,10 +828,8 @@ class ExrFileHandler(FileSystemEventHandler):
             elif event.dest_path.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif', '.tiff', '.webp')):
                 # Notify UI of new image file
                 self._notify_image_update(event.dest_path)
-                if event.dest_path.lower().endswith('.png'):
-                    # Process PNG with transparency check before handling
-                    processed_path = self.process_transparent_image(event.dest_path)
-                    self.handle_png_file(processed_path)
+                # Don't process PNG files on move events - they're likely renames during processing
+                # PNG processing should only happen on creation or EXR conversion completion
     
     def _notify_image_update(self, image_path: str):
         """Notify the UI that a new image is available."""
@@ -1160,6 +1160,11 @@ class ExrFileHandler(FileSystemEventHandler):
         """Check if image is entirely transparent and crop to 2x2 if needed."""
         # Skip if already processed to avoid double processing
         if png_path in self.processed_png_files:
+            return png_path
+        
+        # Wait for file to be stable before processing
+        if not self._wait_for_file_stability(png_path, max_wait=10):
+            logging.debug(f"PNG file not stable or missing for transparency check: {png_path}")
             return png_path
             
         try:
