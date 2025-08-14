@@ -1683,42 +1683,6 @@ def start_iray_server():
 
 # open_iray_server_web_interface function is now provided by iray_server_actions module
 
-def create_splash_screen():
-    """Create and show splash screen during startup"""
-    splash = tk.Tk()
-    splash.title("Overlord")
-    splash.overrideredirect(True)  # Remove window decorations
-    
-    # Center the splash screen
-    splash_width = 400
-    splash_height = 400  # Changed from 300 to 400 to match image dimensions
-    screen_width = splash.winfo_screenwidth()
-    screen_height = splash.winfo_screenheight()
-    x = (screen_width - splash_width) // 2
-    y = (screen_height - splash_height) // 2
-    splash.geometry(f"{splash_width}x{splash_height}+{x}+{y}")
-    
-    try:
-        # Load splash screen image
-        splash_image = tk.PhotoImage(file=resource_path(os.path.join("images", "splashScreen.png")))
-        splash_label = tk.Label(splash, image=splash_image)
-        splash_label.image = splash_image  # Keep reference
-        splash_label.pack(fill="both", expand=True)
-    except Exception as e:
-        # Fallback to text if image fails to load
-        logging.warning(f"Could not load splash screen image: {e}")
-        splash_label = tk.Label(splash, text=f"Overlord {overlord_version}\nRender Pipeline Manager\n\nStarting up...", 
-                               font=("Arial", 16), bg="#2c2c2c", fg="white")
-        splash_label.pack(fill="both", expand=True)
-    
-    # Add status text
-    status_label = tk.Label(splash, text="Starting Overlord...", font=("Arial", 10), 
-                           bg="#2c2c2c", fg="white")
-    status_label.pack(side="bottom", pady=10)
-    
-    splash.update()
-    return splash, status_label
-
 # ============================================================================
 # SINGLE INSTANCE MANAGEMENT
 # ============================================================================
