@@ -1253,6 +1253,9 @@ class ExrFileHandler(FileSystemEventHandler):
             
             # Move to final output directory
             final_path = self._move_to_final_directory(png_path)
+            # After moving, notify UI again with the final path (which may be a zip "virtual" path)
+            if final_path:
+                self._notify_image_update(final_path)
             
         except Exception as e:
             logging.error(f"Error handling PNG file {png_path}: {e}")
@@ -1344,7 +1347,7 @@ class ExrFileHandler(FileSystemEventHandler):
             return png_path  # Return original path if move failed
 
     def _add_to_zip_archive(self, png_path: str, zip_path: str, filename: str) -> str:
-        """Add PNG file to zip archive. Returns the zip path if successful, None if failed."""
+        """Add PNG file to zip archive. Returns a UI-friendly path of the file inside the zip (zipfile\\filename) if successful, None if failed."""
         try:
             # Determine the mode: 'a' (append) if zip exists, 'w' (write) if new
             mode = 'a' if os.path.exists(zip_path) else 'w'
@@ -1365,7 +1368,8 @@ class ExrFileHandler(FileSystemEventHandler):
             except OSError as e:
                 logging.warning(f"Failed to remove original PNG file {png_path}: {e}")
             
-            return zip_path
+            # Return a UI-friendly path that looks like a file inside the zip when viewed in Explorer
+            return os.path.join(zip_path, filename)
             
         except Exception as e:
             logging.error(f"Failed to add {png_path} to zip archive {zip_path}: {e}")
@@ -2654,9 +2658,33 @@ def main():
                 # Update if the new image is in either the final output directory OR the server temp directory
                 if (os.path.dirname(new_image_path) == output_dir or 
                     new_image_path.startswith(output_dir)):
-                    # Image is in final output directory, use regular update
-                    show_last_rendered_image()
-                    logging.debug(f'UI updated for new image in output directory: {new_image_path}')
+                    # If the path points to an actual file, update image normally
+                    if os.path.exists(new_image_path):
+                        show_last_rendered_image()
+                        logging.debug(f'UI updated for new image in output directory: {new_image_path}')
+                    else:
+                        # Handle virtual zip path like "...\\some.zip\\image.png" – update details only
+                        if ".zip" in new_image_path.lower():
+                            # Always display path with Windows separators
+                            details_path.config(text=new_image_path.replace('/', '\\'))
+                            # Optionally update size by reading from zip
+                            try:
+                                parts = new_image_path.split('\\')
+                                # Find the zip segment
+                                zip_index = next(i for i, p in enumerate(parts) if p.lower().endswith('.zip'))
+                                zip_file = '\\'.join(parts[:zip_index+1])
+                                inner_name = '\\'.join(parts[zip_index+1:])
+                                with zipfile.ZipFile(zip_file, 'r') as zf:
+                                    if inner_name in zf.namelist():
+                                        info = zf.getinfo(inner_name)
+                                        size_str = format_file_size(info.file_size)
+                                        details_size.config(text=f"Size: {size_str}")
+                                    # We keep previously computed dimensions to avoid heavy I/O
+                            except Exception:
+                                pass
+                        else:
+                            # Fallback: just refresh the last rendered image
+                            show_last_rendered_image()
                 elif new_image_path.startswith(server_output_dir):
                     # Image is in temp directory, display it directly
                     display_specific_image(new_image_path)
