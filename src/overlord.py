@@ -86,7 +86,8 @@ WEBDRIVER_PROCESSES = ['geckodriver']
 
 # Error messages
 ERROR_MESSAGES = {
-    "missing_source_files": "Please specify at least one Source File before starting the render.",
+    "missing_subject": "Please specify a Subject file before starting the render.",
+    "missing_animation": "Please specify at least one animation before starting the render.",
     "missing_output_dir": "Please specify an Output Directory before starting the render.",
     "daz_running_warning": "DAZ Studio is already running.\n\nDo you want to continue?",
     "iray_config_failed": "Iray Server configuration failed",
@@ -96,7 +97,7 @@ ERROR_MESSAGES = {
 # Validation limits
 VALIDATION_LIMITS = {
     "max_instances": 16, "min_instances": 1, "max_frame_rate": 120, "min_frame_rate": 1,
-    "max_log_size": 1000, "min_log_size": 1, "max_file_wait_time": 30, "png_stability_wait": 10,
+    "max_file_wait_time": 30, "png_stability_wait": 10,
 }
 
 # UI text constants
@@ -627,17 +628,8 @@ class SettingsValidator:
             return False
     
     @staticmethod
-    def validate_log_file_size(value: str) -> bool:
-        """Validate log file size setting."""
-        try:
-            size = int(value)
-            return VALIDATION_LIMITS['min_log_size'] <= size <= VALIDATION_LIMITS['max_log_size']
-        except ValueError:
-            return False
-    
-    @staticmethod
-    def validate_source_files(files: list) -> bool:
-        """Validate source files list."""
+    def validate_animations(files: list) -> bool:
+        """Validate animations list."""
         if not files:
             return False
         return all(validate_file_path(f, must_exist=True) for f in files)
@@ -658,11 +650,14 @@ class SettingsManager:
         
         # Default settings
         self.default_settings = {
-            "source_files": [],
+            "subject": "",
+            "animations": [],
+            "prop_animations": [],
+            "gear": [],
+            "gear_animations": [],
             "output_directory": get_default_output_directory(),
             "number_of_instances": "1",
             "frame_rate": "30",
-            "log_file_size": "100",
             "render_shadows": True
         }
     
@@ -710,23 +705,32 @@ class SettingsManager:
         if not SettingsValidator.validate_frame_rate(settings.get('frame_rate', '30')):
             issues.append("Invalid frame rate")
         
-        if not SettingsValidator.validate_log_file_size(settings.get('log_file_size', '100')):
-            issues.append("Invalid log file size")
-        
         return issues
     
     def get_current_settings(self, value_entries: dict, render_shadows_var) -> dict:
         """Extract current settings from UI widgets."""
         try:
-            source_files_text = value_entries["Source Files"].get("1.0", tk.END).strip()
-            source_files = [f.strip() for f in source_files_text.split('\n') if f.strip()]
+            animations_text = value_entries["Animations"].get("1.0", tk.END).strip()
+            animations = [f.strip() for f in animations_text.split('\n') if f.strip()]
+            
+            prop_animations_text = value_entries["Prop Animations"].get("1.0", tk.END).strip()
+            prop_animations = [f.strip() for f in prop_animations_text.split('\n') if f.strip()]
+            
+            gear_text = value_entries["Gear"].get("1.0", tk.END).strip()
+            gear = [f.strip() for f in gear_text.split('\n') if f.strip()]
+            
+            gear_animations_text = value_entries["Gear Animations"].get("1.0", tk.END).strip()
+            gear_animations = [f.strip() for f in gear_animations_text.split('\n') if f.strip()]
             
             return {
-                "source_files": source_files,
+                "subject": value_entries["Subject"].get(),
+                "animations": animations,
+                "prop_animations": prop_animations,
+                "gear": gear,
+                "gear_animations": gear_animations,
                 "output_directory": value_entries["Output Directory"].get(),
                 "number_of_instances": value_entries["Number of Instances"].get(),
                 "frame_rate": value_entries["Frame Rate"].get(),
-                "log_file_size": value_entries["Log File Size (MBs)"].get(),
                 "render_shadows": render_shadows_var.get()
             }
         except tk.TclError:
@@ -737,10 +741,29 @@ class SettingsManager:
     def apply_settings(self, settings: dict, value_entries: dict, render_shadows_var) -> bool:
         """Apply loaded settings to UI widgets."""
         try:
-            # Source Files (text widget)
-            value_entries["Source Files"].delete("1.0", tk.END)
-            if settings["source_files"]:
-                value_entries["Source Files"].insert("1.0", "\n".join(settings["source_files"]))
+            # Subject
+            value_entries["Subject"].delete(0, tk.END)
+            value_entries["Subject"].insert(0, settings["subject"])
+            
+            # Animations (text widget)
+            value_entries["Animations"].delete("1.0", tk.END)
+            if settings["animations"]:
+                value_entries["Animations"].insert("1.0", "\n".join(settings["animations"]))
+            
+            # Prop Animations (text widget)
+            value_entries["Prop Animations"].delete("1.0", tk.END)
+            if settings["prop_animations"]:
+                value_entries["Prop Animations"].insert("1.0", "\n".join(settings["prop_animations"]))
+            
+            # Gear (text widget)
+            value_entries["Gear"].delete("1.0", tk.END)
+            if settings["gear"]:
+                value_entries["Gear"].insert("1.0", "\n".join(settings["gear"]))
+            
+            # Gear Animations (text widget)
+            value_entries["Gear Animations"].delete("1.0", tk.END)
+            if settings["gear_animations"]:
+                value_entries["Gear Animations"].insert("1.0", "\n".join(settings["gear_animations"]))
             
             # Output Directory
             value_entries["Output Directory"].delete(0, tk.END)
@@ -753,10 +776,6 @@ class SettingsManager:
             # Frame Rate
             value_entries["Frame Rate"].delete(0, tk.END)
             value_entries["Frame Rate"].insert(0, settings["frame_rate"])
-            
-            # Log File Size
-            value_entries["Log File Size (MBs)"].delete(0, tk.END)
-            value_entries["Log File Size (MBs)"].insert(0, settings["log_file_size"])
             
             # Checkboxes
             render_shadows_var.set(settings["render_shadows"])
@@ -1988,14 +2007,17 @@ def main():
 
     # File/folder path parameters
     file_params = [
-        "Source Files",
+        "Subject",
+        "Animations",
+        "Prop Animations",
+        "Gear",
+        "Gear Animations",
         "Output Directory"
     ]
     # Short/simple parameters
     param_params = [
         "Number of Instances",
-        "Frame Rate",
-        "Log File Size (MBs)"
+        "Frame Rate"
     ]
     value_entries = {}
 
@@ -2055,7 +2077,30 @@ def main():
         param_label.grid(row=i+1, column=0, padx=10, pady=5, sticky="w")
         theme_manager.register_widget(param_label, "label")
 
-        if param == "Source Files":
+        if param == "Subject":
+            value_entry = tk.Entry(file_table_frame, width=80, font=("Consolas", 10))
+            value_entry.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
+            theme_manager.register_widget(value_entry, "entry")
+
+            browse_button = tk.Button(
+                file_table_frame,
+                text="Browse",
+                command=make_browse_files(
+                    value_entry,
+                    initialdir=os.path.join(os.path.expanduser("~"), "Documents"),
+                    title="Select Subject File",
+                    filetypes=(("DSON User File", "*.duf"),)
+                ),
+                width=8
+            )
+            browse_button.grid(row=i+1, column=2, padx=5, pady=5)
+            theme_manager.register_widget(browse_button, "button")
+            value_entries[param] = value_entry
+            
+            # Bind auto-save for subject
+            value_entry.bind("<KeyRelease>", lambda e: auto_save_settings())
+            value_entry.bind("<FocusOut>", lambda e: auto_save_settings())
+        elif param == "Animations":
             text_widget = tk.Text(file_table_frame, width=80, height=5, font=("Consolas", 10))
             text_widget.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
             theme_manager.register_widget(text_widget, "text")
@@ -2064,7 +2109,7 @@ def main():
                 documents_dir = os.path.join(os.path.expanduser("~"), "Documents")
                 filenames = filedialog.askopenfilenames(
                     initialdir=documents_dir,
-                    title="Select Source Files",
+                    title="Select Animations",
                     filetypes=(("DSON User File", "*.duf"),)
                 )
                 if filenames:
@@ -2091,27 +2136,201 @@ def main():
             browse_button.pack(side="top", fill="x", pady=(0, 2))
             theme_manager.register_widget(browse_button, "button")
 
-            def clear_source_files():
+            def clear_animations():
                 text_widget.delete("1.0", tk.END)
             clear_button = tk.Button(
                 button_frame,
                 text="Clear",
-                command=clear_source_files,
+                command=clear_animations,
                 width=8
             )
             clear_button.pack(side="top", fill="x")
             theme_manager.register_widget(clear_button, "button")
             value_entries[param] = text_widget
             
-            # Bind auto-save for source files (save after a delay to avoid saving on every keystroke)
-            def schedule_source_files_save(event=None):
+            # Bind auto-save for animations (save after a delay to avoid saving on every keystroke)
+            def schedule_animations_save(event=None):
                 # Cancel any existing scheduled save
-                if hasattr(schedule_source_files_save, 'after_id'):
-                    root.after_cancel(schedule_source_files_save.after_id)
+                if hasattr(schedule_animations_save, 'after_id'):
+                    root.after_cancel(schedule_animations_save.after_id)
                 # Schedule save after 2 seconds of inactivity
-                schedule_source_files_save.after_id = root.after(AUTO_SAVE_DELAY, auto_save_settings)
+                schedule_animations_save.after_id = root.after(AUTO_SAVE_DELAY, auto_save_settings)
             
-            text_widget.bind("<KeyRelease>", schedule_source_files_save)
+            text_widget.bind("<KeyRelease>", schedule_animations_save)
+            text_widget.bind("<FocusOut>", lambda e: auto_save_settings())
+        elif param == "Prop Animations":
+            text_widget = tk.Text(file_table_frame, width=80, height=5, font=("Consolas", 10))
+            text_widget.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
+            theme_manager.register_widget(text_widget, "text")
+            def browse_prop_animations():
+                # Start in user's Documents directory
+                documents_dir = os.path.join(os.path.expanduser("~"), "Documents")
+                filenames = filedialog.askopenfilenames(
+                    initialdir=documents_dir,
+                    title="Select Prop Animation Files",
+                    filetypes=(("DSON User File", "*.duf"),)
+                )
+                if filenames:
+                    filenames = [fname.replace('/', '\\') for fname in filenames]
+                    current = text_widget.get("1.0", tk.END).strip().replace('/', '\\')
+                    current_files = set(current.split("\n")) if current else set()
+                    new_files = [fname for fname in filenames if fname not in current_files]
+                    if new_files:
+                        # If textbox is not empty, append new files each on a new line
+                        if current:
+                            text_widget.insert(tk.END, "\n" + "\n".join(new_files))
+                        else:
+                            text_widget.insert(tk.END, "\n".join(new_files))
+            button_frame = tk.Frame(file_table_frame)
+            button_frame.grid(row=i+1, column=2, padx=5, pady=5, sticky="n")
+            theme_manager.register_widget(button_frame, "frame")
+
+            browse_button = tk.Button(
+                button_frame,
+                text="Browse",
+                command=browse_prop_animations,
+                width=8
+            )
+            browse_button.pack(side="top", fill="x", pady=(0, 2))
+            theme_manager.register_widget(browse_button, "button")
+
+            def clear_prop_animations():
+                text_widget.delete("1.0", tk.END)
+            clear_button = tk.Button(
+                button_frame,
+                text="Clear",
+                command=clear_prop_animations,
+                width=8
+            )
+            clear_button.pack(side="top", fill="x")
+            theme_manager.register_widget(clear_button, "button")
+            value_entries[param] = text_widget
+            
+            # Bind auto-save for prop animations
+            def schedule_prop_animations_save(event=None):
+                # Cancel any existing scheduled save
+                if hasattr(schedule_prop_animations_save, 'after_id'):
+                    root.after_cancel(schedule_prop_animations_save.after_id)
+                # Schedule save after 2 seconds of inactivity
+                schedule_prop_animations_save.after_id = root.after(AUTO_SAVE_DELAY, auto_save_settings)
+            
+            text_widget.bind("<KeyRelease>", schedule_prop_animations_save)
+            text_widget.bind("<FocusOut>", lambda e: auto_save_settings())
+        elif param == "Gear":
+            text_widget = tk.Text(file_table_frame, width=80, height=5, font=("Consolas", 10))
+            text_widget.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
+            theme_manager.register_widget(text_widget, "text")
+            def browse_gear():
+                # Start in user's Documents directory
+                documents_dir = os.path.join(os.path.expanduser("~"), "Documents")
+                filenames = filedialog.askopenfilenames(
+                    initialdir=documents_dir,
+                    title="Select Gear Files",
+                    filetypes=(("DSON User File", "*.duf"),)
+                )
+                if filenames:
+                    filenames = [fname.replace('/', '\\') for fname in filenames]
+                    current = text_widget.get("1.0", tk.END).strip().replace('/', '\\')
+                    current_files = set(current.split("\n")) if current else set()
+                    new_files = [fname for fname in filenames if fname not in current_files]
+                    if new_files:
+                        # If textbox is not empty, append new files each on a new line
+                        if current:
+                            text_widget.insert(tk.END, "\n" + "\n".join(new_files))
+                        else:
+                            text_widget.insert(tk.END, "\n".join(new_files))
+            button_frame = tk.Frame(file_table_frame)
+            button_frame.grid(row=i+1, column=2, padx=5, pady=5, sticky="n")
+            theme_manager.register_widget(button_frame, "frame")
+
+            browse_button = tk.Button(
+                button_frame,
+                text="Browse",
+                command=browse_gear,
+                width=8
+            )
+            browse_button.pack(side="top", fill="x", pady=(0, 2))
+            theme_manager.register_widget(browse_button, "button")
+
+            def clear_gear():
+                text_widget.delete("1.0", tk.END)
+            clear_button = tk.Button(
+                button_frame,
+                text="Clear",
+                command=clear_gear,
+                width=8
+            )
+            clear_button.pack(side="top", fill="x")
+            theme_manager.register_widget(clear_button, "button")
+            value_entries[param] = text_widget
+            
+            # Bind auto-save for gear
+            def schedule_gear_save(event=None):
+                # Cancel any existing scheduled save
+                if hasattr(schedule_gear_save, 'after_id'):
+                    root.after_cancel(schedule_gear_save.after_id)
+                # Schedule save after 2 seconds of inactivity
+                schedule_gear_save.after_id = root.after(AUTO_SAVE_DELAY, auto_save_settings)
+            
+            text_widget.bind("<KeyRelease>", schedule_gear_save)
+            text_widget.bind("<FocusOut>", lambda e: auto_save_settings())
+        elif param == "Gear Animations":
+            text_widget = tk.Text(file_table_frame, width=80, height=5, font=("Consolas", 10))
+            text_widget.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
+            theme_manager.register_widget(text_widget, "text")
+            def browse_gear_animations():
+                # Start in user's Documents directory
+                documents_dir = os.path.join(os.path.expanduser("~"), "Documents")
+                filenames = filedialog.askopenfilenames(
+                    initialdir=documents_dir,
+                    title="Select Gear Animation Files",
+                    filetypes=(("DSON User File", "*.duf"),)
+                )
+                if filenames:
+                    filenames = [fname.replace('/', '\\') for fname in filenames]
+                    current = text_widget.get("1.0", tk.END).strip().replace('/', '\\')
+                    current_files = set(current.split("\n")) if current else set()
+                    new_files = [fname for fname in filenames if fname not in current_files]
+                    if new_files:
+                        # If textbox is not empty, append new files each on a new line
+                        if current:
+                            text_widget.insert(tk.END, "\n" + "\n".join(new_files))
+                        else:
+                            text_widget.insert(tk.END, "\n".join(new_files))
+            button_frame = tk.Frame(file_table_frame)
+            button_frame.grid(row=i+1, column=2, padx=5, pady=5, sticky="n")
+            theme_manager.register_widget(button_frame, "frame")
+
+            browse_button = tk.Button(
+                button_frame,
+                text="Browse",
+                command=browse_gear_animations,
+                width=8
+            )
+            browse_button.pack(side="top", fill="x", pady=(0, 2))
+            theme_manager.register_widget(browse_button, "button")
+
+            def clear_gear_animations():
+                text_widget.delete("1.0", tk.END)
+            clear_button = tk.Button(
+                button_frame,
+                text="Clear",
+                command=clear_gear_animations,
+                width=8
+            )
+            clear_button.pack(side="top", fill="x")
+            theme_manager.register_widget(clear_button, "button")
+            value_entries[param] = text_widget
+            
+            # Bind auto-save for gear animations
+            def schedule_gear_animations_save(event=None):
+                # Cancel any existing scheduled save
+                if hasattr(schedule_gear_animations_save, 'after_id'):
+                    root.after_cancel(schedule_gear_animations_save.after_id)
+                # Schedule save after 2 seconds of inactivity
+                schedule_gear_animations_save.after_id = root.after(AUTO_SAVE_DELAY, auto_save_settings)
+            
+            text_widget.bind("<KeyRelease>", schedule_gear_animations_save)
             text_widget.bind("<FocusOut>", lambda e: auto_save_settings())
         elif param == "Output Directory":
             value_entry = tk.Entry(file_table_frame, width=80, font=("Consolas", 10))
@@ -2140,27 +2359,27 @@ def main():
 
 
 
-    # Short/simple parameters table
+    # Short/simple parameters table - arranged horizontally
+    current_column = 0
     for i, param in enumerate(param_params):
         param_label = tk.Label(param_table_frame, text=param, font=("Arial", 10), anchor="w")
-        param_label.grid(row=i+1, column=0, padx=10, pady=5, sticky="w")
+        param_label.grid(row=1, column=current_column, padx=(10, 5), pady=5, sticky="w")
         theme_manager.register_widget(param_label, "label")
 
         value_entry = tk.Entry(param_table_frame, width=5, font=("Consolas", 10))
         if param == "Number of Instances":
             value_entry.insert(0, "1")
-        elif param == "Log File Size (MBs)":
-            value_entry.insert(0, "100")
         elif param == "Frame Rate":
             value_entry.insert(0, "30")
-        value_entry.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
+        value_entry.grid(row=1, column=current_column+1, padx=(0, 20), pady=5, sticky="w")
         theme_manager.register_widget(value_entry, "entry")
         value_entries[param] = value_entry
+        current_column += 2  # Move to next label/entry pair position
 
-    # --- Only keep Render Shadows checkbox ---
+    # --- Render Shadows checkbox - positioned horizontally after other parameters ---
     render_shadows_var = tk.BooleanVar(value=True)
     render_shadows_label = tk.Label(param_table_frame, text="Render shadows", font=("Arial", 10), anchor="w")
-    render_shadows_label.grid(row=len(param_params)+1, column=0, padx=10, pady=(0, 0), sticky="w")
+    render_shadows_label.grid(row=1, column=current_column, padx=(10, 5), pady=5, sticky="w")
     theme_manager.register_widget(render_shadows_label, "label")
     render_shadows_checkbox = tk.Checkbutton(
         param_table_frame,
@@ -2168,7 +2387,7 @@ def main():
         width=2,
         anchor="w"
     )
-    render_shadows_checkbox.grid(row=len(param_params)+1, column=1, padx=10, pady=(0, 5), sticky="w")
+    render_shadows_checkbox.grid(row=1, column=current_column+1, padx=(0, 10), pady=5, sticky="w")
     theme_manager.register_widget(render_shadows_checkbox, "checkbutton")
 
     # Register settings save callback for cleanup
@@ -2187,7 +2406,6 @@ def main():
     value_entries["Output Directory"].bind("<FocusOut>", lambda e: auto_save_settings())
     value_entries["Number of Instances"].bind("<FocusOut>", lambda e: auto_save_settings())
     value_entries["Frame Rate"].bind("<FocusOut>", lambda e: auto_save_settings())
-    value_entries["Log File Size (MBs)"].bind("<FocusOut>", lambda e: auto_save_settings())
     
     # For checkboxes, bind to the variable change
     render_shadows_var.trace_add('write', auto_save_settings)
@@ -2209,7 +2427,7 @@ def main():
     # --- Image Details Column ---
     # Place details_frame to the right of param_table_frame
     details_frame = tk.Frame(root, width=350)
-    details_frame.place(relx=0.25, rely=0.6, anchor="nw", width=350, height=200)
+    details_frame.place(relx=0.25, rely=0.75, anchor="nw", width=350, height=200)
     details_frame.pack_propagate(False)
     theme_manager.register_widget(details_frame, "frame")
 
@@ -2244,7 +2462,7 @@ def main():
 
     # --- Output Details Column ---
     output_details_frame = tk.Frame(root, width=350)
-    output_details_frame.place(relx=0.01, rely=0.6, anchor="nw", width=350, height=200)
+    output_details_frame.place(relx=0.01, rely=0.75, anchor="nw", width=350, height=200)
     output_details_frame.pack_propagate(False)
     theme_manager.register_widget(output_details_frame, "frame")
 
@@ -2279,16 +2497,16 @@ def main():
         justify="right"
     )
     theme_manager.register_widget(estimated_completion_at_label, "label")
-    images_remaining_label.place(relx=0.01, rely=0.55, anchor="nw", width=250, height=18)
+    images_remaining_label.place(relx=0.01, rely=0.70, anchor="nw", width=250, height=18)
     theme_manager.register_widget(images_remaining_label, "label")
-    estimated_time_remaining_label.place(relx=0.11, rely=0.55, anchor="nw", width=250, height=18)
+    estimated_time_remaining_label.place(relx=0.11, rely=0.70, anchor="nw", width=250, height=18)
     theme_manager.register_widget(estimated_time_remaining_label, "label")
-    estimated_completion_at_label.place(relx=0.245, rely=0.55, anchor="nw", width=400, height=18)
+    estimated_completion_at_label.place(relx=0.245, rely=0.70, anchor="nw", width=400, height=18)
     theme_manager.register_widget(estimated_completion_at_label, "label")
 
     progress_bar = ttk.Progressbar(root, variable=progress_var, maximum=100)
     # Place the progress bar just above the output_details_frame, matching its width and alignment
-    progress_bar.place(relx=0.01, rely=0.57, anchor="nw", width=850, height=18)
+    progress_bar.place(relx=0.01, rely=0.72, anchor="nw", width=850, height=18)
     theme_manager.register_widget(progress_bar, "progressbar")
 
     output_details_title = tk.Label(output_details_frame, text="Output Details", font=("Arial", 14, "bold"))
@@ -2619,14 +2837,20 @@ def main():
             logging.info("Start Render already in progress, ignoring additional click")
             return
 
-        # Validate Source Files and Output Directory before launching render
-        source_files = value_entries["Source Files"].get("1.0", tk.END).strip().replace("\\", "/").split("\n")
-        source_files = [file for file in source_files if file]
+        # Validate Subject, Animations and Output Directory before launching render
+        subject_file = value_entries["Subject"].get().strip()
+        animations = value_entries["Animations"].get("1.0", tk.END).strip().replace("\\", "/").split("\n")
+        animations = [file for file in animations if file]
         output_dir = value_entries["Output Directory"].get().strip()
-        if not source_files:
+        if not subject_file:
             from tkinter import messagebox
-            messagebox.showerror("Missing Source Files", "Please specify at least one Source File before starting the render.")
-            logging.info("Start Render cancelled: No Source Files specified.")
+            messagebox.showerror("Missing Subject File", "Please specify a Subject file before starting the render.")
+            logging.info("Start Render cancelled: No Subject file specified.")
+            return
+        if not animations:
+            from tkinter import messagebox
+            messagebox.showerror("Missing Animation Files", "Please specify at least one Animation file before starting the render.")
+            logging.info("Start Render cancelled: No Animation files specified.")
             return
         if not output_dir:
             from tkinter import messagebox
@@ -2716,14 +2940,14 @@ def main():
         render_thread.start()
         
     def complete_render_setup():
-        # Get source files again (since we're in a different scope now)
-        source_files = value_entries["Source Files"].get("1.0", tk.END).strip().replace("\\", "/").split("\n")
-        source_files = [file for file in source_files if file]
+        # Get animations again (since we're in a different scope now)
+        animations = value_entries["Animations"].get("1.0", tk.END).strip().replace("\\", "/").split("\n")
+        animations = [file for file in animations if file]
         
         # Calculate and display total images to render (update label)
-        def find_total_images(source_files):
+        def find_total_images(animations):
             total_frames = 0
-            for file_path in source_files:
+            for file_path in animations:
                 if '_animation.duf' in file_path:
                     try:
                         with open(file_path, 'r', encoding='utf-8') as f:
@@ -2744,8 +2968,8 @@ def main():
 
         total_images = None
         try:
-            if source_files:
-                total_images = find_total_images(source_files)
+            if animations:
+                total_images = find_total_images(animations)
         except Exception:
             total_images = None
         if total_images is not None:
@@ -2806,12 +3030,26 @@ def main():
             install_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
             render_script_path = os.path.join(install_dir, "scripts", "masterRenderer.dsa").replace("\\", "/")
             template_path = os.path.join(install_dir, "templates", "masterTemplate.duf").replace("\\", "/")
-        # Use "Source Files" and treat as files
-        source_files_json = json.dumps(source_files)
+        # Use "Animations" and treat as files
+        animations_json = json.dumps(animations)
+        
+        # Get the new file lists
+        prop_animations = value_entries["Prop Animations"].get("1.0", tk.END).strip().replace("\\", "/").split("\n")
+        prop_animations = [file for file in prop_animations if file]
+        prop_animations_json = json.dumps(prop_animations)
+        
+        gear = value_entries["Gear"].get("1.0", tk.END).strip().replace("\\", "/").split("\n")
+        gear = [file for file in gear if file]
+        gear_json = json.dumps(gear)
+        
+        gear_animations = value_entries["Gear Animations"].get("1.0", tk.END).strip().replace("\\", "/").split("\n")
+        gear_animations = [file for file in gear_animations if file]
+        gear_animations_json = json.dumps(gear_animations)
+        
+        subject_file = value_entries["Subject"].get()
         image_output_dir = value_entries["Output Directory"].get().replace("\\", "/")
         num_instances = value_entries["Number of Instances"].get()
-        log_size = value_entries["Log File Size (MBs)"].get()
-        log_size = int(log_size) * 1000000  # Convert MBs to bytes
+        log_size = LOG_SIZE_MB * 1000000  # Convert MBs to bytes (hardcoded constant)
         frame_rate = value_entries["Frame Rate"].get()
 
         try:
@@ -2826,7 +3064,11 @@ def main():
             f'"num_instances": "{num_instances}", '
             f'"image_output_dir": "{image_output_dir}", '
             f'"frame_rate": "{frame_rate}", '
-            f'"source_files": {source_files_json}, '
+            f'"subject_file": "{subject_file}", '
+            f'"animations": {animations_json}, '
+            f'"prop_animations": {prop_animations_json}, '
+            f'"gear": {gear_json}, '
+            f'"gear_animations": {gear_animations_json}, '
             f'"template_path": "{template_path}", '
             f'"render_shadows": {str(render_shadows).lower()}'
             f'}}'
@@ -2922,7 +3164,7 @@ def main():
 
     # --- Buttons Section ---
     buttons_frame = tk.Frame(root)
-    buttons_frame.place(relx=0.0, rely=0.78, anchor="nw")
+    buttons_frame.place(relx=0.0, rely=0.9, anchor="nw")
     theme_manager.register_widget(buttons_frame, "frame")
 
     button = tk.Button(buttons_frame, text="Start Render", command=start_render, font=("Arial", 16, "bold"), width=16, height=2)

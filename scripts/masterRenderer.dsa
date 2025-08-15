@@ -7,7 +7,11 @@ var sScriptPath = oScriptFileInfo.path();
 var nInstanceNumber = App.instanceName();
 var sOutputDirectory = oScriptArgs['image_output_dir'];
 var oOutputDirectory = new DzDir(sOutputDirectory);
-var aFilepaths = oScriptArgs['source_files'].toString().split(',');
+var sSubjectFilepath = oScriptArgs['subject_file'];
+var aAnimationFilepaths = oScriptArgs['animations'].toString().split(',');
+var aPropAnimationFilepaths = oScriptArgs['prop_animations'].toString().split(',');
+var aGearFilepaths = oScriptArgs['gear'].toString().split(',');
+var aGearAnimationFilepaths = oScriptArgs['gear_animations'].toString().split(',');
 var nDEGREES_IN_CIRCLE = 360;
 var nFrameRate = oScriptArgs['frame_rate'];
 var bRenderShadows = oScriptArgs['render_shadows'];
@@ -183,12 +187,6 @@ function filterFilepathsBySuffix(aFilepaths, suffix) {
 	return result;
 }
 
-// There will only be one subject file
-var sSubjectFilepath = filterFilepathsBySuffix(aFilepaths, '_subject.duf')[0];
-var aAnimationFilepaths = filterFilepathsBySuffix(aFilepaths, '_animation.duf');
-var aPropAnimationFilepaths = filterFilepathsBySuffix(aFilepaths, '_propAnimation.duf');
-var aGearFilepaths = filterFilepathsBySuffix(aFilepaths, '_gear.duf');
-var aGearAnimationFilepaths = filterFilepathsBySuffix(aFilepaths, '_gearAnimation.duf');
 var sSubjectName = getName(sSubjectFilepath);
 
 // If there are animations, loop over them
