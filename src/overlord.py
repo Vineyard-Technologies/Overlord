@@ -2060,8 +2060,16 @@ def main():
                 filetypes=filetypes or (("All files", "*.*"),)
             )
             if filenames:
-                text_widget.delete("1.0", tk.END)
-                text_widget.insert(tk.END, "\n".join(filenames))
+                # Check if it's an Entry widget or Text widget
+                if hasattr(text_widget, 'delete') and hasattr(text_widget, 'insert'):
+                    try:
+                        # Try Text widget methods first
+                        text_widget.delete("1.0", tk.END)
+                        text_widget.insert(tk.END, "\n".join(filenames))
+                    except tk.TclError:
+                        # If that fails, it's an Entry widget
+                        text_widget.delete(0, tk.END)
+                        text_widget.insert(0, "\n".join(filenames))
         return browse_files
 
     # Auto-save settings when important values change
@@ -2085,7 +2093,7 @@ def main():
             browse_button = tk.Button(
                 file_table_frame,
                 text="Browse",
-                command=make_browse_files(
+                command=make_browse_file(
                     value_entry,
                     initialdir=os.path.join(os.path.expanduser("~"), "Documents"),
                     title="Select Subject File",
@@ -2104,233 +2112,93 @@ def main():
             text_widget = tk.Text(file_table_frame, width=80, height=5, font=("Consolas", 10))
             text_widget.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
             theme_manager.register_widget(text_widget, "text")
-            def browse_files_append():
-                # Start in user's Documents directory
-                documents_dir = os.path.join(os.path.expanduser("~"), "Documents")
-                filenames = filedialog.askopenfilenames(
-                    initialdir=documents_dir,
-                    title="Select Animations",
-                    filetypes=(("DSON User File", "*.duf"),)
-                )
-                if filenames:
-                    filenames = [fname.replace('/', '\\') for fname in filenames]
-                    current = text_widget.get("1.0", tk.END).strip().replace('/', '\\')
-                    current_files = set(current.split("\n")) if current else set()
-                    new_files = [fname for fname in filenames if fname not in current_files]
-                    if new_files:
-                        # If textbox is not empty, append new files each on a new line
-                        if current:
-                            text_widget.insert(tk.END, "\n" + "\n".join(new_files))
-                        else:
-                            text_widget.insert(tk.END, "\n".join(new_files))
-            button_frame = tk.Frame(file_table_frame)
-            button_frame.grid(row=i+1, column=2, padx=5, pady=5, sticky="n")
-            theme_manager.register_widget(button_frame, "frame")
 
             browse_button = tk.Button(
-                button_frame,
+                file_table_frame,
                 text="Browse",
-                command=browse_files_append,
+                command=make_browse_files(
+                    text_widget,
+                    initialdir=os.path.join(os.path.expanduser("~"), "Documents"),
+                    title="Select Animations",
+                    filetypes=(("DSON User File", "*.duf"),)
+                ),
                 width=8
             )
-            browse_button.pack(side="top", fill="x", pady=(0, 2))
+            browse_button.grid(row=i+1, column=2, padx=5, pady=5)
             theme_manager.register_widget(browse_button, "button")
-
-            def clear_animations():
-                text_widget.delete("1.0", tk.END)
-            clear_button = tk.Button(
-                button_frame,
-                text="Clear",
-                command=clear_animations,
-                width=8
-            )
-            clear_button.pack(side="top", fill="x")
-            theme_manager.register_widget(clear_button, "button")
             value_entries[param] = text_widget
             
-            # Bind auto-save for animations (save after a delay to avoid saving on every keystroke)
-            def schedule_animations_save(event=None):
-                # Cancel any existing scheduled save
-                if hasattr(schedule_animations_save, 'after_id'):
-                    root.after_cancel(schedule_animations_save.after_id)
-                # Schedule save after 2 seconds of inactivity
-                schedule_animations_save.after_id = root.after(AUTO_SAVE_DELAY, auto_save_settings)
-            
-            text_widget.bind("<KeyRelease>", schedule_animations_save)
+            # Bind auto-save for animations
+            text_widget.bind("<KeyRelease>", lambda e: auto_save_settings())
             text_widget.bind("<FocusOut>", lambda e: auto_save_settings())
         elif param == "Prop Animations":
             text_widget = tk.Text(file_table_frame, width=80, height=5, font=("Consolas", 10))
             text_widget.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
             theme_manager.register_widget(text_widget, "text")
-            def browse_prop_animations():
-                # Start in user's Documents directory
-                documents_dir = os.path.join(os.path.expanduser("~"), "Documents")
-                filenames = filedialog.askopenfilenames(
-                    initialdir=documents_dir,
-                    title="Select Prop Animation Files",
-                    filetypes=(("DSON User File", "*.duf"),)
-                )
-                if filenames:
-                    filenames = [fname.replace('/', '\\') for fname in filenames]
-                    current = text_widget.get("1.0", tk.END).strip().replace('/', '\\')
-                    current_files = set(current.split("\n")) if current else set()
-                    new_files = [fname for fname in filenames if fname not in current_files]
-                    if new_files:
-                        # If textbox is not empty, append new files each on a new line
-                        if current:
-                            text_widget.insert(tk.END, "\n" + "\n".join(new_files))
-                        else:
-                            text_widget.insert(tk.END, "\n".join(new_files))
-            button_frame = tk.Frame(file_table_frame)
-            button_frame.grid(row=i+1, column=2, padx=5, pady=5, sticky="n")
-            theme_manager.register_widget(button_frame, "frame")
 
             browse_button = tk.Button(
-                button_frame,
+                file_table_frame,
                 text="Browse",
-                command=browse_prop_animations,
+                command=make_browse_files(
+                    text_widget,
+                    initialdir=os.path.join(os.path.expanduser("~"), "Documents"),
+                    title="Select Prop Animation Files",
+                    filetypes=(("DSON User File", "*.duf"),)
+                ),
                 width=8
             )
-            browse_button.pack(side="top", fill="x", pady=(0, 2))
+            browse_button.grid(row=i+1, column=2, padx=5, pady=5)
             theme_manager.register_widget(browse_button, "button")
-
-            def clear_prop_animations():
-                text_widget.delete("1.0", tk.END)
-            clear_button = tk.Button(
-                button_frame,
-                text="Clear",
-                command=clear_prop_animations,
-                width=8
-            )
-            clear_button.pack(side="top", fill="x")
-            theme_manager.register_widget(clear_button, "button")
             value_entries[param] = text_widget
             
             # Bind auto-save for prop animations
-            def schedule_prop_animations_save(event=None):
-                # Cancel any existing scheduled save
-                if hasattr(schedule_prop_animations_save, 'after_id'):
-                    root.after_cancel(schedule_prop_animations_save.after_id)
-                # Schedule save after 2 seconds of inactivity
-                schedule_prop_animations_save.after_id = root.after(AUTO_SAVE_DELAY, auto_save_settings)
-            
-            text_widget.bind("<KeyRelease>", schedule_prop_animations_save)
+            text_widget.bind("<KeyRelease>", lambda e: auto_save_settings())
             text_widget.bind("<FocusOut>", lambda e: auto_save_settings())
         elif param == "Gear":
             text_widget = tk.Text(file_table_frame, width=80, height=5, font=("Consolas", 10))
             text_widget.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
             theme_manager.register_widget(text_widget, "text")
-            def browse_gear():
-                # Start in user's Documents directory
-                documents_dir = os.path.join(os.path.expanduser("~"), "Documents")
-                filenames = filedialog.askopenfilenames(
-                    initialdir=documents_dir,
-                    title="Select Gear Files",
-                    filetypes=(("DSON User File", "*.duf"),)
-                )
-                if filenames:
-                    filenames = [fname.replace('/', '\\') for fname in filenames]
-                    current = text_widget.get("1.0", tk.END).strip().replace('/', '\\')
-                    current_files = set(current.split("\n")) if current else set()
-                    new_files = [fname for fname in filenames if fname not in current_files]
-                    if new_files:
-                        # If textbox is not empty, append new files each on a new line
-                        if current:
-                            text_widget.insert(tk.END, "\n" + "\n".join(new_files))
-                        else:
-                            text_widget.insert(tk.END, "\n".join(new_files))
-            button_frame = tk.Frame(file_table_frame)
-            button_frame.grid(row=i+1, column=2, padx=5, pady=5, sticky="n")
-            theme_manager.register_widget(button_frame, "frame")
 
             browse_button = tk.Button(
-                button_frame,
+                file_table_frame,
                 text="Browse",
-                command=browse_gear,
+                command=make_browse_files(
+                    text_widget,
+                    initialdir=os.path.join(os.path.expanduser("~"), "Documents"),
+                    title="Select Gear Files",
+                    filetypes=(("DSON User File", "*.duf"),)
+                ),
                 width=8
             )
-            browse_button.pack(side="top", fill="x", pady=(0, 2))
+            browse_button.grid(row=i+1, column=2, padx=5, pady=5)
             theme_manager.register_widget(browse_button, "button")
-
-            def clear_gear():
-                text_widget.delete("1.0", tk.END)
-            clear_button = tk.Button(
-                button_frame,
-                text="Clear",
-                command=clear_gear,
-                width=8
-            )
-            clear_button.pack(side="top", fill="x")
-            theme_manager.register_widget(clear_button, "button")
             value_entries[param] = text_widget
             
             # Bind auto-save for gear
-            def schedule_gear_save(event=None):
-                # Cancel any existing scheduled save
-                if hasattr(schedule_gear_save, 'after_id'):
-                    root.after_cancel(schedule_gear_save.after_id)
-                # Schedule save after 2 seconds of inactivity
-                schedule_gear_save.after_id = root.after(AUTO_SAVE_DELAY, auto_save_settings)
-            
-            text_widget.bind("<KeyRelease>", schedule_gear_save)
+            text_widget.bind("<KeyRelease>", lambda e: auto_save_settings())
             text_widget.bind("<FocusOut>", lambda e: auto_save_settings())
         elif param == "Gear Animations":
             text_widget = tk.Text(file_table_frame, width=80, height=5, font=("Consolas", 10))
             text_widget.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
             theme_manager.register_widget(text_widget, "text")
-            def browse_gear_animations():
-                # Start in user's Documents directory
-                documents_dir = os.path.join(os.path.expanduser("~"), "Documents")
-                filenames = filedialog.askopenfilenames(
-                    initialdir=documents_dir,
-                    title="Select Gear Animation Files",
-                    filetypes=(("DSON User File", "*.duf"),)
-                )
-                if filenames:
-                    filenames = [fname.replace('/', '\\') for fname in filenames]
-                    current = text_widget.get("1.0", tk.END).strip().replace('/', '\\')
-                    current_files = set(current.split("\n")) if current else set()
-                    new_files = [fname for fname in filenames if fname not in current_files]
-                    if new_files:
-                        # If textbox is not empty, append new files each on a new line
-                        if current:
-                            text_widget.insert(tk.END, "\n" + "\n".join(new_files))
-                        else:
-                            text_widget.insert(tk.END, "\n".join(new_files))
-            button_frame = tk.Frame(file_table_frame)
-            button_frame.grid(row=i+1, column=2, padx=5, pady=5, sticky="n")
-            theme_manager.register_widget(button_frame, "frame")
 
             browse_button = tk.Button(
-                button_frame,
+                file_table_frame,
                 text="Browse",
-                command=browse_gear_animations,
+                command=make_browse_files(
+                    text_widget,
+                    initialdir=os.path.join(os.path.expanduser("~"), "Documents"),
+                    title="Select Gear Animation Files",
+                    filetypes=(("DSON User File", "*.duf"),)
+                ),
                 width=8
             )
-            browse_button.pack(side="top", fill="x", pady=(0, 2))
+            browse_button.grid(row=i+1, column=2, padx=5, pady=5)
             theme_manager.register_widget(browse_button, "button")
-
-            def clear_gear_animations():
-                text_widget.delete("1.0", tk.END)
-            clear_button = tk.Button(
-                button_frame,
-                text="Clear",
-                command=clear_gear_animations,
-                width=8
-            )
-            clear_button.pack(side="top", fill="x")
-            theme_manager.register_widget(clear_button, "button")
             value_entries[param] = text_widget
             
             # Bind auto-save for gear animations
-            def schedule_gear_animations_save(event=None):
-                # Cancel any existing scheduled save
-                if hasattr(schedule_gear_animations_save, 'after_id'):
-                    root.after_cancel(schedule_gear_animations_save.after_id)
-                # Schedule save after 2 seconds of inactivity
-                schedule_gear_animations_save.after_id = root.after(AUTO_SAVE_DELAY, auto_save_settings)
-            
-            text_widget.bind("<KeyRelease>", schedule_gear_animations_save)
+            text_widget.bind("<KeyRelease>", lambda e: auto_save_settings())
             text_widget.bind("<FocusOut>", lambda e: auto_save_settings())
         elif param == "Output Directory":
             value_entry = tk.Entry(file_table_frame, width=80, font=("Consolas", 10))
@@ -2427,7 +2295,7 @@ def main():
     # --- Image Details Column ---
     # Place details_frame to the right of param_table_frame
     details_frame = tk.Frame(root, width=350)
-    details_frame.place(relx=0.25, rely=0.75, anchor="nw", width=350, height=200)
+    details_frame.place(relx=0.26, rely=0.75, anchor="nw", width=350, height=200)
     details_frame.pack_propagate(False)
     theme_manager.register_widget(details_frame, "frame")
 
@@ -3176,7 +3044,7 @@ def main():
         text="Stop Render",
         command=stop_render,
         font=("Arial", 16, "bold"),
-        width=26,
+        width=16,
         height=2,
         state="disabled"  # Initially disabled until Start Render is clicked
     )

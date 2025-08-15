@@ -39,7 +39,13 @@ oSettings.setStringValue('Password', 'admin');
 
 // Obtain the desired name out of a filepath or filename.
 function getName(sFileName) {
-	return sFileName.split('/').pop().split('_')[0];
+	return new DzFileInfo(sFileName).completeBaseName();
+}
+
+// The Overlord UI passes an array with a single, undefined object
+// whenever filepath(s) are not specified.
+function thereAre(aArray) {
+	return aArray[0] !== '';
 }
 
 // Set the Matte Parameter of a subject and its children.
@@ -189,8 +195,7 @@ function filterFilepathsBySuffix(aFilepaths, suffix) {
 
 var sSubjectName = getName(sSubjectFilepath);
 
-// If there are animations, loop over them
-if (aAnimationFilepaths.length) {
+if (thereAre(aAnimationFilepaths)) {
 	for (var nAnimationFilepathsCounter = 0; nAnimationFilepathsCounter != aAnimationFilepaths.length; nAnimationFilepathsCounter++) {
 		var sAnimationFilepath = aAnimationFilepaths[nAnimationFilepathsCounter];
 		var sAnimationName = getName(sAnimationFilepath);
@@ -205,8 +210,7 @@ if (aAnimationFilepaths.length) {
 
 		oContentMgr.openFile(sAnimationFilepath, true);
 
-		// If this animation has corresponding animated props, merge them all in
-		if (aPropAnimationFilepaths.length) {
+		if (thereAre(aPropAnimationFilepaths)) {
 			for (var nPropAnimationCounter = 0; nPropAnimationCounter != aPropAnimationFilepaths.length; nPropAnimationCounter++) {
 				var sPropAnimationFilepath = aPropAnimationFilepaths[nPropAnimationCounter];
 				// walk-LightningOrb
@@ -230,7 +234,7 @@ if (aAnimationFilepaths.length) {
 			}
 		}
 
-		if (aGearFilepaths.length) {
+		if (thereAre(aGearFilepaths)) {
 			for (var nGearCounter = 0; nGearCounter != aGearFilepaths.length; nGearCounter++) {
 				var sGearFilepath = aGearFilepaths[nGearCounter];
 
