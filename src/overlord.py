@@ -35,6 +35,7 @@ from version import __version__ as overlord_version
 # Application constants
 DEFAULT_MAX_WORKERS = 8
 LOG_SIZE_MB = 100
+RENDERS_PER_SESSION = 25
 RECENT_RENDER_TIMES_LIMIT = 25
 
 # UI update intervals (milliseconds)
@@ -2932,7 +2933,7 @@ def main():
                 iray_actions = IrayServerActions(cleanup_manager)
                 
                 # Configure Iray Server (starts browser, configures settings, closes browser)
-                if not iray_actions.configure_server(server_output_dir):
+                if not iray_actions.configure_server(server_output_dir, RENDERS_PER_SESSION):
                     logging.error('Failed to configure Iray Server')
                     # Shutdown Iray Server since configuration failed
                     cleanup_manager.stop_iray_server()
@@ -3094,6 +3095,7 @@ def main():
             f'"gear": {gear_json}, '
             f'"gear_animations": {gear_animations_json}, '
             f'"template_path": "{template_path}", '
+            f'"renders_per_session": "{RENDERS_PER_SESSION}", '
             f'"render_shadows": {str(render_shadows).lower()}'
             f'}}'
         )

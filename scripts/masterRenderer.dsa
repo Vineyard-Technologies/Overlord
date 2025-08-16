@@ -13,6 +13,8 @@ var aPropAnimationFilepaths = oScriptArgs['prop_animations'].toString().split(',
 var aGearFilepaths = oScriptArgs['gear'].toString().split(',');
 var aGearAnimationFilepaths = oScriptArgs['gear_animations'].toString().split(',');
 var nDEGREES_IN_CIRCLE = 360;
+var nRENDERS_PER_SESSION = oScriptArgs['renders_per_session'];
+var nRenderCounter = 0;
 var nFrameRate = oScriptArgs['frame_rate'];
 var bRenderShadows = oScriptArgs['render_shadows'];
 var bCloseDazOnFinish = oScriptArgs['close_daz_on_finish'];
@@ -194,6 +196,15 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 
 			App.log('Sending render to Iray Server...');
 			oRenderer.exportRenderToBridgeQueue(sFinalName, 'png', oCamera, oRenderOptions, 0);
+
+			nRenderCounter++;
+
+			if (nRenderCounter >= nRENDERS_PER_SESSION) {
+				
+				App.log('Render session limit reached. Exiting...');
+				
+				return;
+			}
 		}
 	}
 	if (bRenderShadows) {

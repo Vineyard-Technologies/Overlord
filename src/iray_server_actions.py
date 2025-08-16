@@ -144,8 +144,8 @@ class IrayServerActions:
             logging.info(f"{operation_description} confirmation message appeared and disappeared")
         except TimeoutException:
             logging.warning(f"{operation_description} confirmation message did not appear or disappear as expected")
-        
-    def configure_server(self, storage_path: str):
+
+    def configure_server(self, storage_path: str, renders_per_session: int):
         """
         Configure Iray Server by starting browser, configuring settings, and closing browser
         
@@ -239,7 +239,19 @@ class IrayServerActions:
             else:
                 logging.info("ZIP generation switch already off")
 
-            logging.info("Iray Server configuration completed successfully")
+            # Navigate to the queue page after configuring settings
+            queue_url = f"{self.base_url}/index.html#queue"
+            self.driver.get(queue_url)
+            logging.info(f"Navigated to queue page: {queue_url}")
+
+            # Wait for the queue page to load
+            if not self.wait_for_page_ready():
+                logging.warning("Queue page took longer than expected to load")
+                return False
+
+            WebDriverWait(self.driver, 60 * renders_per_session).until(
+                EC.text_to_be_present_in_element((By.XPATH, IrayServerXPaths.queuePage.DONE_QUANTITY), str(renders_per_session))
+            )
             return True
             
         except Exception as e:

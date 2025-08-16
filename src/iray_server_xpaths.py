@@ -22,7 +22,8 @@ class IrayServerXPaths:
         # CONFIRM_PASSWORD_INPUT = "//input[@name='newpassConfirm']"
         # SAVE_BUTTON = "//button[text()='Save']"
     
-    # class queuePage:
+    class queuePage:
+        DONE_QUANTITY = "//h3[span[@class='item-count'] and contains(., 'Done')]/span[@class='item-count']"
     #     REMOVE_BUTTONS = "//button[@title='Remove']"
 
     #     DELETE_CONFIRMATION_DIALOG = "//div[@class='modal-content']"
