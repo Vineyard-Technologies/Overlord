@@ -2582,7 +2582,7 @@ def main():
             progress_var.set(0)
             images_remaining_var.set("Images remaining: --")
 
-    no_img_label = tk.Label(right_frame, text="No images found in output directory", font=("Arial", 12))
+    no_img_label = tk.Label(right_frame, font=("Arial", 12))
     no_img_label.place(relx=0.5, rely=0.5, anchor="center")
     no_img_label.lower()  # Hide initially
     theme_manager.register_widget(no_img_label, "label")
@@ -2648,8 +2648,9 @@ def main():
                     width, height = orig_img.size
                 
                 file_size = os.path.getsize(newest_img_path)
-                # Always display path with Windows separators
-                details_path.config(text=newest_img_path.replace('/', '\\'))  # No "Path: " prefix
+                # Always display the mapped output path instead of server path
+                display_path = map_server_path_to_output_path(newest_img_path)
+                details_path.config(text=display_path)  # No "Path: " prefix
                 details_dim.config(text=f"Dimensions: {width} x {height}")
                 details_size.config(text=f"Size: {file_size/1024:.1f} KB")
                 
@@ -2687,11 +2688,28 @@ def main():
             details_size.config(text="Size: ")
             no_img_label.lift()
             if not getattr(show_last_rendered_image, 'last_no_img_logged', False):
-                logging.info('No images found in output directory or all images failed to load')
                 show_last_rendered_image.last_no_img_logged = True
         
         # Force garbage collection to clean up any remaining references
         gc.collect()
+
+    def map_server_path_to_output_path(server_path):
+        """Map a server output directory path to the corresponding final output directory path."""
+        try:
+            server_output_dir = get_server_output_directory()
+            output_dir = value_entries["Output Directory"].get()
+            
+            # If the path starts with server output directory, map it to output directory
+            if server_path.startswith(server_output_dir):
+                relative_path = os.path.relpath(server_path, server_output_dir)
+                mapped_path = os.path.join(output_dir, relative_path)
+                return mapped_path.replace('/', '\\')
+            
+            # If it's already in the output directory or not a server path, return as-is
+            return server_path.replace('/', '\\')
+        except Exception:
+            # Fallback to original path if mapping fails
+            return server_path.replace('/', '\\')
 
     def display_specific_image(image_path):
         """Display a specific image in the UI."""
@@ -2734,8 +2752,9 @@ def main():
                 width, height = orig_img.size
             
             file_size = os.path.getsize(image_path)
-            # Always display path with Windows separators
-            details_path.config(text=image_path.replace('/', '\\'))  # No "Path: " prefix
+            # Always display the mapped output path instead of server path
+            display_path = map_server_path_to_output_path(image_path)
+            details_path.config(text=display_path)  # No "Path: " prefix
             details_dim.config(text=f"Dimensions: {width} x {height}")
             details_size.config(text=f"Size: {file_size/1024:.1f} KB")
             
@@ -2773,8 +2792,9 @@ def main():
                     else:
                         # Handle virtual zip path like "...\\some.zip\\image.png" – update details only
                         if ".zip" in new_image_path.lower():
-                            # Always display path with Windows separators
-                            details_path.config(text=new_image_path.replace('/', '\\'))
+                            # Always display the mapped output path instead of server path
+                            display_path = map_server_path_to_output_path(new_image_path)
+                            details_path.config(text=display_path)
                             # Optionally update size by reading from zip
                             try:
                                 parts = new_image_path.split('\\')
