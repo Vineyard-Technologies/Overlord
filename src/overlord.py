@@ -319,6 +319,59 @@ def stop_all_render_processes() -> dict:
     
     return results
 
+def cleanup_iray_database_and_cache():
+    """Clean up iray_server.db and cache folder from all possible locations."""
+    try:
+        cleanup_locations = []
+        
+        # Add source directory
+        cleanup_locations.append(os.path.dirname(__file__))
+        
+        # Add LocalAppData directory if different
+        local_app_data_dir = get_local_app_data_path()
+        if local_app_data_dir != os.path.dirname(__file__):
+            cleanup_locations.append(local_app_data_dir)
+        
+        for cleanup_dir in cleanup_locations:
+            # Clean up iray_server.db with retry mechanism
+            iray_db_path = os.path.join(cleanup_dir, "iray_server.db")
+            if os.path.exists(iray_db_path):
+                # Try to delete with retries (processes might still be releasing file handles)
+                max_retries = 5
+                retry_delay = 0.5  # seconds
+                for attempt in range(max_retries):
+                    try:
+                        os.remove(iray_db_path)
+                        logging.info(f"Cleaned up iray_server.db at: {iray_db_path}")
+                        break
+                    except (OSError, PermissionError) as e:
+                        if attempt < max_retries - 1:
+                            logging.debug(f"Attempt {attempt + 1} failed to delete {iray_db_path}, retrying in {retry_delay}s: {e}")
+                            time.sleep(retry_delay)
+                        else:
+                            logging.warning(f"Failed to delete iray_server.db after {max_retries} attempts: {e}")
+            
+            # Clean up cache folder with retry mechanism
+            cache_dir_path = os.path.join(cleanup_dir, "cache")
+            if os.path.exists(cache_dir_path):
+                # Try to delete with retries
+                max_retries = 5
+                retry_delay = 0.5  # seconds
+                for attempt in range(max_retries):
+                    try:
+                        shutil.rmtree(cache_dir_path)
+                        logging.info(f"Cleaned up cache folder at: {cache_dir_path}")
+                        break
+                    except (OSError, PermissionError) as e:
+                        if attempt < max_retries - 1:
+                            logging.debug(f"Attempt {attempt + 1} failed to delete {cache_dir_path}, retrying in {retry_delay}s: {e}")
+                            time.sleep(retry_delay)
+                        else:
+                            logging.warning(f"Failed to delete cache folder after {max_retries} attempts: {e}")
+                
+    except Exception as e:
+        logging.error(f"Error during database and cache cleanup: {e}")
+
 
 # ============================================================================
 # IMAGE PROCESSING
@@ -809,6 +862,7 @@ class ExrFileHandler(FileSystemEventHandler):
         self.conversion_thread = None
         self.stop_conversion = False
         self.final_output_directory = output_directory
+        self._lock = threading.Lock()  # Thread safety lock
         self.conversion_stats = {
             'total': 0,
             'successful': 0,
@@ -861,14 +915,18 @@ class ExrFileHandler(FileSystemEventHandler):
     
     def add_to_conversion_queue(self, exr_path: str):
         """Add EXR file to conversion queue."""
-        if exr_path not in self.processed_files:
-            self.conversion_queue.append(exr_path)
-            self.processed_files.add(exr_path)
-            logging.info(f'Added {exr_path} to EXR conversion queue')
-            
-            # Start conversion thread if not already running
-            if self.conversion_thread is None or not self.conversion_thread.is_alive():
-                self.start_conversion_thread()
+        with self._lock:
+            if self.stop_conversion:
+                return  # Don't add new items if we're stopping
+                
+            if exr_path not in self.processed_files:
+                self.conversion_queue.append(exr_path)
+                self.processed_files.add(exr_path)
+                logging.info(f'Added {exr_path} to EXR conversion queue')
+                
+                # Start conversion thread if not already running
+                if self.conversion_thread is None or not self.conversion_thread.is_alive():
+                    self.start_conversion_thread()
     
     def start_conversion_thread(self):
         """Start the conversion thread."""
@@ -878,32 +936,55 @@ class ExrFileHandler(FileSystemEventHandler):
     
     def stop_conversion_thread(self):
         """Stop the conversion thread."""
-        self.stop_conversion = True
+        with self._lock:
+            self.stop_conversion = True
+            
         if self.conversion_thread and self.conversion_thread.is_alive():
-            self.conversion_thread.join(timeout=5.0)
+            try:
+                self.conversion_thread.join(timeout=5.0)
+                if self.conversion_thread.is_alive():
+                    logging.warning("Conversion thread did not stop within timeout, forcing termination")
+            except Exception as e:
+                logging.error(f"Error stopping conversion thread: {e}")
+        self.conversion_thread = None
     
     def process_conversion_queue(self):
         """Process the conversion queue in a background thread."""
         while not self.stop_conversion:
-            if self.conversion_queue:
-                exr_path = self.conversion_queue.pop(0)
-                try:
-                    self.convert_exr_to_png(exr_path)
-                except Exception as e:
-                    logging.error(f'Failed to convert {exr_path} to PNG: {e}')
-                    self.conversion_stats['failed'] += 1
+            exr_path = None
+            
+            # Safely get next item from queue
+            with self._lock:
+                if self.conversion_queue and not self.stop_conversion:
+                    exr_path = self.conversion_queue.pop(0)
+            
+            if exr_path is not None:
+                if not self.stop_conversion:  # Check again before processing
+                    try:
+                        self.convert_exr_to_png(exr_path)
+                    except Exception as e:
+                        logging.error(f'Failed to convert {exr_path} to PNG: {e}')
+                        self.conversion_stats['failed'] += 1
             else:
                 time.sleep(0.5)
     
     def convert_exr_to_png(self, exr_path: str) -> bool:
         """Convert a single EXR file to PNG with enhanced error handling."""
         try:
+            # Check if we should stop processing
+            if self.stop_conversion:
+                return False
+                
             self.conversion_stats['total'] += 1
             
             # Wait for file to be fully written
             if not self._wait_for_file_stability(exr_path):
                 logging.warning(f'EXR file not stable or missing: {exr_path}')
                 self.conversion_stats['skipped'] += 1
+                return False
+            
+            # Check again after stability wait
+            if self.stop_conversion:
                 return False
             
             # Validate EXR file before attempting conversion
@@ -1012,12 +1093,20 @@ class ExrFileHandler(FileSystemEventHandler):
         """Wait for file to be stable and fully written."""
         wait_time = 0
         while wait_time < max_wait:
+            # Check if we should stop processing
+            if self.stop_conversion:
+                return False
+                
             try:
                 if not os.path.exists(file_path):
                     return False
                     
                 size1 = os.path.getsize(file_path)
                 time.sleep(0.5)
+                
+                # Check again after sleep
+                if self.stop_conversion:
+                    return False
                 
                 if not os.path.exists(file_path):
                     return False
@@ -1211,9 +1300,17 @@ class ExrFileHandler(FileSystemEventHandler):
     def handle_png_file(self, png_path: str):
         """Handle PNG files with enhanced stability checks and error handling."""
         try:
+            # Check if we should stop processing
+            if self.stop_conversion:
+                return
+                
             # Enhanced stability check
             if not self._wait_for_file_stability(png_path, max_wait=10):
                 logging.debug(f"PNG file not stable or missing: {png_path}")
+                return
+            
+            # Check again after stability wait
+            if self.stop_conversion:
                 return
             
             directory = os.path.dirname(png_path)
@@ -1229,6 +1326,10 @@ class ExrFileHandler(FileSystemEventHandler):
             
             # Rename if necessary
             if new_name != name:
+                # Check if we should stop before file operations
+                if self.stop_conversion:
+                    return
+                    
                 new_filename = new_name + ext
                 new_path = os.path.join(directory, new_filename)
                 
@@ -1461,18 +1562,25 @@ class CleanupManager:
     def stop_file_monitoring(self):
         """Stop monitoring files and clean up the observer"""
         try:
+            # First stop the file observer to prevent new events
             if self.file_observer is not None:
+                logging.info('Stopping file observer...')
                 self.file_observer.stop()
                 self.file_observer.join(timeout=5.0)  # Wait up to 5 seconds
                 self.file_observer = None
                 logging.info('Stopped file monitoring')
             
+            # Then stop the conversion thread
             if self.exr_handler is not None:
+                logging.info('Stopping EXR conversion handler...')
                 self.exr_handler.stop_conversion_thread()
                 self.exr_handler = None
                 logging.info('Stopped EXR conversion handler')
         except Exception as e:
             logging.error(f'Error stopping file monitoring: {e}')
+            # Force cleanup even if there were errors
+            self.file_observer = None
+            self.exr_handler = None
     
     def stop_iray_server(self):
         """Stop all iray_server.exe and iray_server_worker.exe processes"""
@@ -3047,12 +3155,30 @@ def main():
 
     def stop_render():
         logging.info('Stop Render button clicked')
-        # Stop file monitoring first
-        cleanup_manager.stop_file_monitoring()
-        kill_render_related_processes()
-        # Re-enable Start Render button and disable Stop Render button
-        button.config(state="normal")
+        
+        # Immediately disable the stop button to prevent multiple clicks
         stop_button.config(state="disabled")
+        root.update_idletasks()  # Force UI update
+        
+        try:
+            # Stop file monitoring first to prevent race conditions
+            logging.info('Stopping file monitoring and conversion...')
+            cleanup_manager.stop_file_monitoring()
+            
+            # Then kill render processes
+            logging.info('Stopping render processes...')
+            kill_render_related_processes()
+            
+            # Clean up database and cache after processes are killed
+            logging.info('Cleaning up Iray database and cache...')
+            cleanup_iray_database_and_cache()
+            
+        except Exception as e:
+            logging.error(f'Error during stop render: {e}')
+        finally:
+            # Always re-enable Start Render button, even if there were errors
+            button.config(state="normal")
+            logging.info('Stop render completed')
 
     # Initial display setup
     root.after(500, show_last_rendered_image)  # Initial image load

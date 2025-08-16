@@ -103,8 +103,8 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 		var oAnimationsJson = JSON.parse(oAnimationFile.read()).scene.animations;
 		oAnimationFile.close();
 
-		for (var i = 0; i < oAnimationsJson.length; i++) {
-			var nNumberOfFrames = oAnimationsJson[i].keys.length;
+		for (var nJsonCounter = 0; nJsonCounter < oAnimationsJson.length; nJsonCounter++) {
+			var nNumberOfFrames = oAnimationsJson[nJsonCounter].keys.length;
 
 			if (nNumberOfFrames > 1) {
 				// Subtract 1 here to make it 0-based
@@ -136,22 +136,39 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 		if (nOutputAngle <= -180) nOutputAngle += 360;
 
 		// Loop through each frame...
-		for (var nFrame = 0; nFrame <= nFramesTotal; nFrame++) {
+		frameLoop: for (var nFrame = 0; nFrame <= nFramesTotal; nFrame++) {
 			// Check if the current Daz instance should render this frame.
 			if ((nFrame - (nInstanceNumber - 1)) % nTotalNumberOfInstances != 0) continue;
 
 			var sFinalName = sSubjectName + (bIsShadow ? ' shadow_' : '_')
 			+ sAnimationName + '_' + nOutputAngle + '_' + ('000' + nFrame).slice(-3);
 
-			var sFinalFullPath = sOutputDirectory + '/' + sFinalName + '.png';
+			var sZipPath = sOutputDirectory + '/' + sSubjectName + (bIsShadow ? ' shadow' : '')
+				+ '/' + sAnimationName + '/' + sAnimationName + '_' + nOutputAngle + '.zip';
 
-			if (oOutputDirectory.exists(sFinalFullPath)) {
-				// Skip images that already exist
-				App.log(sFinalFullPath + ' already exists. Skipping render.');
-				continue;
-			} else {
-				App.log(sFinalFullPath + ' does not exist.');
-			}
+			if(oOutputDirectory.exists(sZipPath)) {
+
+					var sFinalNameWithExtension = sFinalName + '.png';
+					var oZipFile = new DzZipFile(sZipPath);
+
+					oZipFile.open(DzZipFile.ReadOnly);
+
+					var aFileNames = oZipFile.getFileNames();
+
+					oZipFile.close();
+
+					for (var nFileNameCounter = 0; nFileNameCounter < aFileNames.length; nFileNameCounter++) {
+
+						var sFileName = aFileNames[nFileNameCounter];
+
+						if (sFileName === sFinalNameWithExtension) {
+
+							App.log(sFinalNameWithExtension + ' already exists in zip. Skipping this frame.');
+
+							continue frameLoop;
+						}
+					}
+				}
 
 			Scene.setFrame(nFrame);
 			// Do this every frame, or else it will interpolate.
