@@ -209,7 +209,10 @@ class IrayServerActions:
                 return False
             
             # Set image storage path
-            global_image_storage_path_input = self.find_element(IrayServerXPaths.settingsPage.GLOBAL_IMAGE_STORAGE_PATH_INPUT)
+            # Wait for the image storage path input to be present before interacting
+            global_image_storage_path_input = WebDriverWait(self.driver, self.default_timeout).until(
+                EC.presence_of_element_located((By.XPATH, IrayServerXPaths.settingsPage.GLOBAL_IMAGE_STORAGE_PATH_INPUT))
+            )
             global_image_storage_path_input.clear()
             global_image_storage_path_input.send_keys(storage_path.replace('/', '\\'))
             logging.info(f"Set image storage path to: {storage_path}")

@@ -2891,9 +2891,20 @@ def main():
         # Start the render process in a background thread to keep UI responsive
         def start_render_background():
             try:
-                # Start Iray Server if not already running
+                # First, ensure all render-related processes are stopped
                 logging.info('Start Render button clicked')
-                logging.info('Starting Iray Server...')
+                logging.info('Closing any existing Iray Server, DAZ Studio, and webdriver instances...')
+                
+                # Stop file monitoring first to prevent conflicts
+                cleanup_manager.stop_file_monitoring()
+                
+                # Kill all existing render-related processes
+                kill_render_related_processes()
+                
+                # Clean up database and cache from any previous sessions
+                cleanup_iray_database_and_cache()
+                
+                logging.info('All previous instances closed. Starting fresh Iray Server...')
                 
                 # Get server output directory path
                 server_output_dir = get_server_output_directory()
