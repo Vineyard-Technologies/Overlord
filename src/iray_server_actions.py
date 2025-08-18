@@ -16,7 +16,29 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import WebDriverException, TimeoutException
-from iray_server_xpaths import IrayServerXPaths
+try:
+    from iray_server_xpaths import IrayServerXPaths
+except ImportError:
+    # Try relative import if absolute import fails
+    from .iray_server_xpaths import IrayServerXPaths
+
+# Suppress urllib3 connection pool warnings from Selenium WebDriver
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# Configure logging levels to suppress connection pool warnings
+logging.getLogger("urllib3.connectionpool").setLevel(logging.ERROR)
+logging.getLogger("selenium.webdriver.remote.remote_connection").setLevel(logging.WARNING)
+
+# Increase the default connection pool settings to prevent pool exhaustion
+try:
+    # Configure pool manager defaults to handle more connections
+    urllib3.poolmanager.DEFAULT_POOLBLOCK = False
+    urllib3.poolmanager.DEFAULT_POOLSIZE = 50
+    urllib3.poolmanager.DEFAULT_RETRIES = 3
+except AttributeError:
+    # Fallback if urllib3 structure changes in future versions
+    pass
 
 
 class IrayServerActions:
@@ -33,10 +55,89 @@ class IrayServerActions:
         self.cleanup_manager = cleanup_manager
         self.base_url = "http://127.0.0.1:9090"
         self.default_timeout = 10
+        self.stop_requested = False  # Flag to signal when operations should stop
     
     def find_element(self, xpath):
         """Helper method to find element by XPath"""
         return self.driver.find_element(By.XPATH, xpath)
+    
+    def is_session_valid(self):
+        """
+        Check if the WebDriver session is still valid and active
+        
+        Returns:
+            bool: True if session is valid, False otherwise
+        """
+        if not self.driver:
+            return False
+        
+        try:
+            # Try a simple operation that requires an active session
+            self.driver.current_url
+            return True
+        except Exception as e:
+            error_msg = str(e).lower()
+            if any(phrase in error_msg for phrase in [
+                "without establishing a connection", "invalidsessionid",
+                "session not created", "session deleted", "connection refused"
+            ]):
+                return False
+            # For other exceptions, assume session might still be valid
+            return False
+    
+    def request_stop(self):
+        """
+        Signal that all operations should stop (called when Stop Render is clicked)
+        """
+        self.stop_requested = True
+        logging.debug("Stop requested for IrayServerActions")
+    
+    def cleanup_driver(self):
+        """
+        Clean up the WebDriver session safely and ensure all connections are closed
+        """
+        if self.driver:
+            try:
+                # Check if the session is still valid before attempting operations
+                session_active = self.is_session_valid()
+                
+                if session_active:
+                    # Only try to close windows if session is still active
+                    try:
+                        handles = self.driver.window_handles
+                        for handle in handles:
+                            try:
+                                self.driver.switch_to.window(handle)
+                                self.driver.close()
+                            except Exception:
+                                pass  # Ignore individual window close errors
+                    except Exception:
+                        pass  # Ignore if window operations fail
+                
+                # Always attempt to quit, even if session appears inactive
+                self.driver.quit()
+                logging.info("WebDriver session closed successfully")
+            except Exception as e:
+                error_msg = str(e)
+                if any(phrase in error_msg.lower() for phrase in [
+                    "connection broken", "connection refused", 
+                    "without establishing a connection", "invalidsessionid",
+                    "session not created", "session deleted"
+                ]):
+                    logging.info("WebDriver session was already closed or unreachable")
+                else:
+                    logging.warning(f"Error during WebDriver cleanup (non-critical): {e}")
+            finally:
+                self.driver = None
+                if self.cleanup_manager and hasattr(self.cleanup_manager, 'browser_driver'):
+                    self.cleanup_manager.browser_driver = None
+                
+                # Set stop flag to signal any running operations to exit
+                self.stop_requested = True
+                
+                # Give urllib3 a moment to clean up connections
+                import time
+                time.sleep(0.1)
     
     def log_detailed_error(self, e, operation_description, log_level="error"):
         """
@@ -57,8 +158,8 @@ class IrayServerActions:
         screenshot_path = None
         if not getattr(sys, 'frozen', False) and self.driver:
             try:
-                # Check if driver is still available for screenshots
-                if self.driver:
+                # Check if driver session is still valid before attempting screenshot
+                if self.driver and self.is_session_valid():
                     # Create screenshots directory in user's Pictures folder
                     user_profile = os.environ.get('USERPROFILE') or os.path.expanduser('~')
                     screenshots_dir = os.path.join(user_profile, 'Pictures', 'Overlord Error Screenshots')
@@ -79,12 +180,18 @@ class IrayServerActions:
                     else:
                         logging.warning("Failed to save error screenshot")
                         screenshot_path = None
+                elif self.driver:
+                    logging.debug("Cannot take screenshot: browser session is no longer valid")
                 else:
-                    logging.warning("Cannot take screenshot: browser driver is None")
+                    logging.debug("Cannot take screenshot: browser driver is None")
             except Exception as screenshot_error:
-                error_msg = str(screenshot_error)
-                if "connection broken" in error_msg.lower() or "connection refused" in error_msg.lower():
-                    logging.warning("Cannot take screenshot: browser session no longer available")
+                error_msg = str(screenshot_error).lower()
+                if any(phrase in error_msg for phrase in [
+                    "connection broken", "connection refused", "max retries exceeded",
+                    "without establishing a connection", "invalidsessionid",
+                    "failed to establish a new connection"
+                ]):
+                    logging.debug("Cannot take screenshot: browser session no longer available")
                 else:
                     logging.warning(f"Failed to take error screenshot: {screenshot_error}")
                 screenshot_path = None
@@ -161,6 +268,17 @@ class IrayServerActions:
             firefox_options.add_argument("--disable-web-security")
             firefox_options.add_argument("--start-maximized")
             firefox_options.add_argument("--headless")
+            
+            # Add connection management options to reduce connection pool warnings
+            firefox_options.add_argument("--disable-dev-shm-usage")
+            firefox_options.add_argument("--no-sandbox")
+            firefox_options.add_argument("--disable-gpu")
+            firefox_options.add_argument("--disable-features=VizDisplayCompositor")
+            
+            # Set Firefox preferences to optimize connection handling
+            firefox_options.set_preference("network.http.max-connections", 10)
+            firefox_options.set_preference("network.http.max-connections-per-server", 5)
+            firefox_options.set_preference("network.http.max-persistent-connections-per-server", 2)
             
             self.driver = webdriver.Firefox(options=firefox_options)
             logging.info("Successfully started Firefox WebDriver")
@@ -260,20 +378,7 @@ class IrayServerActions:
         except Exception as e:
             self.log_detailed_error(e, "Failed to configure Iray Server")
             # Close browser on configuration failure
-            if self.driver:
-                try:
-                    self.driver.quit()
-                    logging.info("Browser closed due to configuration failure")
-                except Exception as cleanup_e:
-                    error_msg = str(cleanup_e)
-                    if "connection broken" in error_msg.lower() or "connection refused" in error_msg.lower():
-                        logging.info("Browser session was already closed or unreachable")
-                    else:
-                        logging.warning(f"Error during browser cleanup (non-critical): {cleanup_e}")
-                finally:
-                    self.driver = None
-                    if self.cleanup_manager and hasattr(self.cleanup_manager, 'browser_driver'):
-                        self.cleanup_manager.browser_driver = None
+            self.cleanup_driver()
             return False
         # Note: browser is kept open on success for background render monitoring
 
@@ -293,14 +398,42 @@ class IrayServerActions:
             if not self.driver:
                 logging.error("Cannot wait for render completion: browser driver not available")
                 return False
+            
+            # Check if stop has been requested
+            if self.stop_requested:
+                logging.info("Render completion check stopped due to stop request")
+                return False
+            
+            # Check if session is still valid before proceeding
+            if not self.is_session_valid():
+                logging.info("Cannot wait for render completion: browser session is no longer valid")
+                return False
                 
             # Wait for the expected number of renders to complete
-            WebDriverWait(self.driver, 60 * renders_per_session).until(
-                EC.text_to_be_present_in_element((By.XPATH, IrayServerXPaths.queuePage.DONE_QUANTITY), str(renders_per_session))
-            )
+            # Use a custom condition that also checks for stop requests
+            def wait_condition(driver):
+                if self.stop_requested:
+                    return True  # Exit the wait
+                try:
+                    element = driver.find_element(By.XPATH, IrayServerXPaths.queuePage.DONE_QUANTITY)
+                    return element.text.strip() == str(renders_per_session)
+                except Exception:
+                    return False
+            
+            WebDriverWait(self.driver, 60 * renders_per_session).until(wait_condition)
+            
+            # Check if we exited due to stop request
+            if self.stop_requested:
+                logging.info("Render completion check stopped due to stop request")
+                return False
             
             # Verify the completion by checking the actual element value
             try:
+                # Double-check session validity before accessing elements
+                if not self.is_session_valid():
+                    logging.info("Browser session became invalid during render completion check")
+                    return False
+                
                 done_elem = self.find_element(IrayServerXPaths.queuePage.DONE_QUANTITY)
                 done_text = (done_elem.text or '').strip()
                 
@@ -322,28 +455,44 @@ class IrayServerActions:
                     logging.warning(f"DONE_QUANTITY shows '{done_text}' but expected {renders_per_session}")
                     return False
             except Exception as e:
-                self.log_detailed_error(e, "Error verifying render completion")
-                return False
+                # Check if this is a session-related error before logging as an error
+                error_msg = str(e).lower()
+                if any(phrase in error_msg for phrase in [
+                    "without establishing a connection", "invalidsessionid",
+                    "session not created", "session deleted", "connection refused",
+                    "max retries exceeded", "failed to establish a new connection"
+                ]):
+                    logging.info("Render completion check stopped due to invalid browser session")
+                    return False
+                else:
+                    self.log_detailed_error(e, "Error verifying render completion")
+                    return False
                 
         except TimeoutException:
-            logging.warning(f"Timeout waiting for {renders_per_session} renders to complete")
-            return False
+            # Check if timeout was due to session being closed
+            if not self.is_session_valid():
+                logging.info("Render completion check stopped due to invalid browser session")
+                return False
+            else:
+                logging.warning(f"Timeout waiting for {renders_per_session} renders to complete")
+                return False
         except Exception as e:
-            self.log_detailed_error(e, "Error waiting for render completion")
-            return False
+            # Check if this is a session-related error
+            error_msg = str(e).lower()
+            if any(phrase in error_msg for phrase in [
+                "without establishing a connection", "invalidsessionid",
+                "session not created", "session deleted", "connection refused",
+                "max retries exceeded", "failed to establish a new connection"
+            ]):
+                logging.info("Render completion check stopped due to invalid browser session")
+                return False
+            else:
+                self.log_detailed_error(e, "Error waiting for render completion")
+                return False
         finally:
-            # Close browser after waiting is complete
-            if self.driver:
-                try:
-                    self.driver.quit()
-                    logging.info("Browser closed after render completion check")
-                except Exception as e:
-                    error_msg = str(e)
-                    if "connection broken" in error_msg.lower() or "connection refused" in error_msg.lower():
-                        logging.info("Browser session was already closed or unreachable")
-                    else:
-                        logging.warning(f"Error during browser cleanup (non-critical): {e}")
-                finally:
-                    self.driver = None
-                    if self.cleanup_manager and hasattr(self.cleanup_manager, 'browser_driver'):
-                        self.cleanup_manager.browser_driver = None
+            # Only close browser if session is still valid
+            if self.driver and self.is_session_valid():
+                self.cleanup_driver()
+            elif self.driver:
+                # Session is invalid, just clean up the reference
+                self.driver = None

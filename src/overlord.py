@@ -882,14 +882,22 @@ class ExrFileHandler(FileSystemEventHandler):
     def on_created(self, event):
         """Handle new file creation events."""
         if not event.is_directory:
+            # Check if we should stop processing early
+            if self.stop_conversion:
+                return
+                
             if event.src_path.lower().endswith('.exr'):
                 self.add_to_conversion_queue(event.src_path)
             elif event.src_path.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif', '.tiff', '.webp')):
+                # Check again before processing
+                if self.stop_conversion:
+                    return
+                    
                 # Notify UI of new image file
                 self._notify_image_update(event.src_path)
                 if event.src_path.lower().endswith('.png'):
-                    # Only process if not already processed
-                    if event.src_path not in self.processed_png_files:
+                    # Only process if not already processed and not stopping
+                    if event.src_path not in self.processed_png_files and not self.stop_conversion:
                         # Process PNG with transparency check before handling
                         processed_path = self.process_transparent_image(event.src_path)
                         self.handle_png_file(processed_path)
@@ -897,9 +905,17 @@ class ExrFileHandler(FileSystemEventHandler):
     def on_moved(self, event):
         """Handle file move events."""
         if not event.is_directory:
+            # Check if we should stop processing early
+            if self.stop_conversion:
+                return
+                
             if event.dest_path.lower().endswith('.exr'):
                 self.add_to_conversion_queue(event.dest_path)
             elif event.dest_path.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif', '.tiff', '.webp')):
+                # Check again before processing
+                if self.stop_conversion:
+                    return
+                    
                 # Notify UI of new image file
                 self._notify_image_update(event.dest_path)
                 # Don't process PNG files on move events - they're likely renames during processing
@@ -907,6 +923,9 @@ class ExrFileHandler(FileSystemEventHandler):
     
     def _notify_image_update(self, image_path: str):
         """Notify the UI that a new image is available."""
+        if self.stop_conversion:
+            return  # Don't notify UI if we're stopping
+            
         if self.image_update_callback:
             try:
                 # Schedule the UI update on the main thread
@@ -1338,6 +1357,10 @@ class ExrFileHandler(FileSystemEventHandler):
                     logging.debug(f"PNG file disappeared before rename: {png_path}")
                     return
                 
+                # Final check before file operation
+                if self.stop_conversion:
+                    return
+                
                 try:
                     os.rename(png_path, new_path)
                     logging.info(f"Renamed: {filename} → {new_filename}")
@@ -1350,13 +1373,21 @@ class ExrFileHandler(FileSystemEventHandler):
                     logging.warning(f"Failed to rename PNG file {png_path}: {e}")
                     return
             
+            # Check if we should stop before UI operations
+            if self.stop_conversion:
+                return
+            
             # Notify UI of new image before moving to archive (while file is still accessible)
             self._notify_image_update(png_path)
+            
+            # Check again before file movement
+            if self.stop_conversion:
+                return
             
             # Move to final output directory
             final_path = self._move_to_final_directory(png_path)
             # After moving, notify UI again with the final path (which may be a zip "virtual" path)
-            if final_path:
+            if final_path and not self.stop_conversion:
                 self._notify_image_update(final_path)
             
         except Exception as e:
@@ -1394,6 +1425,10 @@ class ExrFileHandler(FileSystemEventHandler):
 
     def _move_to_final_directory(self, png_path: str) -> str:
         """Move PNG file to final output directory with organized zip archive structure. Returns final path if successful."""
+        # Check if we should stop processing
+        if self.stop_conversion:
+            return png_path  # Return original path without moving
+            
         if not self.final_output_directory or not os.path.exists(self.final_output_directory):
             if not self.final_output_directory:
                 logging.warning(f"Final output directory not set, PNG remains: {png_path}")
@@ -1405,15 +1440,27 @@ class ExrFileHandler(FileSystemEventHandler):
             logging.debug(f"PNG file disappeared before move: {png_path}")
             return None
         
+        # Check again before processing
+        if self.stop_conversion:
+            return png_path
+        
         filename = os.path.basename(png_path)
         base_name, animation, frame_group = self._parse_filename_for_organization(filename)
         
         # Create organized structure with zip archives if parsing succeeded
         if base_name and animation and frame_group:
+            # Check before creating directories
+            if self.stop_conversion:
+                return png_path
+                
             # Create folder structure: final_output_directory/base_name/animation/
             animation_dir = os.path.join(self.final_output_directory, base_name, animation)
             try:
                 os.makedirs(animation_dir, exist_ok=True)
+                
+                # Check again after directory creation
+                if self.stop_conversion:
+                    return png_path
                 
                 # Create zip archive name: animation_framegroup.zip (e.g., "idle_0.zip")
                 zip_filename = f"{animation}_{frame_group}.zip"
@@ -1439,6 +1486,10 @@ class ExrFileHandler(FileSystemEventHandler):
             final_png_path = os.path.join(self.final_output_directory, filename)
             logging.debug(f"Using root directory for file: {filename}")
         
+        # Check one more time before the file move operation
+        if self.stop_conversion:
+            return png_path
+        
         # For fallback cases, use regular file move
         try:
             shutil.move(png_path, final_png_path)
@@ -1451,10 +1502,18 @@ class ExrFileHandler(FileSystemEventHandler):
     def _add_to_zip_archive(self, png_path: str, zip_path: str, filename: str) -> str:
         """Add PNG file to zip archive. Returns a UI-friendly path of the file inside the zip (zipfile\\filename) if successful, None if failed."""
         try:
+            # Check if we should stop processing
+            if self.stop_conversion:
+                return None
+                
             # Determine the mode: 'a' (append) if zip exists, 'w' (write) if new
             mode = 'a' if os.path.exists(zip_path) else 'w'
             
             with zipfile.ZipFile(zip_path, mode, compression=zipfile.ZIP_STORED) as zipf:
+                # Check again inside the zip operation
+                if self.stop_conversion:
+                    return None
+                    
                 # Check if file already exists in zip
                 existing_files = zipf.namelist()
                 if filename not in existing_files:
@@ -1507,6 +1566,7 @@ class CleanupManager:
         self.browser_driver = None
         self.file_observer = None
         self.exr_handler = None
+        self.iray_actions = None
     
     def register_temp_file(self, filepath):
         """Register a temporary file for cleanup"""
@@ -1523,6 +1583,10 @@ class CleanupManager:
     def register_browser_driver(self, driver):
         """Register a browser driver for cleanup"""
         self.browser_driver = driver
+    
+    def register_iray_actions(self, iray_actions):
+        """Register an IrayServerActions instance for cleanup and stop operations"""
+        self.iray_actions = iray_actions
     
     def register_settings_callback(self, callback):
         """Register a callback to save settings on exit"""
@@ -1563,7 +1627,13 @@ class CleanupManager:
     def stop_file_monitoring(self):
         """Stop monitoring files and clean up the observer"""
         try:
-            # First stop the file observer to prevent new events
+            # First signal the handler to stop processing any remaining events
+            if self.exr_handler is not None:
+                logging.info('Signaling EXR handler to stop processing...')
+                with self.exr_handler._lock:
+                    self.exr_handler.stop_conversion = True
+            
+            # Then stop the file observer to prevent new events
             if self.file_observer is not None:
                 logging.info('Stopping file observer...')
                 self.file_observer.stop()
@@ -1571,7 +1641,7 @@ class CleanupManager:
                 self.file_observer = None
                 logging.info('Stopped file monitoring')
             
-            # Then stop the conversion thread
+            # Finally stop the conversion thread
             if self.exr_handler is not None:
                 logging.info('Stopping EXR conversion handler...')
                 self.exr_handler.stop_conversion_thread()
@@ -1609,11 +1679,37 @@ class CleanupManager:
             # Close browser driver if exists
             if self.browser_driver:
                 try:
+                    # Check if we can access the driver session before attempting cleanup
+                    try:
+                        # Test if session is still active with a minimal operation
+                        self.browser_driver.current_url
+                        session_active = True
+                    except Exception:
+                        session_active = False
+                    
+                    if session_active:
+                        # Only attempt advanced cleanup if session is active
+                        try:
+                            # Close any open windows
+                            for handle in self.browser_driver.window_handles:
+                                try:
+                                    self.browser_driver.switch_to.window(handle)
+                                    self.browser_driver.close()
+                                except Exception:
+                                    pass
+                        except Exception:
+                            pass  # Ignore window cleanup errors
+                    
+                    # Always attempt to quit, regardless of session state
                     self.browser_driver.quit()
                     logging.info('Browser driver closed via cleanup manager')
                 except Exception as e:
-                    error_msg = str(e)
-                    if "connection broken" in error_msg.lower() or "connection refused" in error_msg.lower():
+                    error_msg = str(e).lower()
+                    if any(phrase in error_msg for phrase in [
+                        "connection broken", "connection refused",
+                        "without establishing a connection", "invalidsessionid",
+                        "session not created", "session deleted"
+                    ]):
                         logging.info('Browser driver was already closed or unreachable')
                     else:
                         logging.warning(f'Error during browser driver cleanup (non-critical): {e}')
@@ -2943,6 +3039,9 @@ def main():
                 
                 iray_actions = IrayServerActions(cleanup_manager)
                 
+                # Register the iray_actions instance for cleanup and stop operations
+                cleanup_manager.register_iray_actions(iray_actions)
+                
                 # Configure Iray Server (starts browser, configures settings, keeps browser open)
                 if not iray_actions.configure_server(server_output_dir, RENDERS_PER_SESSION):
                     logging.error('Failed to configure Iray Server')
@@ -2962,6 +3061,26 @@ def main():
                             # Move heavy operations to background thread to avoid freezing UI
                             def cleanup_and_restart_background():
                                 try:
+                                    # First, properly close the WebDriver session to prevent connection errors
+                                    try:
+                                        # Check if we have an existing iray_actions instance with a driver
+                                        if hasattr(iray_actions, 'driver') and iray_actions.driver:
+                                            # Use the existing instance's cleanup method directly
+                                            iray_actions.cleanup_driver()
+                                            logging.info("Cleaned up WebDriver session before restart")
+                                        else:
+                                            logging.debug("No WebDriver session to clean up")
+                                    except Exception as driver_cleanup_e:
+                                        # Check if this is a session-related error that we can safely ignore
+                                        error_msg = str(driver_cleanup_e).lower()
+                                        if any(phrase in error_msg for phrase in [
+                                            "without establishing a connection", "invalidsessionid",
+                                            "session not created", "session deleted", "connection refused"
+                                        ]):
+                                            logging.debug("WebDriver session was already closed or invalid")
+                                        else:
+                                            logging.warning(f"Error cleaning up WebDriver session: {driver_cleanup_e}")
+                                    
                                     # Kill all render-related processes (DAZ Studio, Iray Server, webdrivers)
                                     kill_render_related_processes()
                                     
@@ -3390,6 +3509,11 @@ def main():
         root.update_idletasks()  # Force UI update
         
         try:
+            # Signal any running IrayServerActions operations to stop
+            if hasattr(cleanup_manager, 'iray_actions') and cleanup_manager.iray_actions:
+                cleanup_manager.iray_actions.request_stop()
+                logging.info('Signaled IrayServerActions to stop')
+            
             # Stop file monitoring first to prevent race conditions
             logging.info('Stopping file monitoring and conversion...')
             cleanup_manager.stop_file_monitoring()
