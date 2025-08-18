@@ -2165,16 +2165,47 @@ def main():
     def on_closing():
         """Handle window closing event"""
         logging.info('Application closing...')
-        # Save settings before cleanup to avoid accessing destroyed widgets
-        try:
-            save_current_settings()
-            cleanup_manager.mark_settings_saved()  # Mark that settings have been saved
-        except Exception as e:
-            logging.error(f"Error saving settings before close: {e}")
-        kill_render_related_processes()
-        cleanup_manager.cleanup_all()
-        root.quit()
-        root.destroy()
+        
+        # Immediately hide the window to make closing feel responsive
+        root.withdraw()  # Hide the window immediately
+        root.update()    # Force the UI update
+        
+        # Do all cleanup in a background thread
+        def cleanup_background():
+            try:
+                # Save settings before cleanup to avoid accessing destroyed widgets
+                try:
+                    save_current_settings()
+                    cleanup_manager.mark_settings_saved()  # Mark that settings have been saved
+                    logging.info('Settings saved successfully before exit')
+                except Exception as e:
+                    logging.error(f"Error saving settings before close: {e}")
+                
+                # Kill render processes
+                logging.info('Killing render-related processes...')
+                kill_render_related_processes()
+                
+                # Full cleanup
+                logging.info('Performing final cleanup...')
+                cleanup_manager.cleanup_all()
+                
+                logging.info('Background cleanup completed')
+            except Exception as e:
+                logging.error(f'Error during background cleanup: {e}')
+            finally:
+                # Ensure the application exits even if cleanup fails
+                try:
+                    root.quit()
+                    root.destroy()
+                except Exception as e:
+                    logging.error(f'Error destroying root window: {e}')
+                    # Force exit if normal cleanup fails
+                    import sys
+                    sys.exit(0)
+        
+        # Start cleanup in background thread (non-daemon so it completes)
+        cleanup_thread = threading.Thread(target=cleanup_background, daemon=False)
+        cleanup_thread.start()
     
     root.protocol("WM_DELETE_WINDOW", on_closing)
 
@@ -3125,7 +3156,11 @@ def main():
                                                 if iray_actions_restart.wait_for_render_completion(RENDERS_PER_SESSION, schedule_next_cleanup):
                                                     logging.info('Next render cycle completed successfully')
                                                 else:
-                                                    logging.warning('Next render completion check failed or timed out')
+                                                    # Check if this was due to a stop request before logging as a warning
+                                                    if iray_actions_restart.stop_requested:
+                                                        logging.info('Next render completion check stopped due to stop request')
+                                                    else:
+                                                        logging.warning('Next render completion check failed or timed out')
                                             except Exception as e:
                                                 logging.error(f'Error in next render completion monitoring: {e}')
                                         
@@ -3260,7 +3295,11 @@ def main():
                         if iray_actions.wait_for_render_completion(RENDERS_PER_SESSION, schedule_cleanup):
                             logging.info('All renders completed successfully')
                         else:
-                            logging.warning('Render completion check failed or timed out')
+                            # Check if this was due to a stop request before logging as a warning
+                            if iray_actions.stop_requested:
+                                logging.info('Render completion check stopped due to stop request')
+                            else:
+                                logging.warning('Render completion check failed or timed out')
                     except Exception as e:
                         logging.error(f'Error in render completion monitoring: {e}')
                 
