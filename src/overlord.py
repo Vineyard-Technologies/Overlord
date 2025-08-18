@@ -35,7 +35,7 @@ from version import __version__ as overlord_version
 # Application constants
 DEFAULT_MAX_WORKERS = 8
 LOG_SIZE_MB = 100
-RENDERS_PER_SESSION = 25
+RENDERS_PER_SESSION = 10
 RECENT_RENDER_TIMES_LIMIT = 25
 
 # UI update intervals (milliseconds)
@@ -2932,7 +2932,7 @@ def main():
                 
                 iray_actions = IrayServerActions(cleanup_manager)
                 
-                # Configure Iray Server (starts browser, configures settings, closes browser)
+                # Configure Iray Server (starts browser, configures settings, keeps browser open)
                 if not iray_actions.configure_server(server_output_dir, RENDERS_PER_SESSION):
                     logging.error('Failed to configure Iray Server')
                     # Shutdown Iray Server since configuration failed
@@ -2940,6 +2940,202 @@ def main():
                     raise Exception("Iray Server configuration failed")
                 
                 logging.info('Iray Server configuration complete')
+                
+                # Start background thread to wait for render completion
+                def wait_for_completion():
+                    try:
+                        # Define callback to run on main thread when renders complete
+                        def on_renders_complete():
+                            logging.info('Starting render completion cleanup...')
+                            
+                            # Move heavy operations to background thread to avoid freezing UI
+                            def cleanup_and_restart_background():
+                                try:
+                                    # Kill all render-related processes (DAZ Studio, Iray Server, webdrivers)
+                                    kill_render_related_processes()
+                                    
+                                    # Clean up database and cache
+                                    cleanup_iray_database_and_cache()
+                                    
+                                    logging.info('Cleanup complete, restarting Iray Server and Daz Studio...')
+                                    
+                                    # Restart Iray Server
+                                    start_iray_server()
+                                    logging.info('Iray Server restarted')
+                                    
+                                    # Wait for Iray server to start up before configuring
+                                    time.sleep(IRAY_STARTUP_DELAY / 1000)  # Convert to seconds
+                                    
+                                    # Get server output directory path for reconfiguration
+                                    server_output_dir = get_server_output_directory()
+                                    
+                                    # Clean up and recreate server output directory
+                                    if os.path.exists(server_output_dir):
+                                        shutil.rmtree(server_output_dir)
+                                        logging.info(f"Cleaned server output directory: {server_output_dir}")
+                                    os.makedirs(server_output_dir, exist_ok=True)
+                                    logging.info(f"Recreated server output directory: {server_output_dir}")
+                                    
+                                    # Create new IrayServerActions instance and reconfigure
+                                    iray_actions_restart = IrayServerActions(cleanup_manager)
+                                    if iray_actions_restart.configure_server(server_output_dir, RENDERS_PER_SESSION):
+                                        logging.info('Iray Server reconfigured successfully')
+                                        
+                                        # Start new background monitoring for the next render cycle
+                                        def wait_for_next_completion():
+                                            try:
+                                                # Create a new callback for the next cycle to avoid recursion
+                                                def on_next_renders_complete():
+                                                    logging.info('Next render cycle completed - starting cleanup and restart...')
+                                                    root.after(0, on_renders_complete)  # Reuse the same cleanup logic
+                                                
+                                                def schedule_next_cleanup():
+                                                    root.after(0, on_next_renders_complete)
+                                                
+                                                if iray_actions_restart.wait_for_render_completion(RENDERS_PER_SESSION, schedule_next_cleanup):
+                                                    logging.info('Next render cycle completed successfully')
+                                                else:
+                                                    logging.warning('Next render completion check failed or timed out')
+                                            except Exception as e:
+                                                logging.error(f'Error in next render completion monitoring: {e}')
+                                        
+                                        next_completion_thread = threading.Thread(target=wait_for_next_completion, daemon=True)
+                                        next_completion_thread.start()
+                                        
+                                        # Restart Daz Studio instances with the same configuration
+                                        def restart_daz_instances():
+                                            try:
+                                                # Get current render settings
+                                                animations = value_entries["Animations"].get("1.0", tk.END).strip().replace("\\", "/").split("\n")
+                                                animations = [file for file in animations if file]
+                                                
+                                                if animations:  # Only restart if we have animations to render
+                                                    # Use the same JSON configuration as before
+                                                    prop_animations = value_entries["Prop Animations"].get("1.0", tk.END).strip().replace("\\", "/").split("\n")
+                                                    prop_animations = [file for file in prop_animations if file]
+                                                    prop_animations_json = json.dumps(prop_animations)
+                                                    
+                                                    gear = value_entries["Gear"].get("1.0", tk.END).strip().replace("\\", "/").split("\n")
+                                                    gear = [file for file in gear if file]
+                                                    gear_json = json.dumps(gear)
+                                                    
+                                                    gear_animations = value_entries["Gear Animations"].get("1.0", tk.END).strip().replace("\\", "/").split("\n")
+                                                    gear_animations = [file for file in gear_animations if file]
+                                                    gear_animations_json = json.dumps(gear_animations)
+                                                    
+                                                    animations_json = json.dumps(animations)
+                                                    subject_file = value_entries["Subject"].get()
+                                                    image_output_dir = value_entries["Output Directory"].get().replace("\\", "/")
+                                                    num_instances = value_entries["Number of Instances"].get()
+                                                    frame_rate = value_entries["Frame Rate"].get()
+                                                    render_shadows = render_shadows_var.get()
+                                                    
+                                                    # Get paths (same logic as in complete_render_setup)
+                                                    if getattr(sys, 'frozen', False):
+                                                        user_scripts_dir = os.path.join(get_app_data_path(), 'scripts')
+                                                        render_script_path = os.path.join(user_scripts_dir, "masterRenderer.dsa").replace("\\", "/")
+                                                        template_path = os.path.join(get_app_data_path(), 'templates', 'masterTemplate.duf').replace("\\", "/")
+                                                    else:
+                                                        install_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+                                                        render_script_path = os.path.join(install_dir, "scripts", "masterRenderer.dsa").replace("\\", "/")
+                                                        template_path = os.path.join(install_dir, "templates", "masterTemplate.duf").replace("\\", "/")
+                                                    
+                                                    json_map = (
+                                                        f'{{'
+                                                        f'"num_instances": "{num_instances}", '
+                                                        f'"image_output_dir": "{image_output_dir}", '
+                                                        f'"frame_rate": "{frame_rate}", '
+                                                        f'"subject_file": "{subject_file}", '
+                                                        f'"animations": {animations_json}, '
+                                                        f'"prop_animations": {prop_animations_json}, '
+                                                        f'"gear": {gear_json}, '
+                                                        f'"gear_animations": {gear_animations_json}, '
+                                                        f'"template_path": "{template_path}", '
+                                                        f'"renders_per_session": "{RENDERS_PER_SESSION}", '
+                                                        f'"render_shadows": {str(render_shadows).lower()}'
+                                                        f'}}'
+                                                    )
+                                                    
+                                                    # Launch Daz Studio instances
+                                                    daz_executable_path = os.path.join(
+                                                        os.environ.get("ProgramFiles", "C:\\Program Files"),
+                                                        "DAZ 3D", "DAZStudio4", "DAZStudio.exe"
+                                                    )
+                                                    log_size = LOG_SIZE_MB * 1000000
+                                                    
+                                                    try:
+                                                        num_instances_int = int(num_instances)
+                                                    except Exception:
+                                                        num_instances_int = 1
+                                                    
+                                                    def run_restart_instance():
+                                                        command = [
+                                                            daz_executable_path,
+                                                            "-scriptArg", json_map,
+                                                            "-instanceName", "#",
+                                                            "-logSize", str(log_size),
+                                                            "-headless",
+                                                            "-noPrompt", 
+                                                            render_script_path
+                                                        ]
+                                                        try:
+                                                            subprocess.Popen(command)
+                                                            logging.info('Daz Studio restart instance launched')
+                                                        except Exception as e:
+                                                            logging.error(f'Failed to restart Daz Studio instance: {e}')
+                                                    
+                                                    def run_all_restart_instances(i=0):
+                                                        if i < num_instances_int:
+                                                            run_restart_instance()
+                                                            # Use threading timer instead of root.after for background thread
+                                                            threading.Timer(DAZ_STUDIO_STARTUP_DELAY / 1000, lambda: run_all_restart_instances(i + 1)).start()
+                                                        else:
+                                                            logging.info('All Daz Studio restart instances launched')
+                                                            # Restart file monitoring - schedule on main thread
+                                                            root.after(0, lambda: cleanup_manager.start_file_monitoring(server_output_dir, image_output_dir, watchdog_image_update))
+                                                    
+                                                    run_all_restart_instances()
+                                                    logging.info('Daz Studio instances restarted for next render cycle')
+                                                else:
+                                                    logging.info('No animations configured, skipping Daz Studio restart')
+                                                    # Re-enable Start Render button since no restart needed - schedule on main thread
+                                                    root.after(0, lambda: (button.config(state="normal"), stop_button.config(state="disabled")))
+                                            except Exception as restart_e:
+                                                logging.error(f'Error restarting Daz Studio instances: {restart_e}')
+                                                # Re-enable Start Render button on error - schedule on main thread
+                                                root.after(0, lambda: (button.config(state="normal"), stop_button.config(state="disabled")))
+                                        
+                                        # Schedule Daz Studio restart with a delay
+                                        threading.Timer(2.0, restart_daz_instances).start()  # 2 second delay to let Iray Server fully start
+                                        
+                                    else:
+                                        logging.error('Failed to reconfigure Iray Server after restart')
+                                        # Re-enable Start Render button if reconfiguration fails - schedule on main thread
+                                        root.after(0, lambda: (button.config(state="normal"), stop_button.config(state="disabled")))
+                                    
+                                    logging.info('Render completion restart sequence finished successfully')
+                                except Exception as cleanup_e:
+                                    logging.error(f'Error during render completion cleanup/restart: {cleanup_e}')
+                                    # Still re-enable buttons even if cleanup fails - schedule on main thread
+                                    root.after(0, lambda: (button.config(state="normal"), stop_button.config(state="disabled")))
+                            
+                            # Start the heavy operations in a background thread
+                            cleanup_thread = threading.Thread(target=cleanup_and_restart_background, daemon=True)
+                            cleanup_thread.start()
+                        
+                        # Schedule the callback on the main UI thread
+                        def schedule_cleanup():
+                            root.after(0, on_renders_complete)
+                        
+                        if iray_actions.wait_for_render_completion(RENDERS_PER_SESSION, schedule_cleanup):
+                            logging.info('All renders completed successfully')
+                        else:
+                            logging.warning('Render completion check failed or timed out')
+                    except Exception as e:
+                        logging.error(f'Error in render completion monitoring: {e}')
+                
+                completion_thread = threading.Thread(target=wait_for_completion, daemon=True)
+                completion_thread.start()
                 
                 # Continue with the rest of the render setup on UI thread
                 root.after(0, continue_render_setup)

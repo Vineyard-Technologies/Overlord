@@ -249,32 +249,98 @@ class IrayServerActions:
                 logging.warning("Queue page took longer than expected to load")
                 return False
 
-            WebDriverWait(self.driver, 60 * renders_per_session).until(
-                EC.text_to_be_present_in_element((By.XPATH, IrayServerXPaths.queuePage.DONE_QUANTITY), str(renders_per_session))
-            )
+            # Configuration is complete - return True immediately
+            # The caller can start a background thread to wait for renders to complete
+            logging.info("Iray Server configuration completed successfully")
             return True
             
         except Exception as e:
             self.log_detailed_error(e, "Failed to configure Iray Server")
-            return False
-        finally:
-            # Always close browser, even if configuration failed
+            # Close browser on configuration failure
             if self.driver:
                 try:
-                    # Try to quit the driver directly without checking responsiveness first
-                    # This avoids connection errors when the session is already dead
                     self.driver.quit()
-                    logging.info("Browser closed successfully")
+                    logging.info("Browser closed due to configuration failure")
+                except Exception as cleanup_e:
+                    error_msg = str(cleanup_e)
+                    if "connection broken" in error_msg.lower() or "connection refused" in error_msg.lower():
+                        logging.info("Browser session was already closed or unreachable")
+                    else:
+                        logging.warning(f"Error during browser cleanup (non-critical): {cleanup_e}")
+                finally:
+                    self.driver = None
+                    if self.cleanup_manager and hasattr(self.cleanup_manager, 'browser_driver'):
+                        self.cleanup_manager.browser_driver = None
+            return False
+        # Note: browser is kept open on success for background render monitoring
+
+    def wait_for_render_completion(self, renders_per_session: int, completion_callback=None):
+        """
+        Wait for all renders to complete by monitoring the DONE_QUANTITY element.
+        This method should be called in a background thread after configure_server() succeeds.
+        
+        Args:
+            renders_per_session: Expected number of completed renders
+            completion_callback: Optional callback function to call when renders complete successfully
+            
+        Returns:
+            bool: True if all renders completed successfully, False otherwise
+        """
+        try:
+            if not self.driver:
+                logging.error("Cannot wait for render completion: browser driver not available")
+                return False
+                
+            # Wait for the expected number of renders to complete
+            WebDriverWait(self.driver, 60 * renders_per_session).until(
+                EC.text_to_be_present_in_element((By.XPATH, IrayServerXPaths.queuePage.DONE_QUANTITY), str(renders_per_session))
+            )
+            
+            # Verify the completion by checking the actual element value
+            try:
+                done_elem = self.find_element(IrayServerXPaths.queuePage.DONE_QUANTITY)
+                done_text = (done_elem.text or '').strip()
+                
+                # Extract numeric characters and compare
+                numeric = ''.join(ch for ch in done_text if ch.isdigit())
+                if numeric and int(numeric) == renders_per_session:
+                    logging.info(f"All {renders_per_session} renders completed successfully")
+                    
+                    # Call the completion callback if provided
+                    if completion_callback:
+                        try:
+                            completion_callback()
+                            logging.info("Render completion callback executed successfully")
+                        except Exception as cb_e:
+                            logging.error(f"Error in render completion callback: {cb_e}")
+                    
+                    return True
+                else:
+                    logging.warning(f"DONE_QUANTITY shows '{done_text}' but expected {renders_per_session}")
+                    return False
+            except Exception as e:
+                self.log_detailed_error(e, "Error verifying render completion")
+                return False
+                
+        except TimeoutException:
+            logging.warning(f"Timeout waiting for {renders_per_session} renders to complete")
+            return False
+        except Exception as e:
+            self.log_detailed_error(e, "Error waiting for render completion")
+            return False
+        finally:
+            # Close browser after waiting is complete
+            if self.driver:
+                try:
+                    self.driver.quit()
+                    logging.info("Browser closed after render completion check")
                 except Exception as e:
-                    # Log the error but don't treat it as critical - the browser may already be closed
                     error_msg = str(e)
                     if "connection broken" in error_msg.lower() or "connection refused" in error_msg.lower():
                         logging.info("Browser session was already closed or unreachable")
                     else:
                         logging.warning(f"Error during browser cleanup (non-critical): {e}")
                 finally:
-                    # Always set driver to None regardless of quit() success
                     self.driver = None
-                    # Also clear the driver from cleanup manager to prevent double-quit attempts
                     if self.cleanup_manager and hasattr(self.cleanup_manager, 'browser_driver'):
                         self.cleanup_manager.browser_driver = None
