@@ -1,7 +1,7 @@
 ![Overlord Logo](images/readmelogo.png)
 ## An Asset Creation Pipeline Management Tool
 #### Overlord uses [Daz Studio](https://www.daz3d.com/) and [NVIDIA Iray](https://www.nvidia.com/en-us/design-visualization/iray/) to create assets for [Construct](https://www.construct.net/en) games, like [DaggerQuest](https://www.DaggerQuest.com/) and [Plains of Shinar](https://PlainsOfShinar.com/).
-![Overlord Screenshot](images/screenshot.png)
+![Overlord Screenshot](images/screenshot.webp)
 
 ## Installation
 

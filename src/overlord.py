@@ -566,6 +566,19 @@ class ThemeManager:
         self.themes = THEME_COLORS
         self.widgets_to_theme = []
         self.ttk_style = None
+        self.theme_change_callbacks = []  # List of callbacks to call when theme changes
+        
+    def add_theme_change_callback(self, callback):
+        """Add a callback function to be called when the theme changes."""
+        self.theme_change_callbacks.append(callback)
+        
+    def _call_theme_change_callbacks(self):
+        """Call all registered theme change callbacks."""
+        for callback in self.theme_change_callbacks:
+            try:
+                callback()
+            except Exception as e:
+                logging.error(f"Error calling theme change callback: {e}")
         
     def get_color(self, color_name: str) -> str:
         """Get a color value for the current theme."""
@@ -648,6 +661,7 @@ class ThemeManager:
         
         self.current_theme = theme_name
         self.apply_theme_to_all()
+        self._call_theme_change_callbacks()  # Call registered callbacks
         logging.info(f"Switched to {theme_name} theme")
         return True
 
@@ -2193,19 +2207,16 @@ def main():
             except Exception as e:
                 logging.error(f'Error during background cleanup: {e}')
             finally:
-                # Ensure the application exits even if cleanup fails
-                try:
-                    root.quit()
-                    root.destroy()
-                except Exception as e:
-                    logging.error(f'Error destroying root window: {e}')
-                    # Force exit if normal cleanup fails
-                    import sys
-                    sys.exit(0)
+                # Ensure the application exits
+                logging.info('Exiting application...')
+                import os
+                os._exit(0)  # Force exit regardless of remaining threads
         
-        # Start cleanup in background thread (non-daemon so it completes)
-        cleanup_thread = threading.Thread(target=cleanup_background, daemon=False)
+        # Start cleanup in background daemon thread
+        cleanup_thread = threading.Thread(target=cleanup_background, daemon=True)
         cleanup_thread.start()
+        
+        # Don't call root.quit() or root.destroy() here - let the background thread handle exit
     
     root.protocol("WM_DELETE_WINDOW", on_closing)
 
@@ -2518,6 +2529,46 @@ def main():
     # For checkboxes, bind to the variable change
     render_shadows_var.trace_add('write', auto_save_settings)
 
+    # Helper function for processing display paths
+    def process_display_path(path):
+        """Process path for display: filter out admin paths, normalize slashes."""
+        if not path:
+            return ""
+        
+        # Don't display paths containing "admin" - return None to indicate no update should occur
+        if "admin" in path.lower():
+            return None
+        
+        # Replace backslashes with forward slashes
+        return path.replace('\\', '/')
+    
+    def open_file_location(path):
+        """Open the file location in Windows Explorer."""
+        if not path:
+            return
+        
+        try:
+            # Convert back to backslashes for Windows explorer
+            windows_path = path.replace('/', '\\')
+            
+            # If it's a zip path, extract the zip file path
+            if '.zip\\' in windows_path.lower():
+                zip_parts = windows_path.lower().split('.zip\\')
+                zip_file_path = zip_parts[0] + '.zip'
+                # Open the folder containing the zip file
+                subprocess.run(['explorer', '/select,', zip_file_path], check=False)
+            else:
+                # For regular files, try to select the file
+                if os.path.exists(windows_path):
+                    subprocess.run(['explorer', '/select,', windows_path], check=False)
+                else:
+                    # If file doesn't exist, try to open the parent directory
+                    parent_dir = os.path.dirname(windows_path)
+                    if os.path.exists(parent_dir):
+                        subprocess.run(['explorer', parent_dir], check=False)
+        except Exception as e:
+            logging.error(f"Error opening file location: {e}")
+
     # --- Last Rendered Image Section ---
     right_frame = tk.Frame(root)
     right_frame.place(relx=0.73, rely=0.0, anchor="n", width=1024, height=1024)
@@ -2543,14 +2594,52 @@ def main():
     details_title.pack(anchor="nw", pady=(0, 10))
     theme_manager.register_widget(details_title, "label")
 
-    # Show only the path (no "Path: " prefix)
-    details_path = tk.Label(details_frame, text="", font=("Consolas", 9), wraplength=330, justify="left")
-    details_path.pack(anchor="nw", pady=(0, 5))
+    # Show only the path (no "Path: " prefix) - make it clickable like a hyperlink
+    # Fixed height container to prevent shifting of elements below
+    path_container = tk.Frame(details_frame, height=60)  # Fixed height for ~4 lines
+    path_container.pack(anchor="nw", pady=(0, 5), fill="x")
+    path_container.pack_propagate(False)  # Prevent resizing based on content
+    theme_manager.register_widget(path_container, "frame")
+    
+    details_path = tk.Label(path_container, text="", font=("Consolas", 9), wraplength=330, justify="left", 
+                          cursor="hand2", anchor="nw")
+    details_path.pack(anchor="nw", fill="both", expand=True)
     theme_manager.register_widget(details_path, "label")
+    
+    # Apply hyperlink styling based on theme
+    def apply_hyperlink_style():
+        if theme_manager.current_theme == "light":
+            details_path.config(fg="blue")
+        else:
+            details_path.config(fg="#5DADE2")  # Light blue for dark theme
+    
+    apply_hyperlink_style()
+    
+    # Register the hyperlink style function to be called when theme changes
+    theme_manager.add_theme_change_callback(apply_hyperlink_style)
+    
+    # Store the current path for the click handler
+    details_path.current_path = ""
+    
+    def on_path_click(event):
+        """Handle click on path label."""
+        if details_path.current_path:
+            open_file_location(details_path.current_path)
+    
+    details_path.bind("<Button-1>", on_path_click)
+    
+    # Function to update the path display
+    def update_details_path(path):
+        """Update the details path with processing and store the original path."""
+        processed_path = process_display_path(path)
+        # Only update if the processed path is not None (None means don't update)
+        if processed_path is not None:
+            details_path.config(text=processed_path)
+            details_path.current_path = processed_path  # Store for click handler
 
     # Add a button to copy the path to clipboard
     def copy_path_to_clipboard():
-        path = details_path.cget("text")
+        path = details_path.current_path
         if path:
             root.clipboard_clear()
             root.clipboard_append(path)
@@ -2778,7 +2867,7 @@ def main():
                 file_size = os.path.getsize(newest_img_path)
                 # Always display the mapped output path instead of server path
                 display_path = map_server_path_to_output_path(newest_img_path)
-                details_path.config(text=display_path)  # No "Path: " prefix
+                update_details_path(display_path)  # Process and display path
                 details_dim.config(text=f"Dimensions: {width} x {height}")
                 details_size.config(text=f"Size: {file_size/1024:.1f} KB")
                 
@@ -2811,7 +2900,7 @@ def main():
             
             img_label.config(image="")
             img_label.image = None
-            details_path.config(text="")
+            update_details_path("")  # Clear the path
             details_dim.config(text="Dimensions: ")
             details_size.config(text="Size: ")
             no_img_label.lift()
@@ -2882,7 +2971,7 @@ def main():
             file_size = os.path.getsize(image_path)
             # Always display the mapped output path instead of server path
             display_path = map_server_path_to_output_path(image_path)
-            details_path.config(text=display_path)  # No "Path: " prefix
+            update_details_path(display_path)  # Process and display path
             details_dim.config(text=f"Dimensions: {width} x {height}")
             details_size.config(text=f"Size: {file_size/1024:.1f} KB")
             
@@ -2922,7 +3011,7 @@ def main():
                         if ".zip" in new_image_path.lower():
                             # Always display the mapped output path instead of server path
                             display_path = map_server_path_to_output_path(new_image_path)
-                            details_path.config(text=display_path)
+                            update_details_path(display_path)  # Process and display path
                             # Optionally update size by reading from zip
                             try:
                                 parts = new_image_path.split('\\')
