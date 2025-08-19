@@ -49,6 +49,27 @@ oSettings.setIntValue('Port', sPort);
 oSettings.setStringValue('Username', 'admin');
 oSettings.setStringValue('Password', 'admin');
 
+function checkIfFileExistsInZip(sZipPath, sFinalName) {
+
+	var oZipFile = new DzZipFile(sZipPath);
+
+	oZipFile.open(DzZipFile.ReadOnly);
+
+	var aFileNames = oZipFile.getFileNames();
+
+	oZipFile.close();
+
+	for (var nFileNameCounter = 0; nFileNameCounter < aFileNames.length; nFileNameCounter++) {
+
+		var sFileNameInZip = aFileNames[nFileNameCounter];
+
+		if (sFileNameInZip === sFinalName + '.png') {
+
+			return true;
+		}
+	}
+}
+
 // Obtain the desired name out of a filepath or filename.
 function getName(sFileName) {
 	return new DzFileInfo(sFileName).completeBaseName();
@@ -149,39 +170,23 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 		if (nOutputAngle <= -180) nOutputAngle += 360;
 
 		// Loop through each frame...
-		frameLoop: for (var nFrame = 0; nFrame <= nFramesTotal; nFrame++) {
+		for (var nFrame = 0; nFrame <= nFramesTotal; nFrame++) {
 			// Check if the current Daz instance should render this frame.
 			if ((nFrame - (nInstanceNumber - 1)) % nTotalNumberOfInstances != 0) continue;
 
 			var sFinalName = sSubjectName + (bIsShadow ? ' shadow_' : '_')
 			+ sAnimationName + '_' + nOutputAngle + '_' + ('000' + nFrame).slice(-3);
+			var sFinalNameWithExtension = sFinalName + '.png';
 
 			var sZipPath = sOutputDirectory + '/' + sSubjectName + (bIsShadow ? ' shadow' : '')
 				+ '/' + sAnimationName + '/' + sAnimationName + '_' + nOutputAngle + '.zip';
 
-			if(oOutputDirectory.exists(sZipPath)) {
+			if (checkIfFileExistsInZip(sZipPath, sFinalName)) {
 
-					var sFinalNameWithExtension = sFinalName + '.png';
-					var oZipFile = new DzZipFile(sZipPath);
+				App.log(sFinalNameWithExtension + ' already exists in zip. Skipping this frame.');
 
-					oZipFile.open(DzZipFile.ReadOnly);
-
-					var aFileNames = oZipFile.getFileNames();
-
-					oZipFile.close();
-
-					for (var nFileNameCounter = 0; nFileNameCounter < aFileNames.length; nFileNameCounter++) {
-
-						var sFileName = aFileNames[nFileNameCounter];
-
-						if (sFileName === sFinalNameWithExtension) {
-
-							App.log(sFinalNameWithExtension + ' already exists in zip. Skipping this frame.');
-
-							continue frameLoop;
-						}
-					}
-				}
+				continue;
+			}
 
 			App.log('Setting frame to ' + nFrame);
 			Scene.setFrame(nFrame);
@@ -234,15 +239,20 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 
 			oRenderer.exportRenderToBridgeQueue(sFinalName, 'png', oCamera, oRenderOptions, 0);
 
-			// Wait for the rendered PNG file to exist in the results directory
-			var sResultsDirectoryPath = oScriptArgs['results_directory_path'];
-			var sRenderedFilePath = sResultsDirectoryPath + '/admin/' + sFinalName + '/' + sFinalName + '.png';
-			while (!new DzFile(sRenderedFilePath).exists()) {
-				App.log('Waiting for rendered file: ' + sRenderedFilePath);
-				sleep(1000); // Wait 1 second before checking again
+			var nAttempts = 0;
+			while (!checkIfFileExistsInZip(sZipPath, sFinalName)) {
+
+				App.log('Attempt ' + nAttempts + ': Waiting for ' + sFinalName + ' to appear in ' + sZipPath);
+
+				sleep(1000);
+				nAttempts++;
+
+				if (nAttempts > 10) {
+					App.log('Waited more than 10 seconds for ' + sFinalName + '. Retrying this frame.');
+					nFrame--; // retry this frame
+					break;
+				}
 			}
-			App.log('Rendered file found: ' + sRenderedFilePath);
-			
 		}
 	}
 	if (bRenderShadows) {
