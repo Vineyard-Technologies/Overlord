@@ -13,8 +13,6 @@ var aPropAnimationFilepaths = oScriptArgs['prop_animations'].toString().split(',
 var aGearFilepaths = oScriptArgs['gear'].toString().split(',');
 var aGearAnimationFilepaths = oScriptArgs['gear_animations'].toString().split(',');
 var nDEGREES_IN_CIRCLE = 360;
-var nRENDERS_PER_SESSION = oScriptArgs['renders_per_session'];
-var nRenderCounter = 0;
 var nFrameRate = oScriptArgs['frame_rate'];
 var bRenderShadows = oScriptArgs['render_shadows'];
 var nDAZ_TICKS = 4800;
@@ -188,7 +186,7 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 			App.log('Setting frame to ' + nFrame);
 			Scene.setFrame(nFrame);
 			// Do this every frame, or else it will interpolate.
-			App.log('Setting Y rotation to ' + nAngle);
+			App.log('Setting root Y rotation to ' + nAngle);
 			oRootYRotControl.setValue(nAngle);
 
 			if (bIsShadow) {
@@ -230,17 +228,7 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 			} while (sHttpRequestError);
 
 			oRenderer.exportRenderToBridgeQueue(sFinalName, 'png', oCamera, oRenderOptions, 0);
-
-			nRenderCounter++;
-
-			if (nRenderCounter >= nRENDERS_PER_SESSION) {
-				
-				App.log('Render session limit reached. Exiting...');
-				
-				return;
-			}
 		}
-		return;
 	}
 	if (bRenderShadows) {
 		if (!bIsShadow) renderCore(sSubjectName, sAnimationName, bIsGear, true);
