@@ -240,16 +240,16 @@ if (thereAre(aAnimationFilepaths)) {
 
 		if (thereAre(aPropAnimationFilepaths)) {
 			for (var nPropAnimationCounter = 0; nPropAnimationCounter != aPropAnimationFilepaths.length; nPropAnimationCounter++) {
+				
 				var sPropAnimationFilepath = aPropAnimationFilepaths[nPropAnimationCounter];
-				// walk-LightningOrb
 				var sPropAnimationFileName = getName(sPropAnimationFilepath);
-				// walk
-				var sAnimationName = getName(sAnimationFilepath);
+				var aPropAnimationProperties = sPropAnimationFileName.split('-');
+				var sAnimationOfPropAnimation = aPropAnimationProperties.shift();
+				var sPropOfPropAnimation = aPropAnimationProperties.pop();
 
-				if (sPropAnimationFileName.indexOf(sAnimationName) !== -1) {
-					// LightningOrb
-					var sNameOfPropToAnimate = sPropAnimationFileName.split('-').pop();
-					var oProp = Scene.findNodeByLabel(sNameOfPropToAnimate);
+				if (sAnimationName == sAnimationOfPropAnimation) {
+					
+					var oProp = Scene.findNodeByLabel(sPropOfPropAnimation);
 
 					oSubject.select(false);
 					oProp.select(true);

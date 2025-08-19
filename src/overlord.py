@@ -1856,7 +1856,7 @@ def start_iray_server():
     """Start the Iray Server if it's not already running"""
     if is_iray_server_running():
         logging.info('Iray Server already running, skipping startup')
-        return
+        return True
     
     try:
         # Clean up iray_server.db and cache folder from both possible locations
@@ -1898,14 +1898,14 @@ def start_iray_server():
                     logging.info(f"Created directory: {vbs_dir}")
                 except Exception as e:
                     logging.error(f"Failed to create directory {vbs_dir}: {e}")
-                    return
+                    return False
             
             if not os.path.exists(working_dir):
                 try:
                     os.makedirs(working_dir, exist_ok=True)
                 except Exception as e:
                     logging.error(f"Failed to create working directory {working_dir}: {e}")
-                    return
+                    return False
         else:
             # Running from source
             vbs_path = os.path.join(os.path.dirname(__file__), "runIrayServer.vbs")
@@ -1914,14 +1914,39 @@ def start_iray_server():
         
         if not os.path.exists(vbs_path):
             logging.error(f"runIrayServer.vbs not found: {vbs_path}")
-            return
+            return False
             
         # Use subprocess instead of os.startfile to control working directory
         subprocess.Popen(['cscript', '//NoLogo', vbs_path], cwd=working_dir, 
                        creationflags=subprocess.CREATE_NO_WINDOW)
-        logging.info(f"Iray Server started automatically from working directory: {working_dir}")
+        logging.info(f"Iray Server started from working directory: {working_dir}")
+        
+        # Wait for the server to actually start up and become accessible
+        import socket
+        max_wait_time = 30  # Wait up to 30 seconds for server to start
+        wait_interval = 1  # Check every 1 second
+        
+        for attempt in range(max_wait_time):
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(2)
+                result = sock.connect_ex(('127.0.0.1', 9090))
+                sock.close()
+                
+                if result == 0:
+                    logging.info(f"Iray Server is now accessible on port 9090 (took {attempt + 1} seconds)")
+                    return True
+            except Exception:
+                pass
+            
+            time.sleep(wait_interval)
+        
+        logging.error("Iray Server failed to become accessible within 30 seconds")
+        return False
+        
     except Exception as e:
         logging.error(f"Failed to start Iray Server automatically: {e}")
+        return False
 
 # open_iray_server_web_interface function is now provided by iray_server_actions module
 
@@ -3150,10 +3175,12 @@ def main():
                 logging.info(f"Created fresh server output directory at: {server_output_dir}")
 
                 
-                start_iray_server()  # Start Iray Server
+                if not start_iray_server():  # Start Iray Server
+                    logging.error('Failed to start Iray Server')
+                    return  # Exit early if server startup failed
                 
-                # Wait for Iray server to start up (in background thread, so it won't block UI)
-                time.sleep(IRAY_STARTUP_DELAY / 1000)  # Convert to seconds
+                # Wait for Iray server to start up (reduced wait time since we now validate connectivity)
+                # time.sleep(IRAY_STARTUP_DELAY / 1000)  # Convert to seconds - no longer needed
                 
                 # Use intermediate server output directory for Iray Server configuration
                 
@@ -3210,11 +3237,13 @@ def main():
                                     logging.info('Cleanup complete, restarting Iray Server and Daz Studio...')
                                     
                                     # Restart Iray Server
-                                    start_iray_server()
+                                    if not start_iray_server():
+                                        logging.error('Failed to restart Iray Server')
+                                        raise Exception("Iray Server restart failed")
                                     logging.info('Iray Server restarted')
                                     
-                                    # Wait for Iray server to start up before configuring
-                                    time.sleep(IRAY_STARTUP_DELAY / 1000)  # Convert to seconds
+                                    # Wait time no longer needed since start_iray_server now validates connectivity
+                                    # time.sleep(IRAY_STARTUP_DELAY / 1000)  # Convert to seconds
                                     
                                     # Get server output directory path for reconfiguration
                                     server_output_dir = get_server_output_directory()

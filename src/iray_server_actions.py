@@ -92,6 +92,31 @@ class IrayServerActions:
         self.stop_requested = True
         logging.debug("Stop requested for IrayServerActions")
     
+    def _validate_iray_server_running(self):
+        """
+        Validate that Iray Server is running and accessible on port 9090
+        
+        Returns:
+            bool: True if server is accessible, False otherwise
+        """
+        import socket
+        try:
+            # Try to connect to the Iray Server port
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(5)  # 5 second timeout
+            result = sock.connect_ex(('127.0.0.1', 9090))
+            sock.close()
+            
+            if result == 0:
+                logging.info("Iray Server is running and accessible on port 9090")
+                return True
+            else:
+                logging.error("Cannot connect to Iray Server on port 9090 - server may not be running")
+                return False
+        except Exception as e:
+            logging.error(f"Error checking Iray Server connection: {e}")
+            return False
+
     def cleanup_driver(self):
         """
         Clean up the WebDriver session safely and ensure all connections are closed
@@ -273,12 +298,18 @@ class IrayServerActions:
             firefox_options.add_argument("--disable-dev-shm-usage")
             firefox_options.add_argument("--no-sandbox")
             firefox_options.add_argument("--disable-gpu")
-            firefox_options.add_argument("--disable-features=VizDisplayCompositor")
+            # Remove problematic VizDisplayCompositor option that causes DNS errors
+            # firefox_options.add_argument("--disable-features=VizDisplayCompositor")
             
             # Set Firefox preferences to optimize connection handling
             firefox_options.set_preference("network.http.max-connections", 10)
             firefox_options.set_preference("network.http.max-connections-per-server", 5)
             firefox_options.set_preference("network.http.max-persistent-connections-per-server", 2)
+            
+            # Validate that Iray Server is running before attempting connection
+            if not self._validate_iray_server_running():
+                logging.error("Iray Server is not running or not accessible on port 9090")
+                return False
             
             self.driver = webdriver.Firefox(options=firefox_options)
             logging.info("Successfully started Firefox WebDriver")
