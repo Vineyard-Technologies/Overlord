@@ -186,3 +186,6 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 src/iray_server.db-journal
+cache/cache.db
+cache/cache.db-journal
+iray_server.db

@@ -223,11 +223,26 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 
 				if (sHttpRequestError) {
 					App.log('HTTP request error: ' + sHttpRequestError);
+
+					sleep(1000);
+				}
+				else {
+					App.log('HTTP request successful.');
 				}
 
 			} while (sHttpRequestError);
 
 			oRenderer.exportRenderToBridgeQueue(sFinalName, 'png', oCamera, oRenderOptions, 0);
+
+			// Wait for the rendered PNG file to exist in the results directory
+			var sResultsDirectoryPath = oScriptArgs['results_directory_path'];
+			var sRenderedFilePath = sResultsDirectoryPath + '/admin/' + sFinalName + '/' + sFinalName + '.png';
+			while (!new DzFile(sRenderedFilePath).exists()) {
+				App.log('Waiting for rendered file: ' + sRenderedFilePath);
+				sleep(1000); // Wait 1 second before checking again
+			}
+			App.log('Rendered file found: ' + sRenderedFilePath);
+			
 		}
 	}
 	if (bRenderShadows) {
