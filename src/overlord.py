@@ -1925,62 +1925,50 @@ def start_iray_server():
                 shutil.rmtree(cache_dir_path)
                 logging.info(f"Cleaned up cache folder at: {cache_dir_path}")
         
-        # Reference and execute runIrayServer.ps1 from correct location
-        script_name = 'runIrayServer.ps1'
+        # Launch Iray Server directly using Python subprocess
+        iray_server_exe = r"C:\Program Files\NVIDIA Corporation\Iray Server\server\iray_server.exe"
+        iray_install_path = r"C:\Program Files\NVIDIA Corporation\Iray Server"
+        
+        # Set working directory based on execution context
         if getattr(sys, 'frozen', False):
-            # Running as PyInstaller executable - look in LocalAppData/scripts
-            scripts_dir = os.path.join(get_local_app_data_path(), 'scripts')
-            ps1_path = os.path.join(scripts_dir, script_name)
-            # Set working directory to LocalAppData/Overlord so Iray Server can create files there
+            # Running as PyInstaller executable - use LocalAppData
             working_dir = get_local_app_data_path()
-
-            # Ensure the directories exist
-            if not os.path.exists(scripts_dir):
-                try:
-                    os.makedirs(scripts_dir, exist_ok=True)
-                    logging.info(f"Created directory: {scripts_dir}")
-                except Exception as e:
-                    logging.error(f"Failed to create directory {scripts_dir}: {e}")
-                    return False
-
-            if not os.path.exists(working_dir):
-                try:
-                    os.makedirs(working_dir, exist_ok=True)
-                except Exception as e:
-                    logging.error(f"Failed to create working directory {working_dir}: {e}")
-                    return False
-
-            # If the PS1 isn't present in LocalAppData but exists in the source bundle, copy it there
-            source_ps1 = os.path.join(os.path.dirname(__file__), script_name)
-            if not os.path.exists(ps1_path) and os.path.exists(source_ps1):
-                try:
-                    shutil.copy2(source_ps1, ps1_path)
-                    logging.info(f"Copied {source_ps1} to {ps1_path} for runtime use")
-                except Exception as e:
-                    logging.error(f"Failed to copy {source_ps1} to {ps1_path}: {e}")
-                    return False
         else:
-            # Running from source
-            ps1_path = os.path.join(os.path.dirname(__file__), script_name)
-            # Set working directory to the source directory for development
+            # Running from source - use source directory
             working_dir = os.path.dirname(__file__)
-
-        if not os.path.exists(ps1_path):
-            logging.error(f"{script_name} not found: {ps1_path}")
+        
+        # Ensure working directory exists
+        if not os.path.exists(working_dir):
+            try:
+                os.makedirs(working_dir, exist_ok=True)
+                logging.info(f"Created working directory: {working_dir}")
+            except Exception as e:
+                logging.error(f"Failed to create working directory {working_dir}: {e}")
+                return False
+        
+        # Check if Iray Server executable exists
+        if not os.path.exists(iray_server_exe):
+            logging.error(f"Iray Server executable not found: {iray_server_exe}")
             return False
-
-        # Prefer PowerShell Core (pwsh) if available, otherwise fall back to Windows PowerShell
-        pwsh_exe = shutil.which('pwsh') or shutil.which('powershell') or 'powershell'
-
-        # Build command to run the PS1 script with an unrestricted execution policy for this process
-        cmd = [pwsh_exe, '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ps1_path]
-
-        # Launch the script without creating a visible window
+        
+        # Build command arguments
+        cmd = [
+            iray_server_exe,
+            '--install-path', iray_install_path,
+            '--start-queue'
+        ]
+        
+        # Launch Iray Server directly without creating a visible window
         try:
-            subprocess.Popen(cmd, cwd=working_dir, creationflags=subprocess.CREATE_NO_WINDOW)
-            logging.info(f"Iray Server started from working directory: {working_dir} using script: {ps1_path}")
+            # Use SW_HIDE flag through creationflags to keep the process hidden
+            subprocess.Popen(
+                cmd, 
+                cwd=working_dir, 
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            logging.info(f"Iray Server started from working directory: {working_dir} using direct executable: {iray_server_exe}")
         except Exception as e:
-            logging.error(f"Failed to launch PowerShell script {ps1_path}: {e}")
+            logging.error(f"Failed to launch Iray Server executable {iray_server_exe}: {e}")
             return False
         
         # Wait for the server to actually start up and become accessible
