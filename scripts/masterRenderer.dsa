@@ -30,11 +30,24 @@ var oEnvironmentModeProperty;
 var oRoot;
 var oShadowPlane;
 var oSettings = new DzSettings();
+var oHttpHelper = new DzHttpHelper();
+var oHttp = new DzHttpHelper();
+
+var sAddress = '127.0.0.1';
+var sPort = 9090;
+var sSecurity = 'http';
+var sSecureProtocol = 'https';
+
+oHttp.setConnectionMode(sSecurity);
+oHttp.setHost(sAddress);
+oHttp.setPort(sPort);
+oHttp.setPath("/");
+oHttp.setRequestMethod("GET");
 
 oSettings.setIntValue('Connection', 0);
-oSettings.setStringValue('Server', '127.0.0.1');
-oSettings.setBoolValue('Secure', false);
-oSettings.setIntValue('Port', 9090);
+oSettings.setStringValue('Server', sAddress);
+oSettings.setBoolValue('Secure', sSecurity == sSecureProtocol);
+oSettings.setIntValue('Port', sPort);
 oSettings.setStringValue('Username', 'admin');
 oSettings.setStringValue('Password', 'admin');
 
@@ -197,7 +210,25 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 			while (backgroundProgressIsActive()) processEvents();
 
 			App.log('Sending render to Iray Server...');
-			// return;
+			
+			var sHttpRequestError;
+
+			do {
+
+				// This returns a truthy byteArray regardless of the status
+				// of the server, so we're not using it to check server status.
+				oHttp.doSynchronousRequest();
+
+				// This returns an empty string upon successful connection,
+				// otherwise it returns the error as a string.
+				sHttpRequestError = oHttp.getError();
+
+				if (sHttpRequestError) {
+					App.log('HTTP request error: ' + sHttpRequestError);
+				}
+
+			} while (sHttpRequestError);
+
 			oRenderer.exportRenderToBridgeQueue(sFinalName, 'png', oCamera, oRenderOptions, 0);
 
 			nRenderCounter++;
