@@ -359,9 +359,36 @@ class IrayServerActions:
             
             # Set image storage path
             # Wait for the image storage path input to be present before interacting
-            global_image_storage_path_input = WebDriverWait(self.driver, self.default_timeout).until(
-                EC.presence_of_element_located((By.XPATH, IrayServerXPaths.settingsPage.GLOBAL_IMAGE_STORAGE_PATH_INPUT))
-            )
+            # Try finding the element, and if it fails, refresh the page and try again
+            max_retries = 2
+            global_image_storage_path_input = None
+            
+            for attempt in range(max_retries):
+                try:
+                    global_image_storage_path_input = WebDriverWait(self.driver, self.default_timeout).until(
+                        EC.presence_of_element_located((By.XPATH, IrayServerXPaths.settingsPage.GLOBAL_IMAGE_STORAGE_PATH_INPUT))
+                    )
+                    logging.info(f"Found global image storage path input on attempt {attempt + 1}")
+                    break
+                except TimeoutException:
+                    if attempt < max_retries - 1:
+                        logging.warning(f"Could not find global image storage path input on attempt {attempt + 1}, refreshing page...")
+                        # Refresh the settings page
+                        settings_url = f"{self.base_url}/index.html#settings"
+                        self.driver.get(settings_url)
+                        
+                        # Wait for the page to load again
+                        if not self.wait_for_page_ready():
+                            logging.warning("Settings page took longer than expected to load after refresh")
+                        else:
+                            logging.info("Settings page refreshed and loaded successfully")
+                    else:
+                        logging.error("Failed to find global image storage path input after all retry attempts")
+                        raise
+            
+            if global_image_storage_path_input is None:
+                logging.error("Global image storage path input element not found after retries")
+                return False
             global_image_storage_path_input.clear()
             global_image_storage_path_input.send_keys(storage_path.replace('/', '\\'))
             logging.info(f"Set image storage path to: {storage_path}")

@@ -35,7 +35,7 @@ from version import __version__ as overlord_version
 # Application constants
 DEFAULT_MAX_WORKERS = 8
 LOG_SIZE_MB = 100
-RENDERS_PER_SESSION = 10
+RENDERS_PER_SESSION = 100
 RECENT_RENDER_TIMES_LIMIT = 25
 
 # UI update intervals (milliseconds)
@@ -2105,6 +2105,18 @@ def cleanup_single_instance():
         pass
 
 def main():
+    def create_daz_command_array(daz_executable_path, json_map, log_size, render_script_path):
+        """Create the DAZ Studio command array with all required parameters."""
+        return [
+            daz_executable_path,
+            "-scriptArg", json_map,
+            "-instanceName", "#",
+            "-logSize", str(log_size),
+            # "-headless",
+            "-noPrompt", 
+            render_script_path
+        ]
+    
     def update_estimated_time_remaining(images_remaining):
         # Get user profile directory
         user_profile = os.environ.get('USERPROFILE') or os.path.expanduser('~')
@@ -3346,21 +3358,17 @@ def main():
                                                     )
                                                     log_size = LOG_SIZE_MB * 1000000
                                                     
+                                                    def create_daz_command():
+                                                        """Create the DAZ Studio command array with all required parameters."""
+                                                        return create_daz_command_array(daz_executable_path, json_map, log_size, render_script_path)
+                                                    
                                                     try:
                                                         num_instances_int = int(num_instances)
                                                     except Exception:
                                                         num_instances_int = 1
                                                     
                                                     def run_restart_instance():
-                                                        command = [
-                                                            daz_executable_path,
-                                                            "-scriptArg", json_map,
-                                                            "-instanceName", "#",
-                                                            "-logSize", str(log_size),
-                                                            "-headless",
-                                                            "-noPrompt", 
-                                                            render_script_path
-                                                        ]
+                                                        command = create_daz_command()
                                                         try:
                                                             subprocess.Popen(command)
                                                             logging.info('Daz Studio restart instance launched')
@@ -3583,17 +3591,13 @@ def main():
             f'}}'
         )
 
+        def create_daz_command():
+            """Create the DAZ Studio command array with all required parameters."""
+            return create_daz_command_array(daz_executable_path, json_map, log_size, render_script_path)
+
         def run_instance():
             logging.info('Launching Daz Studio render instance')
-            command = [
-                daz_executable_path,
-                "-scriptArg", json_map,
-                "-instanceName", "#",
-                "-logSize", str(log_size),
-                "-headless",
-                "-noPrompt", 
-                render_script_path
-            ]
+            command = create_daz_command()
             logging.info(f'Command executed: {command}')
             try:
                 subprocess.Popen(command)

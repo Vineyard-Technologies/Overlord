@@ -17,7 +17,6 @@ var nRENDERS_PER_SESSION = oScriptArgs['renders_per_session'];
 var nRenderCounter = 0;
 var nFrameRate = oScriptArgs['frame_rate'];
 var bRenderShadows = oScriptArgs['render_shadows'];
-var bCloseDazOnFinish = oScriptArgs['close_daz_on_finish'];
 var nDAZ_TICKS = 4800;
 var nTicksPerFrame = nDAZ_TICKS / nFrameRate;
 var bOverwriteExistingImages = false;
@@ -75,6 +74,7 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 	oDrawGroundProperty = oEnvironmentOptionsPropertyGroups.findProperty('Draw Ground');
 	oEnvironmentModeProperty = oEnvironmentOptionsPropertyGroups.findProperty('Environment Mode');
 	oRoot = Scene.findNodeByLabel('root');
+	oRootYRotControl = oRoot.getYRotControl();
 	oShadowPlane = Scene.findNodeByLabel('shadowPlane');
 	var oCamera = Scene.findCameraByLabel('isometricCamera');
 
@@ -172,9 +172,11 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 					}
 				}
 
+			App.log('Setting frame to ' + nFrame);
 			Scene.setFrame(nFrame);
 			// Do this every frame, or else it will interpolate.
-			oRoot.getYRotControl().setValue(nAngle);
+			App.log('Setting Y rotation to ' + nAngle);
+			oRootYRotControl.setValue(nAngle);
 
 			if (bIsShadow) {
 				// Scene Only
@@ -195,6 +197,7 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 			while (backgroundProgressIsActive()) processEvents();
 
 			App.log('Sending render to Iray Server...');
+			// return;
 			oRenderer.exportRenderToBridgeQueue(sFinalName, 'png', oCamera, oRenderOptions, 0);
 
 			nRenderCounter++;
@@ -206,6 +209,7 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 				return;
 			}
 		}
+		return;
 	}
 	if (bRenderShadows) {
 		if (!bIsShadow) renderCore(sSubjectName, sAnimationName, bIsGear, true);
@@ -289,4 +293,4 @@ if (thereAre(aAnimationFilepaths)) {
 	renderCore(sSubjectName, 'static', false, false);
 }
 
-if (bCloseDazOnFinish) App.delayedExit();
+// App.delayedExit();
