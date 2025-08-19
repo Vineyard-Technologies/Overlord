@@ -1925,43 +1925,63 @@ def start_iray_server():
                 shutil.rmtree(cache_dir_path)
                 logging.info(f"Cleaned up cache folder at: {cache_dir_path}")
         
-        # Reference and execute runIrayServer.vbs from correct location
+        # Reference and execute runIrayServer.ps1 from correct location
+        script_name = 'runIrayServer.ps1'
         if getattr(sys, 'frozen', False):
-            # Running as PyInstaller executable - look in LocalAppData
-            vbs_dir = os.path.join(get_local_app_data_path(), 'scripts')
-            vbs_path = os.path.join(vbs_dir, 'runIrayServer.vbs')
+            # Running as PyInstaller executable - look in LocalAppData/scripts
+            scripts_dir = os.path.join(get_local_app_data_path(), 'scripts')
+            ps1_path = os.path.join(scripts_dir, script_name)
             # Set working directory to LocalAppData/Overlord so Iray Server can create files there
             working_dir = get_local_app_data_path()
-            
-            # Ensure the directories exist (backup safety check)
-            if not os.path.exists(vbs_dir):
+
+            # Ensure the directories exist
+            if not os.path.exists(scripts_dir):
                 try:
-                    os.makedirs(vbs_dir, exist_ok=True)
-                    logging.info(f"Created directory: {vbs_dir}")
+                    os.makedirs(scripts_dir, exist_ok=True)
+                    logging.info(f"Created directory: {scripts_dir}")
                 except Exception as e:
-                    logging.error(f"Failed to create directory {vbs_dir}: {e}")
+                    logging.error(f"Failed to create directory {scripts_dir}: {e}")
                     return False
-            
+
             if not os.path.exists(working_dir):
                 try:
                     os.makedirs(working_dir, exist_ok=True)
                 except Exception as e:
                     logging.error(f"Failed to create working directory {working_dir}: {e}")
                     return False
+
+            # If the PS1 isn't present in LocalAppData but exists in the source bundle, copy it there
+            source_ps1 = os.path.join(os.path.dirname(__file__), script_name)
+            if not os.path.exists(ps1_path) and os.path.exists(source_ps1):
+                try:
+                    shutil.copy2(source_ps1, ps1_path)
+                    logging.info(f"Copied {source_ps1} to {ps1_path} for runtime use")
+                except Exception as e:
+                    logging.error(f"Failed to copy {source_ps1} to {ps1_path}: {e}")
+                    return False
         else:
             # Running from source
-            vbs_path = os.path.join(os.path.dirname(__file__), "runIrayServer.vbs")
+            ps1_path = os.path.join(os.path.dirname(__file__), script_name)
             # Set working directory to the source directory for development
             working_dir = os.path.dirname(__file__)
-        
-        if not os.path.exists(vbs_path):
-            logging.error(f"runIrayServer.vbs not found: {vbs_path}")
+
+        if not os.path.exists(ps1_path):
+            logging.error(f"{script_name} not found: {ps1_path}")
             return False
-            
-        # Use subprocess instead of os.startfile to control working directory
-        subprocess.Popen(['cscript', '//NoLogo', vbs_path], cwd=working_dir, 
-                       creationflags=subprocess.CREATE_NO_WINDOW)
-        logging.info(f"Iray Server started from working directory: {working_dir}")
+
+        # Prefer PowerShell Core (pwsh) if available, otherwise fall back to Windows PowerShell
+        pwsh_exe = shutil.which('pwsh') or shutil.which('powershell') or 'powershell'
+
+        # Build command to run the PS1 script with an unrestricted execution policy for this process
+        cmd = [pwsh_exe, '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ps1_path]
+
+        # Launch the script without creating a visible window
+        try:
+            subprocess.Popen(cmd, cwd=working_dir, creationflags=subprocess.CREATE_NO_WINDOW)
+            logging.info(f"Iray Server started from working directory: {working_dir} using script: {ps1_path}")
+        except Exception as e:
+            logging.error(f"Failed to launch PowerShell script {ps1_path}: {e}")
+            return False
         
         # Wait for the server to actually start up and become accessible
         import socket
