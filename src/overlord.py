@@ -11,10 +11,8 @@ import webbrowser
 import zipfile
 import time
 import threading
-import warnings
 import numpy as np
-import msvcrt
-from concurrent.futures import ThreadPoolExecutor  # For parallel file processing
+from concurrent.futures import ThreadPoolExecutor
 from PIL import Image, ImageTk
 import tkinter as tk
 from tkinter import filedialog
@@ -23,10 +21,8 @@ import winreg
 import psutil
 import atexit
 import tempfile
-from pathlib import Path
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
-# from iray_server_actions import IrayServerActions  # Commented out - no longer using Iray Server web UI
 from version import __version__ as overlord_version
 
 # ============================================================================
@@ -36,12 +32,11 @@ from version import __version__ as overlord_version
 # Application constants
 DEFAULT_MAX_WORKERS = 8
 LOG_SIZE_MB = 100
-RENDERS_PER_SESSION = 10
+RENDERS_PER_SESSION = 50
 RECENT_RENDER_TIMES_LIMIT = 25
 MAX_CONCURRENT_CONVERSIONS = 4  # Allow multiple EXR conversions to run in parallel
 
 # UI update intervals (milliseconds)
-IMAGE_UPDATE_INTERVAL = 1000          # Legacy polling interval (deprecated)
 OUTPUT_UPDATE_INTERVAL = 5000
 AUTO_SAVE_DELAY = 2000
 
@@ -57,8 +52,7 @@ SCENE_EXTENSIONS = ('.duf',)
 # Default paths
 DEFAULT_OUTPUT_SUBDIR = "Downloads/output"
 APPDATA_SUBFOLDER = "Overlord"
-# SERVER_OUTPUT_SUBDIR = "Overlord Server Output"  # Old location - now using "results" in same dir as iray_server.db
-SERVER_OUTPUT_SUBDIR = "results"  # New location - same directory as iray_server.db and cache
+SERVER_OUTPUT_SUBDIR = "results"
 
 # UI dimensions
 SPLASH_WIDTH = 400
@@ -86,7 +80,6 @@ THEME_COLORS = {
 # Process names for monitoring
 DAZ_STUDIO_PROCESSES = ['DAZStudio']
 IRAY_SERVER_PROCESSES = ['iray_server.exe', 'iray_server_worker.exe']
-# WEBDRIVER_PROCESSES = ['geckodriver']  # Commented out - no longer using browser/webdriver
 
 # Error messages
 ERROR_MESSAGES = {
@@ -101,7 +94,7 @@ ERROR_MESSAGES = {
 # Validation limits
 VALIDATION_LIMITS = {
     "max_instances": 16, "min_instances": 1, "max_frame_rate": 120, "min_frame_rate": 1,
-    "max_file_wait_time": 10, "png_stability_wait": 3,  # Reduced wait times for faster processing
+    "max_file_wait_time": 10, "png_stability_wait": 3,
 }
 
 # UI text constants
@@ -309,19 +302,17 @@ def stop_iray_server() -> int:
 
 def stop_all_render_processes() -> dict:
     """Stop all render-related processes. Returns counts of stopped processes."""
-    logging.info('Stopping all render-related processes (DAZStudio, Iray Server)')  # Removed webdrivers
+    logging.info('Stopping all render-related processes (DAZStudio, Iray Server)')
     
     results = {
         'daz_studio': kill_processes_by_name(DAZ_STUDIO_PROCESSES),
         'iray_server': stop_iray_server(),
-        # 'webdrivers': kill_processes_by_name(WEBDRIVER_PROCESSES)  # Commented out - no longer using webdrivers
     }
     
     total = sum(results.values())
     logging.info(f'Stopped {total} total process(es): '
                 f'{results["daz_studio"]} DAZ Studio, '
-                f'{results["iray_server"]} Iray Server')  # Removed webdriver count
-                # f'{results["webdrivers"]} webdriver')  # Commented out
+                f'{results["iray_server"]} Iray Server')
     
     return results
 
@@ -393,7 +384,7 @@ def wait_for_file_stability(file_path: str, max_wait_time: int = None) -> bool:
         try:
             # Try to get file size twice with a small delay
             size1 = os.path.getsize(file_path)
-            time.sleep(0.05)  # Reduced from 0.1s to 0.05s
+            time.sleep(0.05)
             if not os.path.exists(file_path):
                 return False
             size2 = os.path.getsize(file_path)
@@ -401,8 +392,8 @@ def wait_for_file_stability(file_path: str, max_wait_time: int = None) -> bool:
                 return True
         except (OSError, FileNotFoundError):
             return False
-        time.sleep(0.2)  # Reduced from 0.5s to 0.2s
-        wait_time += 0.25  # Adjusted timing
+        time.sleep(0.2)
+        wait_time += 0.25
     return False
 
 def is_image_transparent(image_path: str) -> bool:
@@ -556,9 +547,6 @@ def create_splash_screen() -> tuple:
     return splash, status_label
 
 
-# ============================================================================
-# ENHANCED THEME MANAGER
-# ============================================================================
 # ============================================================================
 # ENHANCED THEME MANAGER
 # ============================================================================
@@ -875,15 +863,14 @@ class ExrFileHandler(FileSystemEventHandler):
         super().__init__()
         self.output_directory = output_directory
         self.update_gui_callback = update_gui_callback
-        self.image_update_callback = None  # New callback for UI image updates
+        self.image_update_callback = None 
         self.processed_files = set()  # Track processed EXR files
         self.processed_png_files = set()  # Track PNG files that have been transparency-processed
         self.conversion_queue = []
-        # Replace single thread with thread pool for parallel processing
         self.executor = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_CONVERSIONS, thread_name_prefix="EXR-Converter")
         self.stop_conversion = False
         self.final_output_directory = output_directory
-        self._lock = threading.Lock()  # Thread safety lock
+        self._lock = threading.Lock()
         self.conversion_stats = {
             'total': 0,
             'successful': 0,
@@ -906,47 +893,39 @@ class ExrFileHandler(FileSystemEventHandler):
         """Set the final output directory where processed PNGs should be moved."""
         self.final_output_directory = final_output_directory
     
-    def on_created(self, event):
-        """Handle new file creation events."""
-        if not event.is_directory:
-            # Check if we should stop processing early
+    def _process_file_event(self, file_path: str, process_png: bool = True):
+        """Common logic for processing file events (creation/move)."""
+        # Check if we should stop processing early
+        if self.stop_conversion:
+            return
+            
+        if file_path.lower().endswith('.exr'):
+            self.add_to_conversion_queue(file_path)
+        elif file_path.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif', '.tiff', '.webp')):
+            # Check again before processing
             if self.stop_conversion:
                 return
                 
-            if event.src_path.lower().endswith('.exr'):
-                self.add_to_conversion_queue(event.src_path)
-            elif event.src_path.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif', '.tiff', '.webp')):
-                # Check again before processing
-                if self.stop_conversion:
-                    return
-                    
-                # Notify UI of new image file
-                self._notify_image_update(event.src_path)
-                if event.src_path.lower().endswith('.png'):
-                    # Only process if not already processed and not stopping
-                    if event.src_path not in self.processed_png_files and not self.stop_conversion:
-                        # Process PNG with transparency check before handling
-                        processed_path = self.process_transparent_image(event.src_path)
-                        self.handle_png_file(processed_path)
+            # Notify UI of new image file
+            self._notify_image_update(file_path)
+            if process_png and file_path.lower().endswith('.png'):
+                # Only process if not already processed and not stopping
+                if file_path not in self.processed_png_files and not self.stop_conversion:
+                    # Process PNG with transparency check before handling
+                    processed_path = self.process_transparent_image(file_path)
+                    self.handle_png_file(processed_path)
+
+    def on_created(self, event):
+        """Handle new file creation events."""
+        if not event.is_directory:
+            self._process_file_event(event.src_path, process_png=True)
     
     def on_moved(self, event):
         """Handle file move events."""
         if not event.is_directory:
-            # Check if we should stop processing early
-            if self.stop_conversion:
-                return
-                
-            if event.dest_path.lower().endswith('.exr'):
-                self.add_to_conversion_queue(event.dest_path)
-            elif event.dest_path.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif', '.tiff', '.webp')):
-                # Check again before processing
-                if self.stop_conversion:
-                    return
-                    
-                # Notify UI of new image file
-                self._notify_image_update(event.dest_path)
-                # Don't process PNG files on move events - they're likely renames during processing
-                # PNG processing should only happen on creation or EXR conversion completion
+            # Don't process PNG files on move events - they're likely renames during processing
+            # PNG processing should only happen on creation or EXR conversion completion
+            self._process_file_event(event.dest_path, process_png=False)
     
     def _notify_image_update(self, image_path: str):
         """Notify the UI that a new image is available."""
@@ -973,7 +952,7 @@ class ExrFileHandler(FileSystemEventHandler):
                 
                 # Submit conversion task to thread pool for immediate parallel processing
                 try:
-                    future = self.executor.submit(self._convert_exr_task, exr_path)
+                    self.executor.submit(self._convert_exr_task, exr_path)
                 except Exception as e:
                     logging.error(f'Failed to submit EXR conversion task: {e}')
     
@@ -987,10 +966,6 @@ class ExrFileHandler(FileSystemEventHandler):
             with self._lock:
                 self.conversion_stats['failed'] += 1
     
-    def start_conversion_thread(self):
-        """Legacy method - now using thread pool instead."""
-        pass  # No longer needed with thread pool
-    
     def stop_conversion_thread(self):
         """Stop the conversion processing and shut down thread pool."""
         with self._lock:
@@ -1003,8 +978,6 @@ class ExrFileHandler(FileSystemEventHandler):
                 logging.info('EXR conversion thread pool shutdown initiated')
             except Exception as e:
                 logging.error(f'Error shutting down EXR conversion thread pool: {e}')
-    
-    # Removed process_conversion_queue method - now using thread pool for immediate parallel processing
     
     def convert_exr_to_png(self, exr_path: str) -> bool:
         """Convert a single EXR file to PNG with enhanced error handling."""
@@ -1432,7 +1405,6 @@ class ExrFileHandler(FileSystemEventHandler):
             base_name = '_'.join(parts[:-3])
             animation = parts[-3]
             frame_group = parts[-2]
-            # frame_number = parts[-1]  # We don't need this for folder structure
             
             return (base_name, animation, frame_group)
             
@@ -1613,10 +1585,8 @@ class CleanupManager:
         self.cleanup_registered = False
         self.save_settings_callback = None
         self.settings_saved_on_close = False
-        # self.browser_driver = None  # Commented out - no longer using browser
         self.file_observer = None
         self.exr_handler = None
-        # self.iray_actions = None  # Commented out - no longer using IrayServerActions
     
     def register_temp_file(self, filepath):
         """Register a temporary file for cleanup"""
@@ -1629,14 +1599,6 @@ class CleanupManager:
     def register_executor(self, executor):
         """Register a thread pool executor for cleanup"""
         self.executor = executor
-    
-    # def register_browser_driver(self, driver):  # Commented out - no longer using browser
-    #     """Register a browser driver for cleanup"""
-    #     self.browser_driver = driver
-    
-    # def register_iray_actions(self, iray_actions):  # Commented out - no longer using IrayServerActions
-    #     """Register an IrayServerActions instance for cleanup and stop operations"""
-    #     self.iray_actions = iray_actions
     
     def register_settings_callback(self, callback):
         """Register a callback to save settings on exit"""
@@ -1731,46 +1693,6 @@ class CleanupManager:
         try:
             # Stop file monitoring first
             self.stop_file_monitoring()
-            
-            # # Close browser driver if exists - COMMENTED OUT - no longer using browser
-            # if self.browser_driver:
-            #     try:
-            #         # Check if we can access the driver session before attempting cleanup
-            #         try:
-            #             # Test if session is still active with a minimal operation
-            #             self.browser_driver.current_url
-            #             session_active = True
-            #         except Exception:
-            #             session_active = False
-            #         
-            #         if session_active:
-            #             # Only attempt advanced cleanup if session is active
-            #             try:
-            #                 # Close any open windows
-            #                 for handle in self.browser_driver.window_handles:
-            #                     try:
-            #                         self.browser_driver.switch_to.window(handle)
-            #                         self.browser_driver.close()
-            #                     except Exception:
-            #                         pass
-            #             except Exception:
-            #                 pass  # Ignore window cleanup errors
-            #         
-            #         # Always attempt to quit, regardless of session state
-            #         self.browser_driver.quit()
-            #         logging.info('Browser driver closed via cleanup manager')
-            #     except Exception as e:
-            #         error_msg = str(e).lower()
-            #         if any(phrase in error_msg for phrase in [
-            #             "connection broken", "connection refused",
-            #             "without establishing a connection", "invalidsessionid",
-            #             "session not created", "session deleted"
-            #         ]):
-            #             logging.info('Browser driver was already closed or unreachable')
-            #         else:
-            #             logging.warning(f'Error during browser driver cleanup (non-critical): {e}')
-            #     finally:
-            #         self.browser_driver = None
             
             # Stop Iray Server processes
             self.stop_iray_server()
@@ -1998,8 +1920,6 @@ def start_iray_server():
         logging.error(f"Failed to start Iray Server automatically: {e}")
         return False
 
-# open_iray_server_web_interface function is now provided by iray_server_actions module
-
 # ============================================================================
 # SINGLE INSTANCE MANAGEMENT
 # ============================================================================
@@ -2162,7 +2082,7 @@ def main():
             "-scriptArg", json_map,
             "-instanceName", "#",
             "-logSize", str(log_size),
-            # "-headless",
+            "-headless",
             "-noPrompt", 
             render_script_path
         ]
@@ -2244,7 +2164,6 @@ def main():
     status_label.config(text="Loading application...")
     splash.update()
     
-    # Give browser a moment to open
     time.sleep(1)
     
     # Close splash screen
@@ -3196,7 +3115,7 @@ def main():
             try:
                 # First, ensure all render-related processes are stopped
                 logging.info('Start Render button clicked')
-                logging.info('Closing any existing Iray Server, DAZ Studio, and webdriver instances...')
+                logging.info('Closing any existing Iray Server and DAZ Studio instances...')
                 
                 # Stop file monitoring first to prevent conflicts
                 cleanup_manager.stop_file_monitoring()
@@ -3240,26 +3159,6 @@ def main():
                 if not start_iray_server():  # Start Iray Server
                     logging.error('Failed to start Iray Server')
                     return  # Exit early if server startup failed
-                
-                # Wait for Iray server to start up (reduced wait time since we now validate connectivity)
-                # time.sleep(IRAY_STARTUP_DELAY / 1000)  # Convert to seconds - no longer needed
-                
-                # Use intermediate server output directory for Iray Server configuration
-                
-                # # COMMENTED OUT - No longer using Iray Server web UI
-                # iray_actions = IrayServerActions(cleanup_manager)
-                # 
-                # # Register the iray_actions instance for cleanup and stop operations
-                # cleanup_manager.register_iray_actions(iray_actions)
-                # 
-                # # Configure Iray Server (starts browser, configures settings, keeps browser open)
-                # if not iray_actions.configure_server(server_output_dir, RENDERS_PER_SESSION):
-                #     logging.error('Failed to configure Iray Server')
-                #     # Shutdown Iray Server since configuration failed
-                #     cleanup_manager.stop_iray_server()
-                #     raise Exception("Iray Server configuration failed")
-                # 
-                # logging.info('Iray Server configuration complete')
                 
                 logging.info('Iray Server started - skipping web UI configuration')
                 
@@ -3318,26 +3217,6 @@ def main():
                             # Move heavy operations to background thread to avoid freezing UI
                             def cleanup_and_restart_background():
                                 try:
-                                    # # First, properly close the WebDriver session to prevent connection errors - COMMENTED OUT
-                                    # try:
-                                    #     # Check if we have an existing iray_actions instance with a driver
-                                    #     if hasattr(iray_actions, 'driver') and iray_actions.driver:
-                                    #         # Use the existing instance's cleanup method directly
-                                    #         iray_actions.cleanup_driver()
-                                    #         logging.info("Cleaned up WebDriver session before restart")
-                                    #     else:
-                                    #         logging.debug("No WebDriver session to clean up")
-                                    # except Exception as driver_cleanup_e:
-                                    #     # Check if this is a session-related error that we can safely ignore
-                                    #     error_msg = str(driver_cleanup_e).lower()
-                                    #     if any(phrase in error_msg for phrase in [
-                                    #         "without establishing a connection", "invalidsessionid",
-                                    #         "session not created", "session deleted", "connection refused"
-                                    #     ]):
-                                    #         logging.debug("WebDriver session was already closed or invalid")
-                                    #     else:
-                                    #         logging.warning(f"Error cleaning up WebDriver session: {driver_cleanup_e}")
-                                    
                                     # Stop Iray Server processes only (keep DAZ Studio running)
                                     cleanup_manager.stop_iray_server()
                                     
@@ -3351,10 +3230,6 @@ def main():
                                         logging.error('Failed to restart Iray Server')
                                         raise Exception("Iray Server restart failed")
                                     logging.info('Iray Server restarted')
-                                    
-                                    # Wait time no longer needed since start_iray_server now validates connectivity
-                                    # time.sleep(IRAY_STARTUP_DELAY / 1000)  # Convert to seconds
-                                    
                                     # Get server output directory path for reconfiguration
                                     server_output_dir = get_server_output_directory()
                                     
@@ -3365,53 +3240,7 @@ def main():
                                     os.makedirs(server_output_dir, exist_ok=True)
                                     logging.info(f"Recreated server output directory: {server_output_dir}")
                                     
-                                    # # Create new IrayServerActions instance and reconfigure - COMMENTED OUT
-                                    # iray_actions_restart = IrayServerActions(cleanup_manager)
-                                    # if iray_actions_restart.configure_server(server_output_dir, RENDERS_PER_SESSION):
-                                    #     logging.info('Iray Server reconfigured successfully')
-                                    #     
-                                    #     # Start new background monitoring for the next render cycle
-                                    #     def wait_for_next_completion():
-                                    #         try:
-                                    #             # Create a new callback for the next cycle to avoid recursion
-                                    #             def on_next_renders_complete():
-                                    #                 logging.info('Next render cycle completed - starting Iray Server cleanup and restart...')
-                                    #                 root.after(0, on_renders_complete)  # Reuse the same cleanup logic
-                                    #             
-                                    #             def schedule_next_cleanup():
-                                    #                 root.after(0, on_next_renders_complete)
-                                    #             
-                                    #             if iray_actions_restart.wait_for_render_completion(RENDERS_PER_SESSION, schedule_next_cleanup):
-                                    #                 logging.info('Next render cycle completed successfully')
-                                    #             else:
-                                    #                 # Check if this was due to a stop request before logging as a warning
-                                    #                 if iray_actions_restart.stop_requested:
-                                    #                     logging.info('Next render completion check stopped due to stop request')
-                                    #                 else:
-                                    #                     logging.warning('Next render completion check failed or timed out')
-                                    #         except Exception as e:
-                                    
                                     logging.info('Iray Server restarted - skipping web UI reconfiguration')
-                                    
-                                    # No longer need to monitor for completion via web UI
-                                    # Just log that we're ready for the next cycle
-                                    # 
-                                    #             logging.error(f'Error in next render completion monitoring: {e}')
-                                    #     
-                                    #     next_completion_thread = threading.Thread(target=wait_for_next_completion, daemon=True)
-                                    #     next_completion_thread.start()
-                                    #     
-                                    #     # Since DAZ Studio no longer needs to restart when Iray Server restarts,
-                                    #     # we just need to restart file monitoring for the existing DAZ instances
-                                    #     logging.info('Restarting file monitoring for existing DAZ Studio instances')
-                                    #     server_output_dir = get_server_output_directory()
-                                    #     image_output_dir = value_entries["Output Directory"].get().replace("\\", "/")
-                                    #     cleanup_manager.start_file_monitoring(server_output_dir, image_output_dir, watchdog_image_update)
-                                    #     
-                                    # else:
-                                    #     logging.error('Failed to reconfigure Iray Server after restart')
-                                    #     # Re-enable Start Render button if reconfiguration fails - schedule on main thread
-                                    #     root.after(0, lambda: (button.config(state="normal"), stop_button.config(state="disabled")))
                                     
                                     # Since DAZ Studio no longer needs to restart when Iray Server restarts,
                                     # we just need to restart file monitoring for the existing DAZ instances
@@ -3430,27 +3259,10 @@ def main():
                             cleanup_thread = threading.Thread(target=cleanup_and_restart_background, daemon=True)
                             cleanup_thread.start()
                         
-                        # # Schedule the callback on the main UI thread - COMMENTED OUT
-                        # def schedule_cleanup():
-                        #     root.after(0, on_renders_complete)
-                        # 
-                        # if iray_actions.wait_for_render_completion(RENDERS_PER_SESSION, schedule_cleanup):
-                        #     logging.info('All renders completed successfully')
-                        # else:
-                        #     # Check if this was due to a stop request before logging as a warning
-                        #     if iray_actions.stop_requested:
-                        #         logging.info('Render completion check stopped due to stop request')
-                        #     else:
-                        #         logging.warning('Render completion check failed or timed out')
-                        
                         # No longer monitoring completion via web UI - just continue with file monitoring
                         logging.info('Render process started - monitoring via file system only')
                     except Exception as e:
                         logging.error(f'Error in render completion monitoring: {e}')
-                
-                # # COMMENTED OUT - No longer monitoring completion via web UI
-                # completion_thread = threading.Thread(target=wait_for_completion, daemon=True)
-                # completion_thread.start()
                 
                 # Continue with the rest of the render setup on UI thread
                 root.after(0, lambda: continue_render_setup(on_session_complete))
@@ -3635,20 +3447,15 @@ def main():
                 # Start file monitoring for .exr files in server output directory, move processed PNGs to final output
                 server_output_dir = get_server_output_directory()
                 cleanup_manager.start_file_monitoring(server_output_dir, image_output_dir, watchdog_image_update, session_completion_callback)
-                root.after(IMAGE_UPDATE_INTERVAL, show_last_rendered_image)  # Update image after render
 
         run_all_instances()
-        # If "Close Overlord After Starting Render" is checked, close after 2 seconds
-        # (Removed: if close_after_render_var.get(): ...)
-        # (Removed: any use of close_after_render_var or close_daz_on_finish_var)
 
     def kill_render_related_processes():
-        """Kill all Daz Studio, Iray Server, and webdriver/browser processes. Also resets UI progress labels."""
-        logging.info('Killing all render-related processes (DAZStudio, Iray Server, webdriver/browsers)')
+        """Kill all Daz Studio and Iray Server processes. Also resets UI progress labels."""
+        logging.info('Killing all render-related processes (DAZStudio, Iray Server)')
         # Stop file monitoring first
         cleanup_manager.stop_file_monitoring()
         killed_daz = 0
-        killed_webdriver = 0
         try:
             # Kill all DAZStudio processes
             for proc in psutil.process_iter(['name']):
@@ -3660,20 +3467,8 @@ def main():
                     continue
             # Kill Iray Server processes using cleanup manager
             cleanup_manager.stop_iray_server()
-            # Kill only webdriver processes (not regular browsers)
-            webdriver_names = [
-                'geckodriver'
-            ]
-            for proc in psutil.process_iter(['name']):
-                try:
-                    pname = proc.info['name']
-                    if pname and any(wd in pname.lower() for wd in webdriver_names):
-                        proc.kill()
-                        killed_webdriver += 1
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    continue
             main.dazstudio_killed_by_user = True
-            logging.info(f'Killed {killed_daz} DAZStudio, {killed_webdriver} webdriver process(es). Iray Server stopped via cleanup manager.')
+            logging.info(f'Killed {killed_daz} DAZStudio process(es). Iray Server stopped via cleanup manager.')
         except Exception as e:
             logging.error(f'Failed to stop render processes: {e}')
         # Reset progress and time labels, and total images label (always reset regardless of error)
