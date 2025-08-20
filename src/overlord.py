@@ -11,6 +11,7 @@ import webbrowser
 import zipfile
 import time
 import threading
+import glob
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor
 from PIL import Image, ImageTk
@@ -316,10 +317,93 @@ def stop_all_render_processes() -> dict:
     
     return results
 
+def cleanup_iray_files_in_directory(cleanup_dir, with_retries=True):
+    """Clean up all Iray-related files and folders in a specific directory."""
+    items_cleaned = []
+    
+    # Files and folders to clean up
+    cleanup_items = [
+        ("iray_server.db", "file"),
+        ("cache", "folder"),
+        ("preview", "folder"),
+        ("results", "folder"),
+        ("iray_server.log", "file")
+    ]
+    
+    # Clean up standard items
+    for item_name, item_type in cleanup_items:
+        item_path = os.path.join(cleanup_dir, item_name)
+        if os.path.exists(item_path):
+            try:
+                if with_retries and item_type in ["file", "folder"]:
+                    # Try to delete with retries (processes might still be releasing file handles)
+                    max_retries = 5
+                    retry_delay = 0.5  # seconds
+                    for attempt in range(max_retries):
+                        try:
+                            if item_type == "file":
+                                os.remove(item_path)
+                            elif item_type == "folder":
+                                shutil.rmtree(item_path)
+                            items_cleaned.append(f"{item_type}: {item_path}")
+                            logging.info(f"Cleaned up {item_type} at: {item_path}")
+                            break
+                        except (OSError, PermissionError) as e:
+                            if attempt < max_retries - 1:
+                                logging.debug(f"Attempt {attempt + 1} failed to delete {item_path}, retrying in {retry_delay}s: {e}")
+                                time.sleep(retry_delay)
+                            else:
+                                logging.warning(f"Failed to delete {item_type} after {max_retries} attempts: {e}")
+                else:
+                    # Simple deletion without retries
+                    if item_type == "file":
+                        os.remove(item_path)
+                    elif item_type == "folder":
+                        shutil.rmtree(item_path)
+                    items_cleaned.append(f"{item_type}: {item_path}")
+                    logging.info(f"Cleaned up {item_type} at: {item_path}")
+            except Exception as e:
+                logging.warning(f"Failed to delete {item_type} at {item_path}: {e}")
+    
+    # Clean up worker log files (worker_*.log)
+    try:
+        worker_log_pattern = os.path.join(cleanup_dir, "worker_*.log")
+        worker_log_files = glob.glob(worker_log_pattern)
+        for worker_log_file in worker_log_files:
+            try:
+                if with_retries:
+                    # Try to delete with retries
+                    max_retries = 5
+                    retry_delay = 0.5  # seconds
+                    for attempt in range(max_retries):
+                        try:
+                            os.remove(worker_log_file)
+                            items_cleaned.append(f"worker log: {worker_log_file}")
+                            logging.info(f"Cleaned up worker log file at: {worker_log_file}")
+                            break
+                        except (OSError, PermissionError) as e:
+                            if attempt < max_retries - 1:
+                                logging.debug(f"Attempt {attempt + 1} failed to delete {worker_log_file}, retrying in {retry_delay}s: {e}")
+                                time.sleep(retry_delay)
+                            else:
+                                logging.warning(f"Failed to delete worker log file after {max_retries} attempts: {e}")
+                else:
+                    # Simple deletion without retries
+                    os.remove(worker_log_file)
+                    items_cleaned.append(f"worker log: {worker_log_file}")
+                    logging.info(f"Cleaned up worker log file at: {worker_log_file}")
+            except Exception as e:
+                logging.warning(f"Failed to delete worker log file at {worker_log_file}: {e}")
+    except Exception as e:
+        logging.warning(f"Error finding worker log files in {cleanup_dir}: {e}")
+    
+    return items_cleaned
+
 def cleanup_iray_database_and_cache():
-    """Clean up iray_server.db and cache folder from all possible locations."""
+    """Clean up all Iray-related files and folders from all possible locations."""
     try:
         cleanup_locations = []
+        all_cleaned_items = []
         
         # Add source directory
         cleanup_locations.append(os.path.dirname(__file__))
@@ -330,44 +414,17 @@ def cleanup_iray_database_and_cache():
             cleanup_locations.append(local_app_data_dir)
         
         for cleanup_dir in cleanup_locations:
-            # Clean up iray_server.db with retry mechanism
-            iray_db_path = os.path.join(cleanup_dir, "iray_server.db")
-            if os.path.exists(iray_db_path):
-                # Try to delete with retries (processes might still be releasing file handles)
-                max_retries = 5
-                retry_delay = 0.5  # seconds
-                for attempt in range(max_retries):
-                    try:
-                        os.remove(iray_db_path)
-                        logging.info(f"Cleaned up iray_server.db at: {iray_db_path}")
-                        break
-                    except (OSError, PermissionError) as e:
-                        if attempt < max_retries - 1:
-                            logging.debug(f"Attempt {attempt + 1} failed to delete {iray_db_path}, retrying in {retry_delay}s: {e}")
-                            time.sleep(retry_delay)
-                        else:
-                            logging.warning(f"Failed to delete iray_server.db after {max_retries} attempts: {e}")
-            
-            # Clean up cache folder with retry mechanism
-            cache_dir_path = os.path.join(cleanup_dir, "cache")
-            if os.path.exists(cache_dir_path):
-                # Try to delete with retries
-                max_retries = 5
-                retry_delay = 0.5  # seconds
-                for attempt in range(max_retries):
-                    try:
-                        shutil.rmtree(cache_dir_path)
-                        logging.info(f"Cleaned up cache folder at: {cache_dir_path}")
-                        break
-                    except (OSError, PermissionError) as e:
-                        if attempt < max_retries - 1:
-                            logging.debug(f"Attempt {attempt + 1} failed to delete {cache_dir_path}, retrying in {retry_delay}s: {e}")
-                            time.sleep(retry_delay)
-                        else:
-                            logging.warning(f"Failed to delete cache folder after {max_retries} attempts: {e}")
+            logging.info(f"Cleaning up Iray files in directory: {cleanup_dir}")
+            cleaned_items = cleanup_iray_files_in_directory(cleanup_dir, with_retries=True)
+            all_cleaned_items.extend(cleaned_items)
+        
+        if all_cleaned_items:
+            logging.info(f"Total cleanup completed: {len(all_cleaned_items)} items cleaned")
+        else:
+            logging.info("No Iray files found to clean up")
                 
     except Exception as e:
-        logging.error(f"Error during database and cache cleanup: {e}")
+        logging.error(f"Error during comprehensive Iray cleanup: {e}")
 
 
 # ============================================================================
@@ -1574,6 +1631,39 @@ class ExrFileHandler(FileSystemEventHandler):
             self.successful_moves = 0
 
 
+class ZipFileHandler(FileSystemEventHandler):
+    """Monitor and delete .zip files in the results directory."""
+    
+    def __init__(self):
+        super().__init__()
+        self.deleted_zip_count = 0
+    
+    def on_created(self, event):
+        """Handle new file creation events."""
+        if not event.is_directory and event.src_path.lower().endswith('.zip'):
+            self._delete_zip_file(event.src_path)
+    
+    def on_moved(self, event):
+        """Handle file move events."""
+        if not event.is_directory and event.dest_path.lower().endswith('.zip'):
+            self._delete_zip_file(event.dest_path)
+    
+    def _delete_zip_file(self, zip_path):
+        """Delete a .zip file immediately."""
+        try:
+            # Small delay to ensure file is fully written
+            time.sleep(0.1)
+            
+            if os.path.exists(zip_path):
+                os.remove(zip_path)
+                self.deleted_zip_count += 1
+                logging.info(f'Deleted .zip file: {zip_path} (total deleted: {self.deleted_zip_count})')
+            else:
+                logging.warning(f'Zip file not found for deletion: {zip_path}')
+        except Exception as e:
+            logging.error(f'Failed to delete .zip file {zip_path}: {e}')
+
+
 # ============================================================================
 # ENHANCED CLEANUP MANAGER
 # ============================================================================
@@ -1587,6 +1677,7 @@ class CleanupManager:
         self.settings_saved_on_close = False
         self.file_observer = None
         self.exr_handler = None
+        self.zip_handler = None
     
     def register_temp_file(self, filepath):
         """Register a temporary file for cleanup"""
@@ -1609,7 +1700,7 @@ class CleanupManager:
         self.settings_saved_on_close = True
     
     def start_file_monitoring(self, server_output_dir, final_output_dir, image_update_callback=None, session_completion_callback=None):
-        """Start monitoring the server output directory for new .exr files"""
+        """Start monitoring the server output directory for new .exr files and .zip files"""
         try:
             if self.file_observer is not None:
                 self.stop_file_monitoring()
@@ -1621,6 +1712,7 @@ class CleanupManager:
                 os.makedirs(final_output_dir, exist_ok=True)
             
             self.exr_handler = ExrFileHandler(final_output_dir)
+            self.zip_handler = ZipFileHandler()
             
             # Set up the image update callback for UI notifications
             if image_update_callback:
@@ -1634,8 +1726,11 @@ class CleanupManager:
             self.file_observer.schedule(self.exr_handler, server_output_dir, recursive=True)
             # Also monitor the final output directory for any direct image additions
             self.file_observer.schedule(self.exr_handler, final_output_dir, recursive=True)
+            # Monitor server output directory for .zip files to delete
+            self.file_observer.schedule(self.zip_handler, server_output_dir, recursive=True)
             self.file_observer.start()
             logging.info(f'Started file monitoring for .exr files in server output: {server_output_dir}')
+            logging.info(f'Started .zip file monitoring and deletion in server output: {server_output_dir}')
             logging.info(f'Processed PNGs will be moved to final output: {final_output_dir}')
             if session_completion_callback:
                 logging.info(f'Session completion monitoring enabled - will restart Iray Server after {RENDERS_PER_SESSION} successful moves')
@@ -1665,11 +1760,17 @@ class CleanupManager:
                 self.exr_handler.stop_conversion_thread()
                 self.exr_handler = None
                 logging.info('Stopped EXR conversion handler')
+            
+            # Clean up zip handler
+            if self.zip_handler is not None:
+                logging.info(f'Zip handler deleted {self.zip_handler.deleted_zip_count} .zip files during session')
+                self.zip_handler = None
         except Exception as e:
             logging.error(f'Error stopping file monitoring: {e}')
             # Force cleanup even if there were errors
             self.file_observer = None
             self.exr_handler = None
+            self.zip_handler = None
     
     def stop_iray_server(self):
         """Stop all iray_server.exe and iray_server_worker.exe processes"""
@@ -1823,7 +1924,7 @@ def start_iray_server():
         return True
     
     try:
-        # Clean up iray_server.db and cache folder from both possible locations
+        # Clean up all Iray-related files from both possible locations
         cleanup_locations = []
         
         # Add source directory
@@ -1835,17 +1936,8 @@ def start_iray_server():
             cleanup_locations.append(local_app_data_dir)
         
         for cleanup_dir in cleanup_locations:
-            # Clean up iray_server.db
-            iray_db_path = os.path.join(cleanup_dir, "iray_server.db")
-            if os.path.exists(iray_db_path):
-                os.remove(iray_db_path)
-                logging.info(f"Cleaned up iray_server.db at: {iray_db_path}")
-            
-            # Clean up cache folder
-            cache_dir_path = os.path.join(cleanup_dir, "cache")
-            if os.path.exists(cache_dir_path):
-                shutil.rmtree(cache_dir_path)
-                logging.info(f"Cleaned up cache folder at: {cache_dir_path}")
+            logging.info(f"Cleaning up Iray files in directory before server start: {cleanup_dir}")
+            cleanup_iray_files_in_directory(cleanup_dir, with_retries=False)  # No retries for faster startup
         
         # Launch Iray Server directly using Python subprocess
         iray_server_exe = r"C:\Program Files\NVIDIA Corporation\Iray Server\server\iray_server.exe"
@@ -2082,7 +2174,7 @@ def main():
             "-scriptArg", json_map,
             "-instanceName", "#",
             "-logSize", str(log_size),
-            "-headless",
+            # "-headless",
             "-noPrompt", 
             render_script_path
         ]
@@ -3131,22 +3223,10 @@ def main():
                 # Get server output directory path
                 server_output_dir = get_server_output_directory()
                 
-                # delete iray_server.db and cache folder
+                # Additional cleanup in script directory (for redundancy)
                 script_dir = os.path.dirname(os.path.abspath(__file__))
-                iray_db_path = os.path.join(script_dir, "iray_server.db")
-                cache_dir_path = os.path.join(script_dir, "cache")
-            
-                if os.path.exists(iray_db_path):
-                    os.remove(iray_db_path)
-                    logging.info(f"Successfully deleted iray_server.db at: {iray_db_path}")
-                else:
-                    logging.info(f"iray_server.db not found at: {iray_db_path} (nothing to delete)")
-                
-                if os.path.exists(cache_dir_path):
-                    shutil.rmtree(cache_dir_path)
-                    logging.info(f"Successfully deleted cache folder at: {cache_dir_path}")
-                else:
-                    logging.info(f"cache folder not found at: {cache_dir_path} (nothing to delete)")
+                logging.info(f"Additional cleanup in script directory: {script_dir}")
+                cleanup_iray_files_in_directory(script_dir, with_retries=False)
 
                 # Clean up server output directory to start fresh
                 if os.path.exists(server_output_dir):
