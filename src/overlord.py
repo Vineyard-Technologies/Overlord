@@ -33,7 +33,7 @@ from version import __version__ as overlord_version
 # Application constants
 DEFAULT_MAX_WORKERS = 8
 LOG_SIZE_MB = 100
-RENDERS_PER_SESSION = 50
+RENDERS_PER_SESSION = 100
 RECENT_RENDER_TIMES_LIMIT = 25
 MAX_CONCURRENT_CONVERSIONS = 4  # Allow multiple EXR conversions to run in parallel
 
@@ -2174,7 +2174,7 @@ def main():
             "-scriptArg", json_map,
             "-instanceName", "#",
             "-logSize", str(log_size),
-            # "-headless",
+            "-headless",
             "-noPrompt", 
             render_script_path
         ]

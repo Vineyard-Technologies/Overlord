@@ -83,18 +83,29 @@ function thereAre(aArray) {
 
 // Set the Matte Parameter of a subject and its children.
 function setMatte(oSubject, bBool) {
-	if (oSubject.matteParameter) oSubject.matteParameter.setValue(bBool);
 
-	for (var nChildCounter = 0; nChildCounter != oSubject.children.length; nChildCounter++) {
-		var oChild = oSubject.children[nChildCounter];
-		oChild.matteParameter = oChild.findPropertyByLabel('Enable Iray Matte');
-		if (oChild.matteParameter) oChild.matteParameter.setValue(bBool);
+	var sIrayMatteLabel = 'Enable Iray Matte';
+
+	oSubject.oMatteParameter = oSubject.findPropertyByLabel(sIrayMatteLabel);
+
+	if (oSubject.oMatteParameter) {
+
+		oSubject.oMatteParameter.setValue(bBool);
+	}
+
+	for (var nChildCounter = 0; nChildCounter != oSubject.aChildren.length; nChildCounter++) {
+
+		var oChild = oSubject.aChildren[nChildCounter];
+
+		oChild.oMatteParameter = oChild.findPropertyByLabel(sIrayMatteLabel);
+
+		if (oChild.oMatteParameter) {
+
+			oChild.oMatteParameter.setValue(bBool);
+		}
 	}
 }
 function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
-
-	oSubject.children = oSubject.getNodeChildren(true);
-	oSubject.matteParameter = oSubject.findPropertyByLabel('Enable Iray Matte');
 
 	// These variables have to be determined when we start rendering
 	oRenderMgr = App.getRenderMgr();
@@ -283,6 +294,52 @@ if (thereAre(aAnimationFilepaths)) {
 		oContentMgr.openFile(sSubjectFilepath, true);
 
 		var oSubject = Scene.findNodeByLabel('subject');
+		
+		/*
+		We have to turn off limits for the subject and its children
+		because the perferences parameter "When importing a Pose/Shaping file that exceeds limits :"
+		(under the 'Content' tab) is _not_ set to "Always turn limits off"
+		on headless runs and fresh Daz Studio installs.
+		*/
+		oSubject.aPropertyList = oSubject.getPropertyList();
+
+		// Turn off limits for all the subject's properties
+		for (var nPropertyCounter = 0; nPropertyCounter != oSubject.aPropertyList.length; nPropertyCounter++) {
+
+			var oProperty = oSubject.aPropertyList[nPropertyCounter];
+
+			turnLimitOff(oProperty);
+		}
+
+		// We use the subject's children to turn off their matte parameter,
+		// and to turn off their limits.
+		oSubject.aChildren = oSubject.getNodeChildren(true);
+
+		// Give the subject's children a property containing their property list
+		for (var nChildCounter = 0; nChildCounter != oSubject.aChildren.length; nChildCounter++) {
+
+			var oChild = oSubject.aChildren[nChildCounter];
+
+			oChild.aPropertyList = oChild.getPropertyList();
+
+			// Loop through that property list, turning off limits
+			for (var nPropertyCounter = 0; nPropertyCounter != oChild.aPropertyList.length; nPropertyCounter++) {
+
+				var oProperty = oChild.aPropertyList[nPropertyCounter];
+
+				turnLimitOff(oProperty);
+			}
+		}
+
+		// Limits are called "limits" in the UI, and "clamps" in Daz Script
+		function turnLimitOff(oProperty) {
+
+			// If this property has a 'setIsClamped' function...
+			if (!!oProperty.setIsClamped) {
+
+				oProperty.setIsClamped(false);
+			}
+		}
 
 		oContentMgr.openFile(sAnimationFilepath, true);
 
