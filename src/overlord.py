@@ -2208,7 +2208,19 @@ def main():
         if avg_times and len(avg_times) > 0:
             recent_times = avg_times[-RECENT_RENDER_TIMES_LIMIT:] if len(avg_times) > RECENT_RENDER_TIMES_LIMIT else avg_times
             avg_time = sum(recent_times) / len(recent_times)
-            total_seconds = int(avg_time * images_remaining)
+            
+            # Account for gear files - each gear file multiplies the rendering workload
+            gear_multiplier = 1
+            try:
+                gear_text = value_entries["Gear"].get("1.0", tk.END).strip()
+                gear_files = [file.strip() for file in gear_text.split('\n') 
+                             if file.strip() and file.strip().endswith('_gear.duf')]
+                if gear_files:
+                    gear_multiplier = len(gear_files)
+            except Exception:
+                gear_multiplier = 1
+            
+            total_seconds = int(avg_time * images_remaining * gear_multiplier)
             # Format as H:MM:SS
             hours = total_seconds // 3600
             minutes = (total_seconds % 3600) // 60
