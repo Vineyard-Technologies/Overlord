@@ -13,6 +13,7 @@ import time
 import threading
 import glob
 import numpy as np
+import argparse
 from concurrent.futures import ThreadPoolExecutor
 from PIL import Image, ImageTk
 import tkinter as tk
@@ -89,6 +90,8 @@ ERROR_MESSAGES = {
     "daz_running_warning": "DAZ Studio is already running.\n\nDo you want to continue?",
     "iray_config_failed": "Iray Server configuration failed",
     "render_start_failed": "Failed to start render",
+    "file_not_found": "File Validation Error",
+    "invalid_file_extension": "Invalid File Extension",
 }
 
 # Validation limits
@@ -2254,7 +2257,233 @@ def cleanup_single_instance():
     except OSError:
         pass
 
-def main():
+def run_headless_mode(cmd_args):
+    """Run Overlord in headless mode without UI"""
+    logging.info('Starting Overlord in headless mode')
+    
+    # Load default settings
+    settings_manager = SettingsManager()
+    settings = settings_manager.load_settings()
+    
+    # Apply command line arguments to settings
+    if cmd_args:
+        if cmd_args.subject:
+            settings["subject"] = cmd_args.subject
+        if cmd_args.animations:
+            settings["animations"] = cmd_args.animations
+        if cmd_args.prop_animations:
+            settings["prop_animations"] = cmd_args.prop_animations
+        if cmd_args.gear:
+            settings["gear"] = cmd_args.gear
+        if cmd_args.gear_animations:
+            settings["gear_animations"] = cmd_args.gear_animations
+        if cmd_args.output_dir:
+            settings["output_directory"] = cmd_args.output_dir
+        if cmd_args.instances:
+            settings["number_of_instances"] = str(cmd_args.instances)
+        if cmd_args.frame_rate:
+            settings["frame_rate"] = str(cmd_args.frame_rate)
+        if cmd_args.render_shadows is not None:
+            settings["render_shadows"] = cmd_args.render_shadows
+    
+    # Validate required fields
+    if not settings.get("subject"):
+        logging.error("Headless mode requires --subject argument")
+        return 1
+    if not settings.get("animations"):
+        logging.error("Headless mode requires --animations argument")
+        return 1
+    if not settings.get("output_directory"):
+        logging.error("Headless mode requires --output-dir argument")
+        return 1
+    
+    # Validate files exist
+    subject_file = settings["subject"]
+    if not os.path.isfile(subject_file):
+        logging.error(f"Subject file does not exist: {subject_file}")
+        return 1
+    
+    animations = settings["animations"] if isinstance(settings["animations"], list) else [settings["animations"]]
+    for animation_file in animations:
+        if not os.path.isfile(animation_file):
+            logging.error(f"Animation file does not exist: {animation_file}")
+            return 1
+    
+    # Validate file extensions
+    all_files = [subject_file] + animations
+    if settings.get("prop_animations"):
+        prop_animations = settings["prop_animations"] if isinstance(settings["prop_animations"], list) else [settings["prop_animations"]]
+        all_files.extend(prop_animations)
+    if settings.get("gear"):
+        gear_files = settings["gear"] if isinstance(settings["gear"], list) else [settings["gear"]]
+        all_files.extend(gear_files)
+    if settings.get("gear_animations"):
+        gear_animations = settings["gear_animations"] if isinstance(settings["gear_animations"], list) else [settings["gear_animations"]]
+        all_files.extend(gear_animations)
+    
+    for file_path in all_files:
+        if not file_path.lower().endswith('.duf'):
+            logging.error(f"File is not a .duf file: {file_path}")
+            return 1
+    
+    logging.info("Headless mode validation passed, starting render...")
+    
+    try:
+        # Start the render process using the same logic as the UI version
+        start_headless_render(settings)
+        return 0
+    except Exception as e:
+        logging.error(f"Headless render failed: {e}")
+        return 1
+
+def start_headless_render(settings):
+    """Start the render process in headless mode"""
+    logging.info('Starting headless render process')
+    
+    # Initialize cleanup manager
+    global cleanup_manager
+    cleanup_manager = CleanupManager()
+    
+    # Stop any existing processes
+    logging.info('Closing any existing Iray Server and DAZ Studio instances...')
+    
+    # Kill processes manually for headless mode
+    import psutil
+    killed_daz = 0
+    try:
+        # Kill all DAZStudio processes
+        for proc in psutil.process_iter(['name']):
+            try:
+                if proc.info['name'] and 'DAZStudio' in proc.info['name']:
+                    proc.kill()
+                    killed_daz += 1
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+        logging.info(f'Killed {killed_daz} DAZStudio process(es)')
+    except Exception as e:
+        logging.error(f'Failed to stop DAZ processes: {e}')
+    
+    # Clean up Iray database and cache
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    cleanup_iray_database_and_cache()
+    
+    # Start Iray Server
+    logging.info('Starting fresh Iray Server...')
+    results_dir = os.path.join(script_dir, "results")
+    final_output_dir = settings["output_directory"]
+    
+    # Create directories
+    os.makedirs(results_dir, exist_ok=True)
+    os.makedirs(final_output_dir, exist_ok=True)
+    
+    # Start Iray Server using the global function
+    if not start_iray_server():
+        raise Exception("Failed to start Iray Server")
+    
+    logging.info('Iray Server started successfully')
+    
+    # Prepare render data
+    subject_file = settings["subject"].replace("\\", "/")
+    animations = settings["animations"] if isinstance(settings["animations"], list) else [settings["animations"]]
+    animations = [anim.replace("\\", "/") for anim in animations]
+    
+    prop_animations = []
+    if settings.get("prop_animations"):
+        prop_animations = settings["prop_animations"] if isinstance(settings["prop_animations"], list) else [settings["prop_animations"]]
+        prop_animations = [anim.replace("\\", "/") for anim in prop_animations]
+    
+    gear = []
+    if settings.get("gear"):
+        gear = settings["gear"] if isinstance(settings["gear"], list) else [settings["gear"]]
+        gear = [g.replace("\\", "/") for g in gear]
+    
+    gear_animations = []
+    if settings.get("gear_animations"):
+        gear_animations = settings["gear_animations"] if isinstance(settings["gear_animations"], list) else [settings["gear_animations"]]
+        gear_animations = [anim.replace("\\", "/") for anim in gear_animations]
+    
+    # Get paths using the same logic as the UI version
+    daz_executable_path = os.path.join(
+        os.environ.get("ProgramFiles", "C:\\Program Files"),
+        "DAZ 3D", "DAZStudio4", "DAZStudio.exe"
+    )
+    
+    # Get template and script paths
+    if getattr(sys, 'frozen', False):
+        install_dir = os.path.dirname(sys.executable)
+        user_scripts_dir = os.path.join(get_app_data_path(), 'scripts')
+        os.makedirs(user_scripts_dir, exist_ok=True)
+        render_script_path = os.path.join(user_scripts_dir, "masterRenderer.dsa").replace("\\", "/")
+        template_path = os.path.join(get_app_data_path(), 'templates', 'masterTemplate.duf').replace("\\", "/")
+    else:
+        install_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        render_script_path = os.path.join(install_dir, "scripts", "masterRenderer.dsa").replace("\\", "/")
+        template_path = os.path.join(install_dir, "templates", "masterTemplate.duf").replace("\\", "/")
+    
+    # Create JSON map for DAZ Studio
+    json_map = {
+        "num_instances": str(settings.get("number_of_instances", "1")),
+        "image_output_dir": final_output_dir.replace("\\", "/"),
+        "frame_rate": str(settings.get("frame_rate", "30")),
+        "subject_file": subject_file,
+        "animations": animations,
+        "prop_animations": prop_animations,
+        "gear": gear,
+        "gear_animations": gear_animations,
+        "template_path": template_path,
+        "render_shadows": settings.get("render_shadows", True),
+        "results_directory_path": results_dir.replace("\\", "/")
+    }
+    
+    # Start file monitoring
+    cleanup_manager.start_file_monitoring(
+        server_output_dir=results_dir,
+        final_output_dir=final_output_dir
+    )
+    
+    # Launch DAZ Studio instances
+    if not os.path.exists(daz_executable_path):
+        raise Exception(f"DAZ Studio executable not found: {daz_executable_path}")
+    
+    if not os.path.exists(render_script_path):
+        raise Exception(f"Render script not found: {render_script_path}")
+    
+    json_map_str = json.dumps(json_map)
+    
+    num_instances = int(settings.get("number_of_instances", "1"))
+    for i in range(num_instances):
+        command = [
+            daz_executable_path,
+            "-scriptArg", json_map_str,
+            "-instanceName", "#",
+            "-logSize", "100000000",
+            "-headless",
+            "-noPrompt", 
+            render_script_path
+        ]
+        
+        logging.info(f"Launching DAZ Studio instance {i+1}/{num_instances}")
+        subprocess.Popen(command)
+        if i < num_instances - 1:  # Don't sleep after the last instance
+            time.sleep(5)  # Delay between instances
+    
+    logging.info('All render instances launched')
+    
+    # In headless mode, we'll run until interrupted or completed
+    try:
+        # Keep the process alive and monitor progress
+        while True:
+            time.sleep(10)
+            # You could add progress monitoring here
+            # For now, just keep running until Ctrl+C
+    except KeyboardInterrupt:
+        logging.info('Headless render interrupted by user')
+    finally:
+        # Cleanup
+        logging.info('Cleaning up headless render...')
+        cleanup_manager.cleanup_all()
+
+def main(auto_start_render=False, cmd_args=None, headless=False):
     def create_daz_command_array(daz_executable_path, json_map, log_size, render_script_path):
         """Create the DAZ Studio command array with all required parameters."""
         return [
@@ -2341,6 +2570,10 @@ def main():
     
     # Close splash screen
     splash.destroy()
+    
+    # Handle headless mode
+    if headless:
+        return run_headless_mode(cmd_args)
     
     logging.info('Application launched')
     logging.info(f'Windows theme detected: {theme_manager.current_theme} mode')
@@ -2697,6 +2930,49 @@ def main():
     saved_settings = settings_manager.load_settings()
     # Apply the loaded settings to the UI (now that all widgets are created)
     settings_manager.apply_settings(saved_settings, value_entries, render_shadows_var)
+
+    # Apply command line arguments if provided (overrides saved settings)
+    def apply_command_line_args():
+        """Apply command line arguments to UI fields"""
+        if cmd_args:
+            if cmd_args.subject:
+                value_entries["Subject"].delete(0, tk.END)
+                value_entries["Subject"].insert(0, cmd_args.subject)
+                
+            if cmd_args.animations:
+                value_entries["Animations"].delete("1.0", tk.END)
+                value_entries["Animations"].insert("1.0", "\n".join(cmd_args.animations))
+                
+            if cmd_args.prop_animations:
+                value_entries["Prop Animations"].delete("1.0", tk.END)
+                value_entries["Prop Animations"].insert("1.0", "\n".join(cmd_args.prop_animations))
+                
+            if cmd_args.gear:
+                value_entries["Gear"].delete("1.0", tk.END)
+                value_entries["Gear"].insert("1.0", "\n".join(cmd_args.gear))
+                
+            if cmd_args.gear_animations:
+                value_entries["Gear Animations"].delete("1.0", tk.END)
+                value_entries["Gear Animations"].insert("1.0", "\n".join(cmd_args.gear_animations))
+                
+            if cmd_args.output_dir:
+                value_entries["Output Directory"].delete(0, tk.END)
+                value_entries["Output Directory"].insert(0, cmd_args.output_dir)
+                
+            if cmd_args.instances:
+                value_entries["Number of Instances"].delete(0, tk.END)
+                value_entries["Number of Instances"].insert(0, str(cmd_args.instances))
+                
+            if cmd_args.frame_rate:
+                value_entries["Frame Rate"].delete(0, tk.END)
+                value_entries["Frame Rate"].insert(0, str(cmd_args.frame_rate))
+                
+            if cmd_args.render_shadows is not None:
+                render_shadows_var.set(cmd_args.render_shadows)
+                
+            logging.info("Command line arguments applied to UI fields")
+    
+    apply_command_line_args()
 
     # Log settings loading - settings loaded silently
     
@@ -3310,6 +3586,69 @@ def main():
             logging.info("Start Render cancelled: No Output Directory specified.")
             return
         
+        # Validate all files exist and have .duf extension
+        files_to_check = []
+        
+        # Add Subject file
+        if subject_file:
+            files_to_check.append(("Subject", subject_file))
+        
+        # Add Animation files
+        for animation_file in animations:
+            files_to_check.append(("Animation", animation_file))
+        
+        # Add Prop Animation files
+        prop_animations_text = value_entries["Prop Animations"].get("1.0", tk.END).strip()
+        if prop_animations_text:
+            prop_animations = [f.strip() for f in prop_animations_text.split('\n') if f.strip()]
+            for prop_animation_file in prop_animations:
+                files_to_check.append(("Prop Animation", prop_animation_file))
+        
+        # Add Gear files
+        gear_text = value_entries["Gear"].get("1.0", tk.END).strip()
+        if gear_text:
+            gear_files = [f.strip() for f in gear_text.split('\n') if f.strip()]
+            for gear_file in gear_files:
+                files_to_check.append(("Gear", gear_file))
+        
+        # Add Gear Animation files
+        gear_animations_text = value_entries["Gear Animations"].get("1.0", tk.END).strip()
+        if gear_animations_text:
+            gear_animations = [f.strip() for f in gear_animations_text.split('\n') if f.strip()]
+            for gear_animation_file in gear_animations:
+                files_to_check.append(("Gear Animation", gear_animation_file))
+        
+        # Check each file
+        missing_files = []
+        invalid_extensions = []
+        
+        for file_type, file_path in files_to_check:
+            # Check if file exists
+            if not os.path.isfile(file_path):
+                missing_files.append(f"{file_type}: {file_path}")
+            # Check if file has .duf extension
+            elif not file_path.lower().endswith('.duf'):
+                invalid_extensions.append(f"{file_type}: {file_path}")
+        
+        # Display errors if any files are missing or invalid
+        if missing_files or invalid_extensions:
+            from tkinter import messagebox
+            error_parts = []
+            if missing_files:
+                error_parts.append("The following files do not exist:")
+                error_parts.extend([f"  • {file}" for file in missing_files])
+            
+            if invalid_extensions:
+                if error_parts:
+                    error_parts.append("")  # Add blank line
+                error_parts.append("The following files are not .duf files:")
+                error_parts.extend([f"  • {file}" for file in invalid_extensions])
+            
+            error_message = "\n".join(error_parts)
+            messagebox.showerror("File Validation Error", error_message)
+            logging.info(f"Start Render cancelled: File validation failed - {error_message}")
+            return
+        
         # Disable Start Render button and enable Stop Render button
         button.config(state="disabled")
         stop_button.config(state="normal")
@@ -3820,6 +4159,29 @@ def main():
     stop_button.pack(side="left", padx=10, pady=10)
     theme_manager.register_widget(stop_button, "button")
 
+    # Auto-start render if requested
+    def auto_start_render_if_requested():
+        """Auto-start render if the --startRender flag was passed"""
+        if auto_start_render:
+            logging.info("Auto-starting render due to --startRender flag")
+            
+            # Quick validation check before auto-starting
+            subject_file = value_entries["Subject"].get().strip()
+            animations = value_entries["Animations"].get("1.0", tk.END).strip().replace("\\", "/").split("\n")
+            animations = [file for file in animations if file]
+            output_dir = value_entries["Output Directory"].get().strip()
+            
+            if not subject_file or not animations or not output_dir:
+                logging.warning("Auto-start render cancelled: Missing required fields (Subject, Animations, or Output Directory)")
+                logging.info("Please fill in all required fields before using --startRender")
+                return
+            
+            # Use root.after to ensure UI is fully loaded before starting render
+            root.after(1000, start_render)  # Wait 1 second for UI to be ready
+    
+    # Schedule auto-start check after UI is ready
+    root.after(100, auto_start_render_if_requested)
+
     # Run the application
     try:
         root.mainloop()
@@ -3831,4 +4193,40 @@ def main():
         logging.info('Application cleanup completed')
 
 if __name__ == "__main__":
-    main()
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Overlord - DAZ Studio Render Management Tool')
+    parser.add_argument('--startRender', action='store_true', 
+                        help='Automatically start render when application launches')
+    parser.add_argument('--headless', action='store_true',
+                        help='Run in headless mode without UI (automatically starts render)')
+    
+    # Input file arguments
+    parser.add_argument('--subject', type=str, 
+                        help='Path to the subject .duf file')
+    parser.add_argument('--animations', nargs='*', type=str, 
+                        help='One or more animation .duf files')
+    parser.add_argument('--prop-animations', nargs='*', type=str, 
+                        help='One or more prop animation .duf files')
+    parser.add_argument('--gear', nargs='*', type=str, 
+                        help='One or more gear .duf files')
+    parser.add_argument('--gear-animations', nargs='*', type=str, 
+                        help='One or more gear animation .duf files')
+    parser.add_argument('--output-dir', type=str, 
+                        help='Output directory for rendered images')
+    
+    # Render settings arguments
+    parser.add_argument('--instances', type=int, 
+                        help='Number of render instances to run')
+    parser.add_argument('--frame-rate', type=int, 
+                        help='Frame rate for animations')
+    parser.add_argument('--render-shadows', action='store_true', default=None,
+                        help='Enable shadow rendering')
+    parser.add_argument('--no-render-shadows', dest='render_shadows', action='store_false',
+                        help='Disable shadow rendering')
+    
+    args = parser.parse_args()
+    
+    # Pass the auto-start flag, headless mode, and all arguments to main
+    exit_code = main(auto_start_render=args.startRender, cmd_args=args, headless=args.headless)
+    if exit_code is not None:
+        sys.exit(exit_code)
