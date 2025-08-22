@@ -14,11 +14,14 @@ import threading
 import glob
 import numpy as np
 import argparse
+import urllib.request
+import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
 from PIL import Image, ImageTk
 import tkinter as tk
 from tkinter import filedialog
 from tkinter import ttk
+from tkinter import messagebox
 import winreg
 import psutil
 import atexit
@@ -26,6 +29,16 @@ import tempfile
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 from version import __version__ as overlord_version
+
+def get_display_version() -> str:
+    """Get the display version string. Shows 'dev' when running in development mode."""
+    try:
+        # If sys._MEIPASS exists, we're running from a PyInstaller executable (production)
+        sys._MEIPASS
+        return overlord_version
+    except AttributeError:
+        # Running from source (development mode)
+        return "dev"
 
 # ============================================================================
 # CONSTANTS AND CONFIGURATION
@@ -629,7 +642,7 @@ def create_splash_screen() -> tuple:
     except Exception as e:
         # Fallback to text if image fails to load
         logging.warning(f"Could not load splash screen image: {e}")
-        splash_label = tk.Label(splash, text=f"Overlord {overlord_version}\nRender Pipeline Manager\n\nStarting up...", 
+        splash_label = tk.Label(splash, text=f"Overlord {get_display_version()}\nRender Pipeline Manager\n\nStarting up...", 
                                font=("Arial", 16), bg="#2c2c2c", fg="white")
         splash_label.pack(fill="both", expand=True)
     
@@ -726,6 +739,12 @@ class ThemeManager:
                                activebackground=self.get_color("select_bg"),
                                activeforeground=self.get_color("select_fg"),
                                selectcolor=self.get_color("entry_bg"))
+            elif widget_type == "canvas":
+                widget.configure(bg=self.get_color("bg"), highlightbackground=self.get_color("border"))
+            elif widget_type == "scrollbar":
+                widget.configure(bg=self.get_color("button_bg"), 
+                               troughcolor=self.get_color("entry_bg"),
+                               activebackground=self.get_color("highlight_bg"))
         except Exception:
             # Some widgets might not support all options
             pass
@@ -2579,7 +2598,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
     logging.info(f'Windows theme detected: {theme_manager.current_theme} mode')
     # Create the main window
     root = tk.Tk()
-    root.title(f"Overlord {overlord_version}")
+    root.title(f"Overlord {get_display_version()}")
     root.iconbitmap(resource_path(os.path.join("images", "favicon.ico")))  # Set the application icon
     
     # Apply theme to root window
@@ -2632,6 +2651,471 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
     
     root.protocol("WM_DELETE_WINDOW", on_closing)
 
+    # Create menu bar
+    def create_menu_bar():
+        """Create and configure the menu bar"""
+        menubar = tk.Menu(root)
+        theme_manager.register_widget(menubar, "menu")
+        
+        # File menu
+        file_menu = tk.Menu(menubar, tearoff=0)
+        theme_manager.register_widget(file_menu, "menu")
+        
+        def choose_subject():
+            """Open file picker for subject field"""
+            filename = filedialog.askopenfilename(
+                title="Choose Subject",
+                filetypes=[("DAZ Scene Files", "*.duf"), ("All Files", "*.*")],
+                initialdir=os.path.dirname(value_entries["Subject"].get()) if value_entries["Subject"].get() else None
+            )
+            if filename:
+                value_entries["Subject"].delete(0, tk.END)
+                value_entries["Subject"].insert(0, filename)
+                auto_save_settings()
+        
+        def choose_animations():
+            """Open file picker for animations field"""
+            filenames = filedialog.askopenfilenames(
+                title="Choose Animations",
+                filetypes=[("DAZ Scene Files", "*.duf"), ("All Files", "*.*")],
+                initialdir=os.path.dirname(value_entries["Animations"].get("1.0", tk.END).strip()) if value_entries["Animations"].get("1.0", tk.END).strip() else None
+            )
+            if filenames:
+                value_entries["Animations"].delete("1.0", tk.END)
+                value_entries["Animations"].insert("1.0", "\n".join(filenames))
+                auto_save_settings()
+        
+        def choose_prop_animations():
+            """Open file picker for prop animations field"""
+            filenames = filedialog.askopenfilenames(
+                title="Choose Prop Animations",
+                filetypes=[("DAZ Scene Files", "*.duf"), ("All Files", "*.*")],
+                initialdir=os.path.dirname(value_entries["Prop Animations"].get("1.0", tk.END).strip()) if value_entries["Prop Animations"].get("1.0", tk.END).strip() else None
+            )
+            if filenames:
+                value_entries["Prop Animations"].delete("1.0", tk.END)
+                value_entries["Prop Animations"].insert("1.0", "\n".join(filenames))
+                auto_save_settings()
+        
+        def choose_gear():
+            """Open file picker for gear field"""
+            filenames = filedialog.askopenfilenames(
+                title="Choose Gear",
+                filetypes=[("DAZ Scene Files", "*.duf"), ("All Files", "*.*")],
+                initialdir=os.path.dirname(value_entries["Gear"].get("1.0", tk.END).strip()) if value_entries["Gear"].get("1.0", tk.END).strip() else None
+            )
+            if filenames:
+                value_entries["Gear"].delete("1.0", tk.END)
+                value_entries["Gear"].insert("1.0", "\n".join(filenames))
+                auto_save_settings()
+        
+        def choose_gear_animations():
+            """Open file picker for gear animations field"""
+            filenames = filedialog.askopenfilenames(
+                title="Choose Gear Animations",
+                filetypes=[("DAZ Scene Files", "*.duf"), ("All Files", "*.*")],
+                initialdir=os.path.dirname(value_entries["Gear Animations"].get("1.0", tk.END).strip()) if value_entries["Gear Animations"].get("1.0", tk.END).strip() else None
+            )
+            if filenames:
+                value_entries["Gear Animations"].delete("1.0", tk.END)
+                value_entries["Gear Animations"].insert("1.0", "\n".join(filenames))
+                auto_save_settings()
+        
+        def choose_output_directory():
+            """Open folder picker for output directory field"""
+            dirname = filedialog.askdirectory(
+                title="Choose Output Directory",
+                initialdir=value_entries["Output Directory"].get() if value_entries["Output Directory"].get() else None
+            )
+            if dirname:
+                value_entries["Output Directory"].delete(0, tk.END)
+                value_entries["Output Directory"].insert(0, dirname)
+                auto_save_settings()
+                on_output_dir_change()  # Update UI
+        
+        def exit_overlord():
+            """Exit the application"""
+            on_closing()
+        
+        file_menu.add_command(label="Choose Subject", command=choose_subject)
+        file_menu.add_command(label="Choose Animations", command=choose_animations)
+        file_menu.add_command(label="Choose Prop Animations", command=choose_prop_animations)
+        file_menu.add_command(label="Choose Gear", command=choose_gear)
+        file_menu.add_command(label="Choose Gear Animations", command=choose_gear_animations)
+        file_menu.add_command(label="Choose Output Directory", command=choose_output_directory)
+        file_menu.add_separator()
+        file_menu.add_command(label="Exit Overlord", command=exit_overlord)
+        
+        menubar.add_cascade(label="File", menu=file_menu)
+        
+        # Edit menu
+        edit_menu = tk.Menu(menubar, tearoff=0)
+        theme_manager.register_widget(edit_menu, "menu")
+        
+        def clear_all_input_fields():
+            """Clear all input fields"""
+            value_entries["Subject"].delete(0, tk.END)
+            value_entries["Animations"].delete("1.0", tk.END)
+            value_entries["Prop Animations"].delete("1.0", tk.END)
+            value_entries["Gear"].delete("1.0", tk.END)
+            value_entries["Gear Animations"].delete("1.0", tk.END)
+            value_entries["Output Directory"].delete(0, tk.END)
+            auto_save_settings()
+            on_output_dir_change()  # Update UI
+            logging.info("All input fields cleared")
+        
+        def restore_default_settings():
+            """Restore default settings"""
+            value_entries["Number of Instances"].delete(0, tk.END)
+            value_entries["Number of Instances"].insert(0, "1")
+            value_entries["Frame Rate"].delete(0, tk.END)
+            value_entries["Frame Rate"].insert(0, "30")
+            render_shadows_var.set(True)
+            auto_save_settings()
+            logging.info("Default settings restored")
+        
+        edit_menu.add_command(label="Clear All Input Fields", command=clear_all_input_fields)
+        edit_menu.add_command(label="Restore Default Settings", command=restore_default_settings)
+        
+        menubar.add_cascade(label="Edit", menu=edit_menu)
+        
+        # Help menu
+        help_menu = tk.Menu(menubar, tearoff=0)
+        theme_manager.register_widget(help_menu, "menu")
+        
+        def show_overlord_log():
+            """Show Overlord log with default program"""
+            log_path = os.path.join(get_app_data_path(), 'log.txt')
+            try:
+                if os.path.exists(log_path):
+                    os.startfile(log_path)  # Open with default program on Windows
+                else:
+                    messagebox.showinfo("Log Not Found", "Overlord log file not found.")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to open log file: {e}")
+        
+        def show_iray_server_log():
+            """Show Iray Server log with default program"""
+            # Look for iray_server.log in multiple locations
+            possible_paths = [
+                os.path.join(os.path.dirname(__file__), "iray_server.log"),
+                os.path.join(get_local_app_data_path(), "iray_server.log")
+            ]
+            
+            log_path = None
+            for path in possible_paths:
+                if os.path.exists(path):
+                    log_path = path
+                    break
+            
+            if log_path:
+                try:
+                    os.startfile(log_path)  # Open with default program on Windows
+                except Exception as e:
+                    messagebox.showerror("Error", f"Failed to open log file: {e}")
+            else:
+                messagebox.showinfo("Log Not Found", "Iray Server log file not found. The server may not have been started yet.")
+        
+        def show_daz_studio_log():
+            """Show DAZ Studio log with default program"""
+            # DAZ Studio logs are typically in user's Documents
+            possible_paths = [
+                os.path.join(os.path.expanduser("~"), "Documents", "DAZ 3D", "Studio", "log.txt"),
+                os.path.join(os.path.expanduser("~"), "Documents", "DAZ 3D", "Studio4", "log.txt"),
+                os.path.join(os.environ.get("APPDATA", ""), "DAZ 3D", "Studio4", "log.txt")
+            ]
+            
+            log_path = None
+            for path in possible_paths:
+                if os.path.exists(path):
+                    log_path = path
+                    break
+            
+            if log_path:
+                try:
+                    os.startfile(log_path)  # Open with default program on Windows
+                except Exception as e:
+                    messagebox.showerror("Error", f"Failed to open log file: {e}")
+            else:
+                messagebox.showinfo("Log Not Found", "DAZ Studio log file not found. DAZ Studio may not have been run yet.")
+        
+        def show_about_overlord():
+            """Show About dialog with logos, links, and patch notes"""
+            about_window = tk.Toplevel(root)
+            about_window.title("About Overlord")
+            about_window.geometry("650x900")
+            about_window.resizable(True, True)
+            about_window.iconbitmap(resource_path(os.path.join("images", "favicon.ico")))
+            theme_manager.register_widget(about_window, "root")
+            
+            # Center the window
+            about_window.transient(root)
+            about_window.grab_set()
+            
+            # Main frame (no scrolling needed now)
+            main_frame = tk.Frame(about_window)
+            main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+            theme_manager.register_widget(main_frame, "frame")
+            
+            # Overlord logo
+            try:
+                overlord_logo = tk.PhotoImage(file=resource_path(os.path.join("images", "overlordLogo.png")))
+                overlord_logo_label = tk.Label(main_frame, image=overlord_logo, cursor="hand2")
+                overlord_logo_label.image = overlord_logo  # Keep reference
+                overlord_logo_label.pack(pady=(0, 10))
+                theme_manager.register_widget(overlord_logo_label, "label")
+                
+                def open_overlord_github(event):
+                    webbrowser.open("https://github.com/Laserwolve-Games/Overlord")
+                
+                overlord_logo_label.bind("<Button-1>", open_overlord_github)
+            except Exception as e:
+                logging.warning(f"Could not load Overlord logo: {e}")
+            
+            # GitHub repository link (text)
+            github_repo_link = tk.Label(main_frame, text="https://github.com/Laserwolve-Games/Overlord", 
+                                       font=("Arial", 10), cursor="hand2")
+            github_repo_link.pack(pady=(0, 15))
+            theme_manager.register_widget(github_repo_link, "label")
+            
+            # Version only
+            version_label = tk.Label(main_frame, text=f"Version {get_display_version()}", 
+                                   font=("Arial", 14, "bold"))
+            version_label.pack(pady=(0, 20))
+            theme_manager.register_widget(version_label, "label")
+            
+            # Patch Notes section
+            patch_notes_label = tk.Label(main_frame, text="Latest Release Notes:", 
+                                        font=("Arial", 12, "bold"))
+            patch_notes_label.pack(pady=(10, 5), anchor="w")
+            theme_manager.register_widget(patch_notes_label, "label")
+            
+            # Create text widget for patch notes with scrollbar
+            patch_notes_frame = tk.Frame(main_frame)
+            patch_notes_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 20))
+            theme_manager.register_widget(patch_notes_frame, "frame")
+            
+            patch_notes_text = tk.Text(patch_notes_frame, height=20, wrap=tk.WORD, 
+                                     font=("Arial", 9), state=tk.DISABLED)
+            patch_scrollbar = tk.Scrollbar(patch_notes_frame, orient=tk.VERTICAL, command=patch_notes_text.yview)
+            patch_notes_text.configure(yscrollcommand=patch_scrollbar.set)
+            
+            theme_manager.register_widget(patch_notes_text, "text")
+            theme_manager.register_widget(patch_scrollbar, "scrollbar")
+            
+            patch_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+            patch_notes_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            
+            # Function to render basic markdown formatting
+            def render_markdown_to_text(markdown_text, text_widget):
+                """Apply basic markdown formatting to text widget"""
+                text_widget.config(state=tk.NORMAL)
+                text_widget.delete(1.0, tk.END)
+                
+                # Configure text tags for formatting
+                text_widget.tag_configure("heading1", font=("Arial", 14, "bold"))
+                text_widget.tag_configure("heading2", font=("Arial", 12, "bold"))
+                text_widget.tag_configure("heading3", font=("Arial", 11, "bold"))
+                text_widget.tag_configure("bold", font=("Arial", 9, "bold"))
+                text_widget.tag_configure("italic", font=("Arial", 9, "italic"))
+                text_widget.tag_configure("code", font=("Courier", 9), background="#f0f0f0")
+                text_widget.tag_configure("bullet", lmargin1=20, lmargin2=40)
+                
+                lines = markdown_text.split('\n')
+                for line in lines:
+                    line = line.rstrip()
+                    
+                    # Headers
+                    if line.startswith('# '):
+                        text_widget.insert(tk.END, line[2:] + '\n', "heading1")
+                    elif line.startswith('## '):
+                        text_widget.insert(tk.END, line[3:] + '\n', "heading2")
+                    elif line.startswith('### '):
+                        text_widget.insert(tk.END, line[4:] + '\n', "heading3")
+                    # Bullet points
+                    elif line.startswith('- ') or line.startswith('* '):
+                        text_widget.insert(tk.END, f"• {line[2:]}\n", "bullet")
+                    # Code blocks (simple detection)
+                    elif line.startswith('```') or line.startswith('    '):
+                        if line.startswith('```'):
+                            text_widget.insert(tk.END, line[3:] + '\n', "code")
+                        else:
+                            text_widget.insert(tk.END, line + '\n', "code")
+                    else:
+                        # Handle inline formatting
+                        current_pos = 0
+                        while current_pos < len(line):
+                            # Find next formatting marker
+                            bold_pos = line.find('**', current_pos)
+                            italic_pos = line.find('*', current_pos)
+                            code_pos = line.find('`', current_pos)
+                            
+                            # Find the earliest formatting marker
+                            next_marker = len(line)
+                            marker_type = None
+                            
+                            if bold_pos != -1 and bold_pos < next_marker:
+                                next_marker = bold_pos
+                                marker_type = 'bold'
+                            if italic_pos != -1 and italic_pos < next_marker and italic_pos != bold_pos:
+                                next_marker = italic_pos
+                                marker_type = 'italic'
+                            if code_pos != -1 and code_pos < next_marker:
+                                next_marker = code_pos
+                                marker_type = 'code'
+                            
+                            # Insert normal text up to marker
+                            if next_marker > current_pos:
+                                text_widget.insert(tk.END, line[current_pos:next_marker])
+                            
+                            if marker_type == 'bold' and next_marker < len(line):
+                                end_pos = line.find('**', next_marker + 2)
+                                if end_pos != -1:
+                                    text_widget.insert(tk.END, line[next_marker + 2:end_pos], "bold")
+                                    current_pos = end_pos + 2
+                                else:
+                                    text_widget.insert(tk.END, line[next_marker:])
+                                    break
+                            elif marker_type == 'italic' and next_marker < len(line):
+                                end_pos = line.find('*', next_marker + 1)
+                                if end_pos != -1:
+                                    text_widget.insert(tk.END, line[next_marker + 1:end_pos], "italic")
+                                    current_pos = end_pos + 1
+                                else:
+                                    text_widget.insert(tk.END, line[next_marker:])
+                                    break
+                            elif marker_type == 'code' and next_marker < len(line):
+                                end_pos = line.find('`', next_marker + 1)
+                                if end_pos != -1:
+                                    text_widget.insert(tk.END, line[next_marker + 1:end_pos], "code")
+                                    current_pos = end_pos + 1
+                                else:
+                                    text_widget.insert(tk.END, line[next_marker:])
+                                    break
+                            else:
+                                if next_marker < len(line):
+                                    text_widget.insert(tk.END, line[next_marker:])
+                                break
+                        
+                        text_widget.insert(tk.END, '\n')
+                
+                text_widget.config(state=tk.DISABLED)
+            
+            # Function to fetch and display patch notes
+            def fetch_patch_notes():
+                try:
+                    # Fetch latest release info from GitHub API
+                    api_url = "https://api.github.com/repos/Laserwolve-Games/Overlord/releases/latest"
+                    
+                    with urllib.request.urlopen(api_url, timeout=10) as response:
+                        release_data = json.loads(response.read().decode())
+                    
+                    # Extract release information
+                    tag_name = release_data.get('tag_name', 'Unknown')
+                    release_name = release_data.get('name', 'Unknown Release')
+                    body = release_data.get('body', 'No release notes available.')
+                    published_at = release_data.get('published_at', '')
+                    
+                    # Format the date
+                    if published_at:
+                        try:
+                            from datetime import datetime
+                            date_obj = datetime.fromisoformat(published_at.replace('Z', '+00:00'))
+                            formatted_date = date_obj.strftime('%B %d, %Y')
+                        except:
+                            formatted_date = published_at
+                    else:
+                        formatted_date = 'Unknown date'
+                    
+                    # Format the patch notes with markdown
+                    patch_notes_content = f"# {release_name} ({tag_name})\n**Released:** {formatted_date}\n\n{body}"
+                    
+                    # Render with basic markdown formatting
+                    render_markdown_to_text(patch_notes_content, patch_notes_text)
+                    
+                except Exception as e:
+                    logging.warning(f"Could not fetch patch notes: {e}")
+                    error_content = f"Could not load patch notes.\n\n**Error:** {str(e)}\n\nPlease visit: https://github.com/Laserwolve-Games/Overlord/releases/latest"
+                    render_markdown_to_text(error_content, patch_notes_text)
+            
+            # Fetch patch notes in a separate thread to avoid blocking UI
+            threading.Thread(target=fetch_patch_notes, daemon=True).start()
+            
+            # Initially show loading message
+            patch_notes_text.config(state=tk.NORMAL)
+            patch_notes_text.insert(1.0, "Loading latest release notes...")
+            patch_notes_text.config(state=tk.DISABLED)
+            
+            # Laserwolve Games logo
+            try:
+                lwg_logo = tk.PhotoImage(file=resource_path(os.path.join("images", "laserwolveGamesLogo.png")))
+                lwg_logo_label = tk.Label(main_frame, image=lwg_logo, cursor="hand2")
+                lwg_logo_label.image = lwg_logo  # Keep reference
+                lwg_logo_label.pack(pady=(10, 10))
+                theme_manager.register_widget(lwg_logo_label, "label")
+                
+                def open_lwg_website(event):
+                    webbrowser.open("https://laserwolvegames.com")
+                
+                lwg_logo_label.bind("<Button-1>", open_lwg_website)
+            except Exception as e:
+                logging.warning(f"Could not load Laserwolve Games logo: {e}")
+            
+            # Laserwolve Games website link
+            lwg_link = tk.Label(main_frame, text="https://laserwolvegames.com", 
+                              font=("Arial", 10), cursor="hand2")
+            lwg_link.pack(pady=(5, 5))
+            theme_manager.register_widget(lwg_link, "label")
+            
+            # Laserwolve Games GitHub organization link
+            lwg_github_link = tk.Label(main_frame, text="https://github.com/Laserwolve-Games", 
+                                     font=("Arial", 10), cursor="hand2")
+            lwg_github_link.pack(pady=(0, 15))
+            theme_manager.register_widget(lwg_github_link, "label")
+            
+            # Apply hyperlink styling based on theme
+            def apply_link_style():
+                if theme_manager.current_theme == "dark":
+                    github_repo_link.config(fg="#5DADE2")  # Light blue for dark theme
+                    lwg_link.config(fg="#5DADE2")
+                    lwg_github_link.config(fg="#5DADE2")
+                else:
+                    github_repo_link.config(fg="#0066CC")  # Dark blue for light theme
+                    lwg_link.config(fg="#0066CC")
+                    lwg_github_link.config(fg="#0066CC")
+            
+            apply_link_style()
+            
+            def open_github_repo(event):
+                webbrowser.open("https://github.com/Laserwolve-Games/Overlord")
+            
+            def open_lwg_link(event):
+                webbrowser.open("https://laserwolvegames.com")
+            
+            def open_lwg_github(event):
+                webbrowser.open("https://github.com/Laserwolve-Games")
+            
+            github_repo_link.bind("<Button-1>", open_github_repo)
+            lwg_link.bind("<Button-1>", open_lwg_link)
+            lwg_github_link.bind("<Button-1>", open_lwg_github)
+            
+            # Close button
+            close_button = tk.Button(main_frame, text="Close", command=about_window.destroy,
+                                   font=("Arial", 10), width=10)
+            close_button.pack(pady=(10, 0))
+            theme_manager.register_widget(close_button, "button")
+        
+        help_menu.add_command(label="Show Overlord Log", command=show_overlord_log)
+        help_menu.add_command(label="Show Iray Server Log", command=show_iray_server_log)
+        help_menu.add_command(label="Show DAZ Studio Log", command=show_daz_studio_log)
+        help_menu.add_separator()
+        help_menu.add_command(label="About Overlord", command=show_about_overlord)
+        
+        menubar.add_cascade(label="Help", menu=help_menu)
+        
+        root.config(menu=menubar)
+        return menubar
+    
     # Maximize the application window
     root.state("zoomed")
 
@@ -3023,6 +3507,9 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                         subprocess.run(['explorer', parent_dir], check=False)
         except Exception as e:
             logging.error(f"Error opening file location: {e}")
+
+    # Create the menu bar (after all UI variables are defined)
+    create_menu_bar()
 
     # --- Last Rendered Image Section ---
     right_frame = tk.Frame(root)
