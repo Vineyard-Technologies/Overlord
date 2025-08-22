@@ -38,7 +38,6 @@ RECENT_RENDER_TIMES_LIMIT = 25
 MAX_CONCURRENT_CONVERSIONS = 4  # Allow multiple EXR conversions to run in parallel
 
 # UI update intervals (milliseconds)
-OUTPUT_UPDATE_INTERVAL = 5000
 AUTO_SAVE_DELAY = 2000
 
 # Process startup delays (milliseconds)
@@ -250,6 +249,42 @@ def find_newest_image(directory: str) -> list:
     # Sort by most recent first
     image_files.sort(reverse=True)
     return [fpath for mtime, fpath in image_files]
+
+def count_existing_images_in_zips(output_directory: str) -> int:
+    """Count existing images in ZIP files following the DSA script's organization structure.
+    
+    ZIP structure: {subject}[_shadow]/{animation}/{animation}_{angle}.zip
+    PNG structure: {subject}[_shadow]_{animation}_{angle}_{frame}.png
+    """
+    if not os.path.exists(output_directory):
+        return 0
+    
+    total_images = 0
+    
+    try:
+        # Walk through the output directory looking for ZIP files
+        for root, dirs, files in os.walk(output_directory):
+            for file in files:
+                if file.lower().endswith('.zip'):
+                    zip_path = os.path.join(root, file)
+                    
+                    try:
+                        with zipfile.ZipFile(zip_path, 'r') as zip_file:
+                            # Count PNG files in the ZIP
+                            png_files = [name for name in zip_file.namelist() 
+                                       if name.lower().endswith('.png')]
+                            total_images += len(png_files)
+                            
+                    except (zipfile.BadZipFile, OSError, IOError) as e:
+                        logging.warning(f"Could not read ZIP file {zip_path}: {e}")
+                        continue
+                        
+    except Exception as e:
+        logging.error(f"Error counting images in ZIP files: {e}")
+        return 0
+    
+    logging.debug(f"count_existing_images_in_zips: Found {total_images} existing images in ZIP files")
+    return total_images
 
 
 # ============================================================================
@@ -937,6 +972,7 @@ class ExrFileHandler(FileSystemEventHandler):
         }
         # Session completion tracking
         self.successful_moves = 0  # Track successful image moves to final directory
+        self.successful_move_timestamps = []  # Track timestamps of successful moves for time estimation
         self.session_completion_callback = None  # Callback to trigger when RENDERS_PER_SESSION is reached
     
     def set_image_update_callback(self, callback):
@@ -1549,6 +1585,11 @@ class ExrFileHandler(FileSystemEventHandler):
             # Track successful move and check for session completion
             with self._lock:
                 self.successful_moves += 1
+                # Record timestamp for time estimation
+                self.successful_move_timestamps.append(time.time())
+                # Keep only recent timestamps for accurate estimation (last 50 moves)
+                if len(self.successful_move_timestamps) > 50:
+                    self.successful_move_timestamps.pop(0)
                 logging.debug(f"Successful moves: {self.successful_moves}/{RENDERS_PER_SESSION}")
                 
                 # Trigger progress update callback
@@ -1606,6 +1647,11 @@ class ExrFileHandler(FileSystemEventHandler):
             # Track successful move to zip and check for session completion
             with self._lock:
                 self.successful_moves += 1
+                # Record timestamp for time estimation
+                self.successful_move_timestamps.append(time.time())
+                # Keep only recent timestamps for accurate estimation (last 50 moves)
+                if len(self.successful_move_timestamps) > 50:
+                    self.successful_move_timestamps.pop(0)
                 logging.debug(f"Successful moves (to zip): {self.successful_moves}/{RENDERS_PER_SESSION}")
                 
                 # Trigger progress update callback
@@ -1650,6 +1696,23 @@ class ExrFileHandler(FileSystemEventHandler):
         # Reset session tracking
         with self._lock:
             self.successful_moves = 0
+            self.successful_move_timestamps.clear()
+    
+    def get_average_time_between_moves(self) -> float:
+        """Calculate average time between successful moves in seconds.
+        Returns 0 if not enough data is available."""
+        with self._lock:
+            if len(self.successful_move_timestamps) < 2:
+                return 0.0
+            
+            # Calculate time differences between consecutive moves
+            time_diffs = []
+            for i in range(1, len(self.successful_move_timestamps)):
+                diff = self.successful_move_timestamps[i] - self.successful_move_timestamps[i-1]
+                time_diffs.append(diff)
+            
+            # Return average time difference
+            return sum(time_diffs) / len(time_diffs) if time_diffs else 0.0
 
 
 class ZipFileHandler(FileSystemEventHandler):
@@ -2205,64 +2268,57 @@ def main():
         ]
     
     def update_estimated_time_remaining(images_remaining):
-        # Get user profile directory
-        user_profile = os.environ.get('USERPROFILE') or os.path.expanduser('~')
-        base_log_dir = os.path.join(user_profile, "AppData", "Roaming", "DAZ 3D")
-        avg_times = []
-        num_instances_str = value_entries.get("Number of Instances", None)
+        """Calculate estimated time remaining based on average time between successful image moves."""
         try:
-            num_instances = int(num_instances_str.get()) if num_instances_str else 1
-        except Exception:
-            num_instances = 1
+            # Get average time between successful moves from ExrFileHandler
+            if hasattr(cleanup_manager, 'exr_handler') and cleanup_manager.exr_handler is not None:
+                avg_time_per_image = cleanup_manager.exr_handler.get_average_time_between_moves()
+                
+                if avg_time_per_image > 0 and images_remaining > 0:
+                    # Calculate total estimated seconds remaining
+                    total_seconds = int(avg_time_per_image * images_remaining)
+                    
+                    # Format as H:MM:SS or M:SS
+                    hours = total_seconds // 3600
+                    minutes = (total_seconds % 3600) // 60
+                    seconds = total_seconds % 60
+                    
+                    if hours > 0:
+                        formatted = f"Estimated time remaining: {hours}:{minutes:02}:{seconds:02}"
+                    else:
+                        formatted = f"Estimated time remaining: {minutes}:{seconds:02}"
+                    
+                    estimated_time_remaining_var.set(formatted)
+                    
+                    # Calculate and set estimated completion time
+                    completion_time = datetime.datetime.now() + datetime.timedelta(seconds=total_seconds)
+                    
+                    def ordinal(n):
+                        if 10 <= n % 100 <= 20:
+                            suffix = 'th'
+                        else:
+                            suffix = {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')
+                        return str(n) + suffix
 
-        for i in range(1, num_instances + 1):
-            # Always use Studio4 [i] for all instances, including i==1
-            studio_dir = os.path.join(base_log_dir, f"Studio4 [{i}]")
-            log_path = os.path.join(studio_dir, "log.txt")
-            if not os.path.exists(log_path):
-                continue
-            try:
-                with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
-                    # Collect all matching times in this log
-                    times = [float(m.group(1)) for line in f if (m := re.search(r"Total Rendering Time: (\d+(?:\.\d+)?) seconds", line))]
-                    avg_times.extend(times)
-            except Exception:
-                continue
-
-        # Use only the 25 most recent render times (from all logs combined)
-        if avg_times and len(avg_times) > 0:
-            recent_times = avg_times[-RECENT_RENDER_TIMES_LIMIT:] if len(avg_times) > RECENT_RENDER_TIMES_LIMIT else avg_times
-            avg_time = sum(recent_times) / len(recent_times)
-            total_seconds = int(avg_time * images_remaining)
-            # Format as H:MM:SS
-            hours = total_seconds // 3600
-            minutes = (total_seconds % 3600) // 60
-            seconds = total_seconds % 60
-            if hours > 0:
-                formatted = f"Estimated time remaining: {hours}:{minutes:02}:{seconds:02}"
-            else:
-                formatted = f"Estimated time remaining: {minutes}:{seconds:02}"
-            estimated_time_remaining_var.set(formatted)
-            # Set estimated completion at
-            completion_time = datetime.datetime.now() + datetime.timedelta(seconds=total_seconds)
-            # Format: "Thursday, July 10th, 2025 2:35 PM"
-            def ordinal(n):
-                if 10 <= n % 100 <= 20:
-                    suffix = 'th'
-                else:
-                    suffix = {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')
-                return str(n) + suffix
-
-            weekday = completion_time.strftime('%A')
-            month = completion_time.strftime('%B')
-            day = ordinal(completion_time.day)
-            year = completion_time.year
-            hour = completion_time.strftime('%I').lstrip('0') or '12'
-            minute = completion_time.strftime('%M')
-            ampm = completion_time.strftime('%p')
-            completion_str = f"Estimated completion at: {weekday}, {month} {day}, {year} {hour}:{minute} {ampm}"
-            estimated_completion_at_var.set(completion_str)
-        else:
+                    weekday = completion_time.strftime('%A')
+                    month = completion_time.strftime('%B')
+                    day = ordinal(completion_time.day)
+                    year = completion_time.year
+                    hour = completion_time.strftime('%I').lstrip('0') or '12'
+                    minute = completion_time.strftime('%M')
+                    ampm = completion_time.strftime('%p')
+                    completion_str = f"Estimated completion at: {weekday}, {month} {day}, {year} {hour}:{minute} {ampm}"
+                    estimated_completion_at_var.set(completion_str)
+                    
+                    logging.debug(f"Time estimation: {avg_time_per_image:.1f}s per image, {images_remaining} remaining = {formatted}")
+                    return
+            
+            # Fallback if no timing data available
+            estimated_time_remaining_var.set("Estimated time remaining: --")
+            estimated_completion_at_var.set("Estimated completion at: --")
+            
+        except Exception as e:
+            logging.error(f"Error calculating estimated time remaining: {e}")
             estimated_time_remaining_var.set("Estimated time remaining: --")
             estimated_completion_at_var.set("Estimated completion at: --")
     
@@ -2910,22 +2966,25 @@ def main():
                 total_images = int(total_images_str) if total_images_str.isdigit() else None
                 logging.debug(f"update_output_details: Parsed total images: {total_images}")
                 
-                # Get accurate count of successfully processed images from ExrFileHandler
-                completed_images = 0
+                # Get count of images that already exist in ZIP files (from previous runs)
+                existing_images_in_zips = count_existing_images_in_zips(output_dir)
+                logging.debug(f"update_output_details: Found {existing_images_in_zips} existing images in ZIP files")
+                
+                # Get count of successfully processed images from current session (ExrFileHandler)
+                current_session_images = 0
                 if hasattr(cleanup_manager, 'exr_handler') and cleanup_manager.exr_handler is not None:
-                    completed_images = cleanup_manager.exr_handler.successful_moves
-                    logging.debug(f"update_output_details: Using ExrFileHandler successful_moves: {completed_images}")
-                else:
-                    # Fallback to PNG file count if ExrFileHandler not available
-                    completed_images = png_count
-                    logging.debug(f"update_output_details: ExrFileHandler not available, using PNG count: {completed_images}")
+                    current_session_images = cleanup_manager.exr_handler.successful_moves
+                    logging.debug(f"update_output_details: Current session successful_moves: {current_session_images}")
+                
+                # Total completed images = existing in ZIPs + current session moves
+                completed_images = existing_images_in_zips + current_session_images
                 
                 if total_images and total_images > 0:
                     percent = min(100, (completed_images / total_images) * 100)
                     progress_var.set(percent)
                     remaining = max(0, total_images - completed_images)
                     images_remaining_var.set(f"Images remaining: {remaining}")
-                    logging.info(f"update_output_details: Updated progress - {completed_images}/{total_images} images ({percent:.1f}%), {remaining} remaining")
+                    logging.info(f"update_output_details: Updated progress - {completed_images}/{total_images} images ({percent:.1f}%), {remaining} remaining (existing: {existing_images_in_zips}, current session: {current_session_images})")
                     update_estimated_time_remaining(remaining)
                 else:
                     progress_var.set(0)
@@ -3191,11 +3250,6 @@ def main():
             root.after(100, update_ui)  # Small delay to ensure file is fully written
         except Exception as e:
             logging.error(f'Error scheduling UI update for new image: {e}')
-
-    def periodic_update_output_details():
-        """Periodically update output details every 5 seconds"""
-        update_output_details()
-        root.after(OUTPUT_UPDATE_INTERVAL, periodic_update_output_details)
 
     # Update image when output directory changes or after render
     def on_output_dir_change(*args):
@@ -3744,7 +3798,6 @@ def main():
 
     # Initial display setup
     root.after(500, show_last_rendered_image)  # Initial image load
-    root.after(OUTPUT_UPDATE_INTERVAL, periodic_update_output_details)  # Start periodic output updates
 
     # --- Buttons Section ---
     buttons_frame = tk.Frame(root)
