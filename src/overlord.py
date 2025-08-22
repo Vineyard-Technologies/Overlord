@@ -916,10 +916,11 @@ settings_manager = SettingsManager()
 class ExrFileHandler(FileSystemEventHandler):
     """Enhanced EXR to PNG converter with better error handling and progress tracking."""
     
-    def __init__(self, output_directory: str, update_gui_callback=None):
+    def __init__(self, output_directory: str, update_gui_callback=None, progress_update_callback=None):
         super().__init__()
         self.output_directory = output_directory
         self.update_gui_callback = update_gui_callback
+        self.progress_update_callback = progress_update_callback  # New callback for progress updates
         self.image_update_callback = None 
         self.processed_files = set()  # Track processed EXR files
         self.processed_png_files = set()  # Track PNG files that have been transparency-processed
@@ -941,6 +942,10 @@ class ExrFileHandler(FileSystemEventHandler):
     def set_image_update_callback(self, callback):
         """Set callback function to update UI when new images are available."""
         self.image_update_callback = callback
+    
+    def set_progress_update_callback(self, callback):
+        """Set callback function to update progress when images are successfully moved."""
+        self.progress_update_callback = callback
     
     def set_session_completion_callback(self, callback):
         """Set callback function to trigger when RENDERS_PER_SESSION images have been successfully moved."""
@@ -1546,6 +1551,14 @@ class ExrFileHandler(FileSystemEventHandler):
                 self.successful_moves += 1
                 logging.debug(f"Successful moves: {self.successful_moves}/{RENDERS_PER_SESSION}")
                 
+                # Trigger progress update callback
+                if self.progress_update_callback:
+                    try:
+                        # Call directly - the callback should handle thread safety
+                        self.progress_update_callback()
+                    except Exception as e:
+                        logging.error(f"Error calling progress update callback: {e}")
+                
                 # Check if we've reached the session completion threshold
                 if self.successful_moves >= RENDERS_PER_SESSION and self.session_completion_callback:
                     logging.info(f"Reached {RENDERS_PER_SESSION} successful moves - triggering session completion")
@@ -1594,6 +1607,14 @@ class ExrFileHandler(FileSystemEventHandler):
             with self._lock:
                 self.successful_moves += 1
                 logging.debug(f"Successful moves (to zip): {self.successful_moves}/{RENDERS_PER_SESSION}")
+                
+                # Trigger progress update callback
+                if self.progress_update_callback:
+                    try:
+                        # Call directly - the callback should handle thread safety
+                        self.progress_update_callback()
+                    except Exception as e:
+                        logging.error(f"Error calling progress update callback: {e}")
                 
                 # Check if we've reached the session completion threshold
                 if self.successful_moves >= RENDERS_PER_SESSION and self.session_completion_callback:
@@ -1699,7 +1720,7 @@ class CleanupManager:
         """Mark that settings have been saved to prevent duplicate saves"""
         self.settings_saved_on_close = True
     
-    def start_file_monitoring(self, server_output_dir, final_output_dir, image_update_callback=None, session_completion_callback=None):
+    def start_file_monitoring(self, server_output_dir, final_output_dir, image_update_callback=None, session_completion_callback=None, progress_update_callback=None):
         """Start monitoring the server output directory for new .exr files and .zip files"""
         try:
             if self.file_observer is not None:
@@ -1717,6 +1738,10 @@ class CleanupManager:
             # Set up the image update callback for UI notifications
             if image_update_callback:
                 self.exr_handler.set_image_update_callback(image_update_callback)
+            
+            # Set up progress update callback to trigger UI updates when images are moved
+            if progress_update_callback:
+                self.exr_handler.set_progress_update_callback(progress_update_callback)
             
             # Set up the session completion callback for Iray Server restart
             if session_completion_callback:
@@ -2829,7 +2854,11 @@ def main():
 
     def update_output_details():
         """Update the output details with current folder statistics"""
+        logging.debug("update_output_details: Starting update...")
+        
         output_dir = value_entries["Output Directory"].get()
+        logging.debug(f"update_output_details: Output directory: {output_dir}")
+        
         if not os.path.exists(output_dir):
             output_folder_size.config(text="Folder Size: N/A")
             output_png_count.config(text="PNG Files: N/A")
@@ -2837,6 +2866,7 @@ def main():
             output_folder_count.config(text="Sub-folders: N/A")
             progress_var.set(0)
             images_remaining_var.set("Images remaining: --")
+            logging.debug("update_output_details: Output directory doesn't exist")
             return
         try:
             total_size = 0
@@ -2863,32 +2893,52 @@ def main():
             output_png_count.config(text=f"PNG Files: {png_count}")
             output_zip_count.config(text=f"ZIP Files: {zip_count}")
             output_folder_count.config(text=f"Sub-folders: {folder_count}")
-            # Update progress bar and images remaining label
+            logging.debug(f"update_output_details: Found {png_count} PNG files")
+            
+            # Update progress bar and images remaining label using successful moves count
             try:
                 total_images_str = output_total_images.cget("text").replace("Total Images to Render: ", "").strip()
+                logging.debug(f"update_output_details: Total images string: '{total_images_str}'")
+                
                 if not total_images_str:
                     progress_var.set(0)
                     images_remaining_var.set("Images remaining: --")
                     estimated_time_remaining_var.set("Estimated time remaining: --")
                     estimated_completion_at_var.set("Estimated completion at: --")
+                    logging.debug("update_output_details: Total images string is empty")
                     return
                 total_images = int(total_images_str) if total_images_str.isdigit() else None
+                logging.debug(f"update_output_details: Parsed total images: {total_images}")
+                
+                # Get accurate count of successfully processed images from ExrFileHandler
+                completed_images = 0
+                if hasattr(cleanup_manager, 'exr_handler') and cleanup_manager.exr_handler is not None:
+                    completed_images = cleanup_manager.exr_handler.successful_moves
+                    logging.debug(f"update_output_details: Using ExrFileHandler successful_moves: {completed_images}")
+                else:
+                    # Fallback to PNG file count if ExrFileHandler not available
+                    completed_images = png_count
+                    logging.debug(f"update_output_details: ExrFileHandler not available, using PNG count: {completed_images}")
+                
                 if total_images and total_images > 0:
-                    percent = min(100, (png_count / total_images) * 100)
+                    percent = min(100, (completed_images / total_images) * 100)
                     progress_var.set(percent)
-                    remaining = max(0, total_images - png_count)
+                    remaining = max(0, total_images - completed_images)
                     images_remaining_var.set(f"Images remaining: {remaining}")
+                    logging.info(f"update_output_details: Updated progress - {completed_images}/{total_images} images ({percent:.1f}%), {remaining} remaining")
                     update_estimated_time_remaining(remaining)
                 else:
                     progress_var.set(0)
                     images_remaining_var.set("Images remaining: --")
                     estimated_time_remaining_var.set("Estimated time remaining: --")
                     estimated_completion_at_var.set("Estimated completion at: --")
-            except Exception:
+                    logging.debug("update_output_details: Total images is 0 or None")
+            except Exception as e:
                 progress_var.set(0)
                 images_remaining_var.set("Images remaining: --")
                 estimated_time_remaining_var.set("Estimated time remaining: --")
                 estimated_completion_at_var.set("Estimated completion at: --")
+                logging.error(f"update_output_details: Error updating progress: {e}")
         except Exception as e:
             output_folder_size.config(text="Folder Size: Error")
             output_png_count.config(text="PNG Files: Error")
@@ -2896,6 +2946,7 @@ def main():
             output_folder_count.config(text="Sub-folders: Error")
             progress_var.set(0)
             images_remaining_var.set("Images remaining: --")
+            logging.error(f"update_output_details: Error in folder stats: {e}")
 
     no_img_label = tk.Label(right_frame, font=("Arial", 12))
     no_img_label.place(relx=0.5, rely=0.5, anchor="center")
@@ -3160,7 +3211,15 @@ def main():
         if hasattr(cleanup_manager, 'file_observer') and cleanup_manager.file_observer is not None:
             try:
                 server_output_dir = get_server_output_directory()
-                cleanup_manager.start_file_monitoring(server_output_dir, new_output_dir, watchdog_image_update, None)  # No session completion callback for directory changes
+                # Create thread-safe progress update callback
+                def safe_progress_update():
+                    """Thread-safe progress update that schedules on main thread."""
+                    try:
+                        root.after_idle(update_output_details)
+                    except Exception as e:
+                        logging.error(f"Error scheduling progress update: {e}")
+                
+                cleanup_manager.start_file_monitoring(server_output_dir, new_output_dir, watchdog_image_update, None, safe_progress_update)  # Pass thread-safe progress update callback
                 logging.info(f'Restarted file monitoring for new output directory: {new_output_dir}')
             except Exception as e:
                 logging.error(f'Failed to restart file monitoring: {e}')
@@ -3277,7 +3336,7 @@ def main():
                             # Since DAZ Studio continues running, just restart file monitoring
                             logging.info('Restarting file monitoring for existing DAZ Studio instances')
                             image_output_dir = value_entries["Output Directory"].get().replace("\\", "/")
-                            cleanup_manager.start_file_monitoring(server_output_dir, image_output_dir, watchdog_image_update, on_session_complete)
+                            cleanup_manager.start_file_monitoring(server_output_dir, image_output_dir, watchdog_image_update, on_session_complete, update_output_details)
                             
                             logging.info('Session restart complete - ready for next cycle')
                         except Exception as e:
@@ -3354,11 +3413,15 @@ def main():
         
         def continue_render_setup(session_completion_callback):
             try:
+                logging.info("continue_render_setup: Starting render setup continuation...")
                 # Continue with rest of render setup
                 complete_render_setup(session_completion_callback)
+                logging.info("continue_render_setup: Render setup completed successfully")
                 
             except Exception as e:
                 logging.error(f"Failed to continue render setup: {e}")
+                import traceback
+                logging.error(f"Full traceback: {traceback.format_exc()}")
                 # Re-enable Start Render button and disable Stop Render button on error
                 button.config(state="normal")
                 stop_button.config(state="disabled")
@@ -3368,47 +3431,127 @@ def main():
         render_thread.start()
         
     def complete_render_setup(session_completion_callback=None):
+        logging.info("complete_render_setup: Starting total images calculation...")
+        
         # Get animations again (since we're in a different scope now)
         animations = value_entries["Animations"].get("1.0", tk.END).strip().replace("\\", "/").split("\n")
         animations = [file for file in animations if file]
+        logging.info(f"complete_render_setup: Found {len(animations)} animation files")
         
         # Calculate and display total images to render (update label)
-        def find_total_images(animations):
-            total_frames = 0
-            for file_path in animations:
-                if '_animation.duf' in file_path:
-                    try:
-                        with open(file_path, 'r', encoding='utf-8') as f:
-                            content = f.read()
-                            json_start = content.find('{')
-                            if json_start == -1:
-                                continue
-                            data = json.loads(content[json_start:])
-                            animations = data.get('scene', {}).get('animations', [])
-                            for anim in animations:
-                                keys = anim.get('keys', [])
-                                if len(keys) != 1:
-                                    total_frames += len(keys)
-                                    break
-                    except Exception:
-                        continue
-            return total_frames
+        def get_angles_from_subject(subject_path):
+            """Read the angles property from the subject file's JSON."""
+            try:
+                with open(subject_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                    json_start = content.find('{')
+                    if json_start == -1:
+                        return 16  # Default value
+                    data = json.loads(content[json_start:])
+                    angles = data.get('asset_info', {}).get('angles')
+                    return angles if angles is not None else 16
+            except Exception:
+                return 16  # Default value if can't read or parse
 
-        total_images = None
-        try:
-            if animations:
-                total_images = find_total_images(animations)
-        except Exception:
-            total_images = None
-        if total_images is not None:
-            # TODO: This should be read from the JSON of the _subject files.
-            total_images *= 16
+        def get_frames_from_animation(animation_path):
+            """Get the number of frames from an animation file."""
+            try:
+                with open(animation_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                    json_start = content.find('{')
+                    if json_start == -1:
+                        return 1  # Static animation
+                    data = json.loads(content[json_start:])
+                    animations = data.get('scene', {}).get('animations', [])
+                    for anim in animations:
+                        keys = anim.get('keys', [])
+                        if len(keys) > 1:
+                            return len(keys)
+                    return 1  # Static animation if no multi-frame animation found
+            except Exception:
+                return 1  # Default to static if can't read
+
+        def calculate_total_images():
+            """Calculate total images based on subject, animations, gear, and settings."""
+            # Get subject file
+            subject_path = value_entries["Subject"].get().strip()
+            if not subject_path:
+                return None
+                
+            # Get number of angles from subject file
+            angles = get_angles_from_subject(subject_path)
+            logging.info(f"complete_render_setup: Subject angles: {angles}")
+            
+            # Get animation files
+            animations = value_entries["Animations"].get("1.0", tk.END).strip().replace("\\", "/").split("\n")
+            animations = [file.strip() for file in animations if file.strip()]
+            
+            # Get gear files
+            gear_files = value_entries["Gear"].get("1.0", tk.END).strip().replace("\\", "/").split("\n")
+            gear_files = [file.strip() for file in gear_files if file.strip()]
+            logging.info(f"complete_render_setup: Found {len(gear_files)} gear files")
+            
+            # If no animations, it's a static render (1 frame)
+            if not animations:
+                total_frames = 1
+                animation_count = 1  # One static render
+                logging.info("complete_render_setup: No animations found - using static render")
+            else:
+                total_frames = 0
+                animation_count = 0
+                for animation_path in animations:
+                    logging.info(f"complete_render_setup: Processing animation: {animation_path}")
+                    if animation_path.lower().endswith('.duf'):
+                        frames = get_frames_from_animation(animation_path)
+                        total_frames += frames
+                        animation_count += 1
+                        logging.info(f"complete_render_setup: Animation {animation_path} has {frames} frames")
+                    else:
+                        logging.info(f"complete_render_setup: Skipping {animation_path} - not a .duf file")
+            
+            logging.info(f"complete_render_setup: Final animation_count: {animation_count}, total_frames: {total_frames}")
+            
+            if animation_count == 0:
+                logging.warning("complete_render_setup: No valid animations found, returning None")
+                return None
+                
+            # Calculate renders per animation:
+            # - Base render (without gear): angles * frames_per_animation
+            # - Gear renders: angles * frames_per_animation * number_of_gear_files
+            gear_count = len(gear_files) if gear_files else 0
+            renders_per_animation = 1 + gear_count  # 1 base render + 1 per gear file
+            
+            # Total images = animation_count * renders_per_animation * angles * avg_frames_per_animation
+            avg_frames_per_animation = total_frames / animation_count if animation_count > 0 else 1
+            total_images = animation_count * renders_per_animation * angles * avg_frames_per_animation
+            
             # If Render Shadows is checked, double the total images
             if render_shadows_var.get():
                 total_images *= 2
+                logging.info("complete_render_setup: Shadows enabled - doubling total images")
+                
+            logging.info(f"complete_render_setup: Calculation - {animation_count} animations × {renders_per_animation} renders/anim × {angles} angles × {avg_frames_per_animation:.1f} avg_frames = {total_images}")
+            return int(total_images)
+
+        total_images = None
+        try:
+            total_images = calculate_total_images()
+            logging.info(f"complete_render_setup: Total images calculated: {total_images}")
+        except Exception as e:
+            logging.warning(f"Error calculating total images: {e}")
+            total_images = None
+            
+        if total_images is not None:
             output_total_images.config(text=f"Total Images to Render: {total_images}")
+            logging.info(f"complete_render_setup: Updated total images label to: {total_images}")
         else:
             output_total_images.config(text="Total Images to Render: ")
+            logging.info("complete_render_setup: Set total images label to empty")
+        
+        # Immediately update the progress details after setting total images
+        logging.info("complete_render_setup: Calling update_output_details()...")
+        update_output_details()
+        logging.info("complete_render_setup: update_output_details() completed")
 
         # Check if any DAZ Studio instances are running
         daz_running = check_process_running(['DAZStudio'])
@@ -3526,7 +3669,16 @@ def main():
                 logging.info('All render instances launched')
                 # Start file monitoring for .exr files in server output directory, move processed PNGs to final output
                 server_output_dir = get_server_output_directory()
-                cleanup_manager.start_file_monitoring(server_output_dir, image_output_dir, watchdog_image_update, session_completion_callback)
+                
+                # Create thread-safe progress update callback
+                def safe_progress_update():
+                    """Thread-safe progress update that schedules on main thread."""
+                    try:
+                        root.after_idle(update_output_details)
+                    except Exception as e:
+                        logging.error(f"Error scheduling progress update: {e}")
+                
+                cleanup_manager.start_file_monitoring(server_output_dir, image_output_dir, watchdog_image_update, session_completion_callback, safe_progress_update)
 
         run_all_instances()
 
