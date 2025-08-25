@@ -1,4 +1,4 @@
-Overlord is a Python dashboard that controls Daz Studio.
+Don't create Python files just to test functionality you've implemented.
 
 The Daz Studio scripting language is called Daz Script. It's based on QtScript.
 

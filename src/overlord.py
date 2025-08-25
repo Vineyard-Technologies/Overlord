@@ -270,7 +270,7 @@ def count_existing_images_in_zips(output_directory: str) -> int:
     """Count existing images in ZIP files following the DSA script's organization structure.
     
     ZIP structure: {subject}[_shadow]/{animation}/{animation}_{angle}.zip
-    PNG structure: {subject}[_shadow]_{animation}_{angle}_{frame}.png
+    PNG structure: {subject}[_shadow]-{animation}_{angle}-{frame}.png
     """
     if not os.path.exists(output_directory):
         return 0
@@ -1454,6 +1454,19 @@ class ExrFileHandler(FileSystemEventHandler):
             if new_name.endswith('-gearCanvas'):
                 new_name = new_name[:-11]
             
+            # Transform underscores to hyphens for the naming scheme
+            # Expected format: subject_animation_angle_frame -> subject-animation_angle-frame
+            parts = new_name.split('_')
+            if len(parts) >= 4:
+                # Join all parts except the last 3 as the subject
+                subject = '_'.join(parts[:-3])
+                animation = parts[-3]
+                angle = parts[-2]
+                frame = parts[-1]
+                
+                # Create new format: subject-animation_angle-frame
+                new_name = f"{subject}-{animation}_{angle}-{frame}"
+            
             # Rename if necessary
             if new_name != name:
                 # Check if we should stop before file operations
@@ -1506,13 +1519,36 @@ class ExrFileHandler(FileSystemEventHandler):
     def _parse_filename_for_organization(self, filename: str) -> tuple:
         """
         Parse filename to extract organization components.
-        Example: "man simpleMace shadow_idle_0_000.png" -> ("man simpleMace shadow", "idle", "0")
+        Example: "man-idle_90-000.png" -> ("man", "idle", "90")
         Returns: (base_name, animation, frame_group) or (None, None, None) if parsing fails
         """
         try:
             # Remove file extension
             name_without_ext = os.path.splitext(filename)[0]
             
+            # Handle new format: subject-animation_angle-frame
+            if '-' in name_without_ext:
+                # Split by the first hyphen to get subject and rest
+                parts = name_without_ext.split('-', 1)
+                if len(parts) == 2:
+                    subject = parts[0]
+                    rest = parts[1]
+                    
+                    # Split the rest by underscore to get animation_angle-frame
+                    if '_' in rest:
+                        animation_and_angle = rest.split('_', 1)
+                        if len(animation_and_angle) == 2:
+                            animation = animation_and_angle[0]
+                            angle_frame = animation_and_angle[1]
+                            
+                            # Split angle-frame by hyphen
+                            if '-' in angle_frame:
+                                angle_frame_parts = angle_frame.split('-', 1)
+                                if len(angle_frame_parts) == 2:
+                                    frame_group = angle_frame_parts[0]
+                                    return (subject, animation, frame_group)
+            
+            # Fallback to old format parsing if new format doesn't match
             # Split by underscores
             parts = name_without_ext.split('_')
             
