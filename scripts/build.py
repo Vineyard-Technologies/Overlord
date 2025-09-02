@@ -203,6 +203,8 @@ def build_executable():
             "--noconsole",
             "--icon", favicon_path,
             "--hidden-import=psutil",
+            "--hidden-import=watchdog_monitor",
+            "--hidden-import=overlord_config",
             "--add-data", f"{favicon_path};images",
             "--add-data", f"{overlord_logo_path};images",
             "--add-data", f"{laserwolve_logo_path};images",

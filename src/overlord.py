@@ -29,6 +29,8 @@ import tempfile
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 from version import __version__ as overlord_version
+from watchdog_monitor import start_watchdog_monitoring, stop_watchdog_monitoring, update_activity, start_critical_operation, end_critical_operation
+from overlord_config import WATCHDOG_CONFIG, CRITICAL_OPERATION_TIMEOUTS, LOGGING_CONFIG, get_config_value
 
 def get_display_version() -> str:
     """Get the display version string. Shows 'dev' when running in development mode."""
@@ -619,6 +621,19 @@ def setup_logger() -> None:
         handlers=[file_handler, stream_handler]
     )
     logging.info(f'--- Overlord started --- (log file: {log_path}, max size: {LOG_SIZE_MB} MB)')
+    
+    # Start watchdog monitoring with configurable settings
+    if WATCHDOG_CONFIG["enabled"]:
+        watchdog_monitor = start_watchdog_monitoring(
+            check_interval=WATCHDOG_CONFIG["check_interval"], 
+            hang_timeout=WATCHDOG_CONFIG["hang_timeout"]
+        )
+        logging.info(f"Watchdog monitoring started - will detect hangs after {WATCHDOG_CONFIG['hang_timeout']} seconds of inactivity")
+        
+        if LOGGING_CONFIG["debug_hangs"]:
+            logging.info(f"Hang detection debug logging enabled - check interval: {WATCHDOG_CONFIG['check_interval']}s")
+    else:
+        logging.warning("Watchdog monitoring is DISABLED in configuration")
 
 def create_splash_screen() -> tuple:
     """Create and show splash screen during startup."""
@@ -833,7 +848,16 @@ class SettingsManager:
             "output_directory": get_default_output_directory(),
             "number_of_instances": "1",
             "frame_rate": "30",
-            "render_shadows": True
+            "render_shadows": True,
+            "output_is_images_folder": True,
+            "browse_locations": {
+                "subject": os.path.join(os.path.expanduser("~"), "Documents"),
+                "animations": os.path.join(os.path.expanduser("~"), "Documents"),
+                "prop_animations": os.path.join(os.path.expanduser("~"), "Documents"),
+                "gear": os.path.join(os.path.expanduser("~"), "Documents"),
+                "gear_animations": os.path.join(os.path.expanduser("~"), "Documents"),
+                "output_directory": get_default_output_directory()
+            }
         }
     
     def load_settings(self) -> dict:
@@ -882,7 +906,7 @@ class SettingsManager:
         
         return issues
     
-    def get_current_settings(self, value_entries: dict, render_shadows_var) -> dict:
+    def get_current_settings(self, value_entries: dict, render_shadows_var, output_is_images_folder_var=None) -> dict:
         """Extract current settings from UI widgets."""
         try:
             animations_text = value_entries["Animations"].get("1.0", tk.END).strip()
@@ -897,7 +921,7 @@ class SettingsManager:
             gear_animations_text = value_entries["Gear Animations"].get("1.0", tk.END).strip()
             gear_animations = [f.strip() for f in gear_animations_text.split('\n') if f.strip()]
             
-            return {
+            settings = {
                 "subject": value_entries["Subject"].get(),
                 "animations": animations,
                 "prop_animations": prop_animations,
@@ -908,12 +932,35 @@ class SettingsManager:
                 "frame_rate": value_entries["Frame Rate"].get(),
                 "render_shadows": render_shadows_var.get()
             }
+            
+            # Add output_is_images_folder setting if the variable is provided
+            if output_is_images_folder_var is not None:
+                settings["output_is_images_folder"] = output_is_images_folder_var.get()
+            else:
+                settings["output_is_images_folder"] = True  # Default value
+            
+            # Preserve browse_locations from global current_settings if available
+            global current_settings
+            if current_settings and "browse_locations" in current_settings:
+                settings["browse_locations"] = current_settings["browse_locations"]
+            else:
+                # Set default browse locations if not available
+                settings["browse_locations"] = {
+                    "subject": os.path.join(os.path.expanduser("~"), "Documents"),
+                    "animations": os.path.join(os.path.expanduser("~"), "Documents"),
+                    "prop_animations": os.path.join(os.path.expanduser("~"), "Documents"),
+                    "gear": os.path.join(os.path.expanduser("~"), "Documents"),
+                    "gear_animations": os.path.join(os.path.expanduser("~"), "Documents"),
+                    "output_directory": get_default_output_directory()
+                }
+                
+            return settings
         except tk.TclError:
             # Widgets have been destroyed, return default settings
             logging.warning("Widgets destroyed during settings extraction, using defaults")
             return self.default_settings.copy()
     
-    def apply_settings(self, settings: dict, value_entries: dict, render_shadows_var) -> bool:
+    def apply_settings(self, settings: dict, value_entries: dict, render_shadows_var, output_is_images_folder_var=None) -> bool:
         """Apply loaded settings to UI widgets."""
         try:
             # Subject
@@ -955,6 +1002,10 @@ class SettingsManager:
             # Checkboxes
             render_shadows_var.set(settings["render_shadows"])
             
+            # Apply output_is_images_folder setting if the variable is provided
+            if output_is_images_folder_var is not None:
+                output_is_images_folder_var.set(settings.get("output_is_images_folder", True))
+            
             logging.info('Settings applied to UI')
             return True
         except Exception as e:
@@ -965,6 +1016,9 @@ class SettingsManager:
 # Global settings manager instance
 settings_manager = SettingsManager()
 
+# Global variable to store current settings including browse locations
+current_settings = None
+
 
 # ============================================================================
 # ENHANCED FILE MONITORING AND EXR CONVERSION
@@ -973,7 +1027,7 @@ settings_manager = SettingsManager()
 class ExrFileHandler(FileSystemEventHandler):
     """Enhanced EXR to PNG converter with better error handling and progress tracking."""
     
-    def __init__(self, output_directory: str, update_gui_callback=None, progress_update_callback=None):
+    def __init__(self, output_directory: str, update_gui_callback=None, progress_update_callback=None, output_is_images_folder_var=None):
         super().__init__()
         self.output_directory = output_directory
         self.update_gui_callback = update_gui_callback
@@ -996,6 +1050,7 @@ class ExrFileHandler(FileSystemEventHandler):
         self.successful_moves = 0  # Track successful image moves to final directory
         self.successful_move_timestamps = []  # Track timestamps of successful moves for time estimation
         self.session_completion_callback = None  # Callback to trigger when RENDERS_PER_SESSION is reached
+        self.output_is_images_folder_var = output_is_images_folder_var  # Reference to the checkbox variable
     
     def set_image_update_callback(self, callback):
         """Set callback function to update UI when new images are available."""
@@ -1008,6 +1063,10 @@ class ExrFileHandler(FileSystemEventHandler):
     def set_session_completion_callback(self, callback):
         """Set callback function to trigger when RENDERS_PER_SESSION images have been successfully moved."""
         self.session_completion_callback = callback
+    
+    def set_output_is_images_folder_var(self, output_is_images_folder_var):
+        """Set reference to the output is images folder checkbox variable."""
+        self.output_is_images_folder_var = output_is_images_folder_var
     
     def set_final_output_directory(self, final_output_directory: str):
         """Set the final output directory where processed PNGs should be moved."""
@@ -1079,10 +1138,17 @@ class ExrFileHandler(FileSystemEventHandler):
     def _convert_exr_task(self, exr_path: str):
         """Thread pool task for converting a single EXR file."""
         try:
+            start_critical_operation(f"exr_conversion_{os.path.basename(exr_path)}")
+            update_activity("exr_conversion_started")
+            
             if not self.stop_conversion:
-                self.convert_exr_to_png(exr_path)
+                result = self.convert_exr_to_png(exr_path)
+                update_activity("exr_conversion_completed")
+            
+            end_critical_operation(f"exr_conversion_{os.path.basename(exr_path)}")
         except Exception as e:
             logging.error(f'Failed to convert {exr_path} to PNG: {e}')
+            end_critical_operation(f"exr_conversion_{os.path.basename(exr_path)}")
             with self._lock:
                 self.conversion_stats['failed'] += 1
     
@@ -1106,24 +1172,32 @@ class ExrFileHandler(FileSystemEventHandler):
             if self.stop_conversion:
                 return False
                 
+            update_activity("exr_file_processing")
+            
             # Wait for file to be fully written
+            start_critical_operation("file_stability_wait")
             if not self._wait_for_file_stability(exr_path):
                 logging.warning(f'EXR file not stable or missing: {exr_path}')
+                end_critical_operation("file_stability_wait")
                 with self._lock:
                     self.conversion_stats['skipped'] += 1
                 return False
+            end_critical_operation("file_stability_wait")
             
             # Check again after stability wait
             if self.stop_conversion:
                 return False
             
             # Validate EXR file before attempting conversion
+            start_critical_operation("exr_validation")
             if not self._validate_exr_file(exr_path):
                 logging.warning(f'EXR file appears to be corrupted or incomplete: {exr_path}')
+                end_critical_operation("exr_validation")
                 self.conversion_stats['failed'] += 1
                 # Still try to clean up the corrupted file
                 self._cleanup_exr_file(exr_path)
                 return False
+            end_critical_operation("exr_validation")
             
             # Generate PNG path
             png_path = os.path.splitext(exr_path)[0] + '.png'
@@ -1590,46 +1664,62 @@ class ExrFileHandler(FileSystemEventHandler):
             return png_path
         
         filename = os.path.basename(png_path)
-        base_name, animation, frame_group = self._parse_filename_for_organization(filename)
         
-        # Create organized structure with zip archives if parsing succeeded
-        if base_name and animation and frame_group:
-            # Check before creating directories
-            if self.stop_conversion:
-                return png_path
-                
-            # Create folder structure: final_output_directory/base_name/animation/
-            animation_dir = os.path.join(self.final_output_directory, base_name, animation)
+        # Check if output is images folder - if so, skip folder hierarchy and zip creation
+        use_simple_output = False
+        if self.output_is_images_folder_var:
             try:
-                os.makedirs(animation_dir, exist_ok=True)
-                
-                # Check again after directory creation
+                use_simple_output = self.output_is_images_folder_var.get()
+            except (AttributeError, tk.TclError):
+                # If we can't get the value, default to simple output
+                use_simple_output = True
+        
+        if use_simple_output:
+            # Simple output: move directly to final directory without folder structure or zips
+            final_png_path = os.path.join(self.final_output_directory, filename)
+            logging.debug(f"Using simple output (images folder mode) for file: {filename}")
+        else:
+            # Original complex output with folder hierarchy and zip files
+            base_name, animation, frame_group = self._parse_filename_for_organization(filename)
+            
+            # Create organized structure with zip archives if parsing succeeded
+            if base_name and animation and frame_group:
+                # Check before creating directories
                 if self.stop_conversion:
                     return png_path
-                
-                # Create zip archive name: animation_framegroup.zip (e.g., "idle_0.zip")
-                zip_filename = f"{animation}_{frame_group}.zip"
-                zip_path = os.path.join(animation_dir, zip_filename)
-                
-                # Add file to zip archive
-                final_png_path = self._add_to_zip_archive(png_path, zip_path, filename)
-                
-                if final_png_path:
-                    logging.debug(f"Organized path: {base_name}/{animation}/{zip_filename}")
-                    return final_png_path
-                else:
-                    # If zip creation failed, fall back to root directory
-                    logging.warning(f"Failed to add to zip archive, falling back to root directory")
-                    final_png_path = os.path.join(self.final_output_directory, filename)
                     
-            except OSError as e:
-                logging.warning(f"Failed to create organized directory structure: {e}, falling back to root directory")
-                # Fall back to root directory if folder creation fails
+                # Create folder structure: final_output_directory/base_name/animation/
+                animation_dir = os.path.join(self.final_output_directory, base_name, animation)
+                try:
+                    os.makedirs(animation_dir, exist_ok=True)
+                    
+                    # Check again after directory creation
+                    if self.stop_conversion:
+                        return png_path
+                    
+                    # Create zip archive name: animation_framegroup.zip (e.g., "idle_0.zip")
+                    zip_filename = f"{animation}_{frame_group}.zip"
+                    zip_path = os.path.join(animation_dir, zip_filename)
+                    
+                    # Add file to zip archive
+                    final_png_path = self._add_to_zip_archive(png_path, zip_path, filename)
+                    
+                    if final_png_path:
+                        logging.debug(f"Organized path: {base_name}/{animation}/{zip_filename}")
+                        return final_png_path
+                    else:
+                        # If zip creation failed, fall back to root directory
+                        logging.warning(f"Failed to add to zip archive, falling back to root directory")
+                        final_png_path = os.path.join(self.final_output_directory, filename)
+                        
+                except OSError as e:
+                    logging.warning(f"Failed to create organized directory structure: {e}, falling back to root directory")
+                    # Fall back to root directory if folder creation fails
+                    final_png_path = os.path.join(self.final_output_directory, filename)
+            else:
+                # If parsing fails, use root directory
                 final_png_path = os.path.join(self.final_output_directory, filename)
-        else:
-            # If parsing fails, use root directory
-            final_png_path = os.path.join(self.final_output_directory, filename)
-            logging.debug(f"Using root directory for file: {filename}")
+                logging.debug(f"Using root directory for file: {filename}")
         
         # Check one more time before the file move operation
         if self.stop_conversion:
@@ -1841,7 +1931,7 @@ class CleanupManager:
         """Mark that settings have been saved to prevent duplicate saves"""
         self.settings_saved_on_close = True
     
-    def start_file_monitoring(self, server_output_dir, final_output_dir, image_update_callback=None, session_completion_callback=None, progress_update_callback=None):
+    def start_file_monitoring(self, server_output_dir, final_output_dir, image_update_callback=None, session_completion_callback=None, progress_update_callback=None, output_is_images_folder_var=None):
         """Start monitoring the server output directory for new .exr files and .zip files"""
         try:
             if self.file_observer is not None:
@@ -1853,7 +1943,7 @@ class CleanupManager:
             if not os.path.exists(final_output_dir):
                 os.makedirs(final_output_dir, exist_ok=True)
             
-            self.exr_handler = ExrFileHandler(final_output_dir)
+            self.exr_handler = ExrFileHandler(final_output_dir, output_is_images_folder_var=output_is_images_folder_var)
             self.zip_handler = ZipFileHandler()
             
             # Set up the image update callback for UI notifications
@@ -1938,16 +2028,22 @@ class CleanupManager:
     def cleanup_all(self):
         """Clean up all registered resources"""
         try:
+            logging.info("Starting comprehensive cleanup...")
+            start_critical_operation("cleanup_all")
+            
             # Stop file monitoring first
             self.stop_file_monitoring()
+            update_activity("file_monitoring_stopped")
             
             # Stop Iray Server processes
             self.stop_iray_server()
+            update_activity("iray_server_stopped")
             
             # Only save settings if callback is available, widgets are still valid, and settings haven't been saved already
             if self.save_settings_callback and not self.settings_saved_on_close:
                 try:
                     self.save_settings_callback()
+                    update_activity("settings_saved")
                 except (tk.TclError, Exception) as e:
                     # Widgets may have been destroyed already, this is normal during shutdown
                     logging.debug(f"Could not save settings during cleanup (widgets may be destroyed): {e}")
@@ -1961,6 +2057,7 @@ class CleanupManager:
                 except Exception:
                     pass
             self.image_references.clear()
+            update_activity("image_references_cleared")
             
             # Force garbage collection
             gc.collect()
@@ -1969,6 +2066,7 @@ class CleanupManager:
             if self.executor:
                 try:
                     self.executor.shutdown(wait=False)
+                    update_activity("executor_shutdown")
                 except Exception:
                     pass
             
@@ -1980,6 +2078,13 @@ class CleanupManager:
                 except Exception:
                     pass
             self.temp_files.clear()
+            update_activity("temp_files_cleaned")
+            
+            # Stop watchdog monitoring
+            stop_watchdog_monitoring()
+            
+            end_critical_operation("cleanup_all")
+            logging.info("Comprehensive cleanup completed successfully")
             
             # Additional cleanup for PIL temporary files
             try:
@@ -2487,13 +2592,15 @@ def start_headless_render(settings):
         "gear_animations": gear_animations,
         "template_path": template_path,
         "render_shadows": settings.get("render_shadows", True),
+        "output_is_images_folder": settings.get("output_is_images_folder", True),
         "results_directory_path": results_dir.replace("\\", "/")
     }
     
     # Start file monitoring
     cleanup_manager.start_file_monitoring(
         server_output_dir=results_dir,
-        final_output_dir=final_output_dir
+        final_output_dir=final_output_dir,
+        output_is_images_folder_var=None  # No UI in headless mode
     )
     
     # Launch DAZ Studio instances
@@ -2591,7 +2698,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                     hour = completion_time.strftime('%I').lstrip('0') or '12'
                     minute = completion_time.strftime('%M')
                     ampm = completion_time.strftime('%p')
-                    completion_str = f"Estimated completion at: {weekday}, {month} {day}, {year} {hour}:{minute} {ampm}"
+                    completion_str = f"Est. completion at: {weekday}, {month} {day}, {year} {hour}:{minute} {ampm}"
                     estimated_completion_at_var.set(completion_str)
                     
                     logging.debug(f"Time estimation: {avg_time_per_image:.1f}s per image, {images_remaining} remaining = {formatted}")
@@ -2599,12 +2706,12 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             
             # Fallback if no timing data available
             estimated_time_remaining_var.set("Estimated time remaining: --")
-            estimated_completion_at_var.set("Estimated completion at: --")
+            estimated_completion_at_var.set("Est. completion at: --")
             
         except Exception as e:
             logging.error(f"Error calculating estimated time remaining: {e}")
             estimated_time_remaining_var.set("Estimated time remaining: --")
-            estimated_completion_at_var.set("Estimated completion at: --")
+            estimated_completion_at_var.set("Est. completion at: --")
     
     # Check for existing instance before showing splash screen
     if not ensure_single_instance():
@@ -2802,13 +2909,27 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
         
         def restore_default_settings():
             """Restore default settings"""
+            global current_settings
             value_entries["Number of Instances"].delete(0, tk.END)
             value_entries["Number of Instances"].insert(0, "1")
             value_entries["Frame Rate"].delete(0, tk.END)
             value_entries["Frame Rate"].insert(0, "30")
             render_shadows_var.set(True)
+            output_is_images_folder_var.set(True)
+            
+            # Reset browse locations to defaults
+            if current_settings:
+                current_settings["browse_locations"] = {
+                    "subject": os.path.join(os.path.expanduser("~"), "Documents"),
+                    "animations": os.path.join(os.path.expanduser("~"), "Documents"),
+                    "prop_animations": os.path.join(os.path.expanduser("~"), "Documents"),
+                    "gear": os.path.join(os.path.expanduser("~"), "Documents"),
+                    "gear_animations": os.path.join(os.path.expanduser("~"), "Documents"),
+                    "output_directory": get_default_output_directory()
+                }
+            
             auto_save_settings()
-            logging.info("Default settings restored")
+            logging.info("Default settings restored (including browse locations)")
         
         edit_menu.add_command(label="Clear All Input Fields", command=clear_all_input_fields)
         edit_menu.add_command(label="Restore Default Settings", command=restore_default_settings)
@@ -3212,33 +3333,63 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
     file_table_frame.grid_columnconfigure(1, weight=1)
     file_table_frame.grid_columnconfigure(2, weight=1)
 
-    def make_browse_file(entry, initialdir=None, filetypes=None, title="Select file"):
+    def make_browse_file(entry, location_key, filetypes=None, title="Select file"):
         def browse_file():
+            global current_settings
+            # Get initial directory from stored browse locations
+            initialdir = ""
+            if current_settings and "browse_locations" in current_settings:
+                initialdir = current_settings["browse_locations"].get(location_key, "")
+            
             filename = filedialog.askopenfilename(
-                initialdir=initialdir or "",
+                initialdir=initialdir,
                 title=title,
                 filetypes=filetypes or (("All files", "*.*"),)
             )
             if filename:
                 entry.delete(0, tk.END)
                 entry.insert(0, filename)
+                
+                # Update stored browse location to the directory of the selected file
+                if current_settings and "browse_locations" in current_settings:
+                    current_settings["browse_locations"][location_key] = os.path.dirname(filename)
+                    # Save settings immediately to persist the location
+                    settings_manager.save_settings(current_settings)
         return browse_file
 
-    def make_browse_folder(entry, initialdir=None, title="Select folder"):
+    def make_browse_folder(entry, location_key, title="Select folder"):
         def browse_folder():
+            global current_settings
+            # Get initial directory from stored browse locations
+            initialdir = ""
+            if current_settings and "browse_locations" in current_settings:
+                initialdir = current_settings["browse_locations"].get(location_key, "")
+            
             foldername = filedialog.askdirectory(
-                initialdir=initialdir or "",
+                initialdir=initialdir,
                 title=title
             )
             if foldername:
                 entry.delete(0, tk.END)
                 entry.insert(0, foldername)
+                
+                # Update stored browse location to the selected folder
+                if current_settings and "browse_locations" in current_settings:
+                    current_settings["browse_locations"][location_key] = foldername
+                    # Save settings immediately to persist the location
+                    settings_manager.save_settings(current_settings)
         return browse_folder
 
-    def make_browse_files(text_widget, initialdir=None, filetypes=None, title="Select files"):
+    def make_browse_files(text_widget, location_key, filetypes=None, title="Select files"):
         def browse_files():
+            global current_settings
+            # Get initial directory from stored browse locations
+            initialdir = ""
+            if current_settings and "browse_locations" in current_settings:
+                initialdir = current_settings["browse_locations"].get(location_key, "")
+            
             filenames = filedialog.askopenfilenames(
-                initialdir=initialdir or "",
+                initialdir=initialdir,
                 title=title,
                 filetypes=filetypes or (("All files", "*.*"),)
             )
@@ -3253,6 +3404,12 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                         # If that fails, it's an Entry widget
                         text_widget.delete(0, tk.END)
                         text_widget.insert(0, "\n".join(filenames))
+                
+                # Update stored browse location to the directory of the first selected file
+                if current_settings and "browse_locations" in current_settings and len(filenames) > 0:
+                    current_settings["browse_locations"][location_key] = os.path.dirname(filenames[0])
+                    # Save settings immediately to persist the location
+                    settings_manager.save_settings(current_settings)
         return browse_files
 
     # Auto-save settings when important values change
@@ -3278,7 +3435,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 text="Browse",
                 command=make_browse_file(
                     value_entry,
-                    initialdir=os.path.join(os.path.expanduser("~"), "Documents"),
+                    location_key="subject",
                     title="Select Subject File",
                     filetypes=(("DSON User File", "*.duf"),)
                 ),
@@ -3301,7 +3458,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 text="Browse",
                 command=make_browse_files(
                     text_widget,
-                    initialdir=os.path.join(os.path.expanduser("~"), "Documents"),
+                    location_key="animations",
                     title="Select Animations",
                     filetypes=(("DSON User File", "*.duf"),)
                 ),
@@ -3324,7 +3481,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 text="Browse",
                 command=make_browse_files(
                     text_widget,
-                    initialdir=os.path.join(os.path.expanduser("~"), "Documents"),
+                    location_key="prop_animations",
                     title="Select Prop Animation Files",
                     filetypes=(("DSON User File", "*.duf"),)
                 ),
@@ -3347,7 +3504,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 text="Browse",
                 command=make_browse_files(
                     text_widget,
-                    initialdir=os.path.join(os.path.expanduser("~"), "Documents"),
+                    location_key="gear",
                     title="Select Gear Files",
                     filetypes=(("DSON User File", "*.duf"),)
                 ),
@@ -3370,7 +3527,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 text="Browse",
                 command=make_browse_files(
                     text_widget,
-                    initialdir=os.path.join(os.path.expanduser("~"), "Documents"),
+                    location_key="gear_animations",
                     title="Select Gear Animation Files",
                     filetypes=(("DSON User File", "*.duf"),)
                 ),
@@ -3398,7 +3555,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 text="Browse",
                 command=make_browse_folder(
                     value_entry,
-                    initialdir=default_img_dir,
+                    location_key="output_directory",
                     title="Select Output Directory"
                 ),
                 width=8
@@ -3441,15 +3598,57 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
     render_shadows_checkbox.grid(row=1, column=current_column+1, padx=(0, 10), pady=5, sticky="w")
     theme_manager.register_widget(render_shadows_checkbox, "checkbutton")
 
+    # --- Output Directory is Images Folder checkbox - positioned to the right of Render Shadows ---
+    current_column += 2  # Move to next available columns
+    output_is_images_folder_var = tk.BooleanVar(value=True)
+    output_is_images_folder_label = tk.Label(param_table_frame, text="Output Directory is Images Folder in Construct 3 Project", font=("Arial", 10), anchor="w")
+    output_is_images_folder_label.grid(row=1, column=current_column, padx=(10, 5), pady=5, sticky="w")
+    theme_manager.register_widget(output_is_images_folder_label, "label")
+    output_is_images_folder_checkbox = tk.Checkbutton(
+        param_table_frame,
+        variable=output_is_images_folder_var,
+        width=2,
+        anchor="w"
+    )
+    output_is_images_folder_checkbox.grid(row=1, column=current_column+1, padx=(0, 10), pady=5, sticky="w")
+    theme_manager.register_widget(output_is_images_folder_checkbox, "checkbutton")
+
     # Register settings save callback for cleanup
     def save_current_settings():
-        current_settings = settings_manager.get_current_settings(value_entries, render_shadows_var)
+        global current_settings
+        current_settings = settings_manager.get_current_settings(value_entries, render_shadows_var, output_is_images_folder_var)
+        # Ensure browse_locations are preserved
+        if "browse_locations" not in current_settings:
+            current_settings["browse_locations"] = {
+                "subject": os.path.join(os.path.expanduser("~"), "Documents"),
+                "animations": os.path.join(os.path.expanduser("~"), "Documents"),
+                "prop_animations": os.path.join(os.path.expanduser("~"), "Documents"),
+                "gear": os.path.join(os.path.expanduser("~"), "Documents"),
+                "gear_animations": os.path.join(os.path.expanduser("~"), "Documents"),
+                "output_directory": get_default_output_directory()
+            }
         settings_manager.save_settings(current_settings)
     cleanup_manager.register_settings_callback(save_current_settings)
 
     saved_settings = settings_manager.load_settings()
+    
+    # Initialize global current_settings
+    global current_settings
+    current_settings = saved_settings.copy()
+    
+    # Ensure browse_locations exists in current_settings
+    if "browse_locations" not in current_settings:
+        current_settings["browse_locations"] = {
+            "subject": os.path.join(os.path.expanduser("~"), "Documents"),
+            "animations": os.path.join(os.path.expanduser("~"), "Documents"),
+            "prop_animations": os.path.join(os.path.expanduser("~"), "Documents"),
+            "gear": os.path.join(os.path.expanduser("~"), "Documents"),
+            "gear_animations": os.path.join(os.path.expanduser("~"), "Documents"),
+            "output_directory": get_default_output_directory()
+        }
+    
     # Apply the loaded settings to the UI (now that all widgets are created)
-    settings_manager.apply_settings(saved_settings, value_entries, render_shadows_var)
+    settings_manager.apply_settings(saved_settings, value_entries, render_shadows_var, output_is_images_folder_var)
 
     # Apply command line arguments if provided (overrides saved settings)
     def apply_command_line_args():
@@ -3503,6 +3702,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
     
     # For checkboxes, bind to the variable change
     render_shadows_var.trace_add('write', auto_save_settings)
+    output_is_images_folder_var.trace_add('write', auto_save_settings)
 
     # Helper function for processing display paths
     def process_display_path(path):
@@ -3647,7 +3847,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
     # Label for images remaining (above progress bar)
     images_remaining_var = tk.StringVar(master=root, value="Images remaining: --")
     estimated_time_remaining_var = tk.StringVar(master=root, value="Estimated time remaining: --")
-    estimated_completion_at_var = tk.StringVar(master=root, value="Estimated completion at: --")
+    estimated_completion_at_var = tk.StringVar(master=root, value="Est. completion at: --")
     images_remaining_label = tk.Label(
         root,
         textvariable=images_remaining_var,
@@ -3710,6 +3910,8 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
     def update_output_details():
         """Update the output details with current folder statistics"""
         logging.debug("update_output_details: Starting update...")
+        update_activity("output_details_update")
+        start_critical_operation("directory_scan")
         
         output_dir = value_entries["Output Directory"].get()
         logging.debug(f"update_output_details: Output directory: {output_dir}")
@@ -3722,6 +3924,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             progress_var.set(0)
             images_remaining_var.set("Images remaining: --")
             logging.debug("update_output_details: Output directory doesn't exist")
+            end_critical_operation("directory_scan")
             return
         try:
             total_size = 0
@@ -3759,7 +3962,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                     progress_var.set(0)
                     images_remaining_var.set("Images remaining: --")
                     estimated_time_remaining_var.set("Estimated time remaining: --")
-                    estimated_completion_at_var.set("Estimated completion at: --")
+                    estimated_completion_at_var.set("Est. completion at: --")
                     logging.debug("update_output_details: Total images string is empty")
                     return
                 total_images = int(total_images_str) if total_images_str.isdigit() else None
@@ -3789,14 +3992,17 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                     progress_var.set(0)
                     images_remaining_var.set("Images remaining: --")
                     estimated_time_remaining_var.set("Estimated time remaining: --")
-                    estimated_completion_at_var.set("Estimated completion at: --")
+                    estimated_completion_at_var.set("Est. completion at: --")
                     logging.debug("update_output_details: Total images is 0 or None")
             except Exception as e:
                 progress_var.set(0)
                 images_remaining_var.set("Images remaining: --")
                 estimated_time_remaining_var.set("Estimated time remaining: --")
-                estimated_completion_at_var.set("Estimated completion at: --")
+                estimated_completion_at_var.set("Est. completion at: --")
                 logging.error(f"update_output_details: Error updating progress: {e}")
+                
+            end_critical_operation("directory_scan")
+            
         except Exception as e:
             output_folder_size.config(text="Folder Size: Error")
             output_png_count.config(text="PNG Files: Error")
@@ -3805,6 +4011,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             progress_var.set(0)
             images_remaining_var.set("Images remaining: --")
             logging.error(f"update_output_details: Error in folder stats: {e}")
+            end_critical_operation("directory_scan")
 
     no_img_label = tk.Label(right_frame, font=("Arial", 12))
     no_img_label.place(relx=0.5, rely=0.5, anchor="center")
@@ -3830,6 +4037,9 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
 
     def show_last_rendered_image():
         """Display the most recent image from the output directory."""
+        start_critical_operation("image_display")
+        update_activity("image_display_started")
+        
         output_dir = value_entries["Output Directory"].get()
         image_paths = find_newest_image(output_dir)
         displayed = False
@@ -3837,6 +4047,8 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             if not os.path.exists(newest_img_path):
                 continue
             try:
+                update_activity("image_processing")
+                
                 # Clean up previous image reference if it exists
                 if hasattr(img_label, 'image') and img_label.image:
                     try:
@@ -3916,6 +4128,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
         
         # Force garbage collection to clean up any remaining references
         gc.collect()
+        end_critical_operation("image_display")
 
     def map_server_path_to_output_path(server_path):
         """Map a server output directory path to the corresponding final output directory path."""
@@ -4072,7 +4285,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                     except Exception as e:
                         logging.error(f"Error scheduling progress update: {e}")
                 
-                cleanup_manager.start_file_monitoring(server_output_dir, new_output_dir, watchdog_image_update, None, safe_progress_update)  # Pass thread-safe progress update callback
+                cleanup_manager.start_file_monitoring(server_output_dir, new_output_dir, watchdog_image_update, None, safe_progress_update, output_is_images_folder_var)  # Pass thread-safe progress update callback
                 logging.info(f'Restarted file monitoring for new output directory: {new_output_dir}')
             except Exception as e:
                 logging.error(f'Failed to restart file monitoring: {e}')
@@ -4088,6 +4301,9 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             logging.info("Start Render already in progress, ignoring additional click")
             return
 
+        update_activity("start_render_initiated")
+        start_critical_operation("render_startup")
+        
         # Validate Subject, Animations and Output Directory before launching render
         subject_file = value_entries["Subject"].get().strip()
         animations = value_entries["Animations"].get("1.0", tk.END).strip().replace("\\", "/").split("\n")
@@ -4097,6 +4313,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             from tkinter import messagebox
             messagebox.showerror("Missing Subject File", "Please specify a Subject file before starting the render.")
             logging.info("Start Render cancelled: No Subject file specified.")
+            end_critical_operation("render_startup")
             return
         if not animations:
             from tkinter import messagebox
@@ -4252,7 +4469,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                             # Since DAZ Studio continues running, just restart file monitoring
                             logging.info('Restarting file monitoring for existing DAZ Studio instances')
                             image_output_dir = value_entries["Output Directory"].get().replace("\\", "/")
-                            cleanup_manager.start_file_monitoring(server_output_dir, image_output_dir, watchdog_image_update, on_session_complete, update_output_details)
+                            cleanup_manager.start_file_monitoring(server_output_dir, image_output_dir, watchdog_image_update, on_session_complete, update_output_details, output_is_images_folder_var)
                             
                             logging.info('Session restart complete - ready for next cycle')
                         except Exception as e:
@@ -4302,7 +4519,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                                     logging.info('Restarting file monitoring for existing DAZ Studio instances')
                                     server_output_dir = get_server_output_directory()
                                     image_output_dir = value_entries["Output Directory"].get().replace("\\", "/")
-                                    cleanup_manager.start_file_monitoring(server_output_dir, image_output_dir, watchdog_image_update)
+                                    cleanup_manager.start_file_monitoring(server_output_dir, image_output_dir, watchdog_image_update, None, None, output_is_images_folder_var)
                                     
                                     logging.info('Render completion cycle finished successfully - Iray Server restarted, DAZ Studio instances continue running')
                                 except Exception as cleanup_e:
@@ -4546,6 +4763,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
 
         # Add render_shadows to json_map
         render_shadows = render_shadows_var.get()
+        output_is_images_folder = output_is_images_folder_var.get()
         results_directory_path = get_server_output_directory().replace("\\", "/")
         json_map = (
             f'{{'
@@ -4559,6 +4777,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             f'"gear_animations": {gear_animations_json}, '
             f'"template_path": "{template_path}", '
             f'"render_shadows": {str(render_shadows).lower()}, '
+            f'"output_is_images_folder": {str(output_is_images_folder).lower()}, '
             f'"results_directory_path": "{results_directory_path}"'
             f'}}'
         )
@@ -4594,7 +4813,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                     except Exception as e:
                         logging.error(f"Error scheduling progress update: {e}")
                 
-                cleanup_manager.start_file_monitoring(server_output_dir, image_output_dir, watchdog_image_update, session_completion_callback, safe_progress_update)
+                cleanup_manager.start_file_monitoring(server_output_dir, image_output_dir, watchdog_image_update, session_completion_callback, safe_progress_update, output_is_images_folder_var)
 
         run_all_instances()
 
@@ -4623,11 +4842,13 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
         output_total_images.config(text="Total Images to Render: ")
         images_remaining_var.set("Images remaining: --")
         estimated_time_remaining_var.set("Estimated time remaining: --")
-        estimated_completion_at_var.set("Estimated completion at: --")
+        estimated_completion_at_var.set("Est. completion at: --")
         progress_var.set(0)
 
     def stop_render():
         logging.info('Stop Render button clicked')
+        update_activity("stop_render_initiated")
+        start_critical_operation("render_shutdown")
         
         # Immediately disable the stop button to prevent multiple clicks
         stop_button.config(state="disabled")
@@ -4638,18 +4859,22 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             if hasattr(cleanup_manager, 'iray_actions') and cleanup_manager.iray_actions:
                 cleanup_manager.iray_actions.request_stop()
                 logging.info('Signaled IrayServerActions to stop')
+                update_activity("iray_actions_stopped")
             
             # Stop file monitoring first to prevent race conditions
             logging.info('Stopping file monitoring and conversion...')
             cleanup_manager.stop_file_monitoring()
+            update_activity("file_monitoring_stopped")
             
             # Then kill render processes
             logging.info('Stopping render processes...')
             kill_render_related_processes()
+            update_activity("render_processes_killed")
             
             # Clean up database and cache after processes are killed
             logging.info('Cleaning up Iray database and cache...')
             cleanup_iray_database_and_cache()
+            update_activity("cleanup_completed")
             
         except Exception as e:
             logging.error(f'Error during stop render: {e}')
@@ -4705,8 +4930,25 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
     # Schedule auto-start check after UI is ready
     root.after(100, auto_start_render_if_requested)
 
+    # Add periodic activity monitoring for GUI event loop
+    def periodic_activity_update():
+        """Periodically update activity to prevent hang detection during normal GUI operation."""
+        try:
+            update_activity("gui_event_loop")
+            # Schedule next update based on configuration
+            interval = WATCHDOG_CONFIG.get("gui_activity_interval", 60000)
+            root.after(interval, periodic_activity_update)
+        except Exception as e:
+            logging.debug(f"Periodic activity update failed: {e}")
+    
+    # Start periodic activity updates based on configuration
+    if WATCHDOG_CONFIG["enabled"]:
+        interval = WATCHDOG_CONFIG.get("gui_activity_interval", 60000)
+        root.after(interval, periodic_activity_update)  # First update after configured interval
+
     # Run the application
     try:
+        update_activity("application_startup_complete")
         root.mainloop()
     except KeyboardInterrupt:
         logging.info('Application interrupted by user')

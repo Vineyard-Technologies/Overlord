@@ -15,6 +15,7 @@ var aGearAnimationFilepaths = oScriptArgs['gear_animations'].toString().split(',
 var nDEGREES_IN_CIRCLE = 360;
 var nFrameRate = oScriptArgs['frame_rate'];
 var bRenderShadows = oScriptArgs['render_shadows'];
+var bStraightToConstruct = oScriptArgs['output_is_images_folder'];
 var nDAZ_TICKS = 4800;
 var nTicksPerFrame = nDAZ_TICKS / nFrameRate;
 var bOverwriteExistingImages = false;
@@ -68,6 +69,13 @@ function checkIfFileExistsInZip(sZipPath, sFinalName) {
 			return true;
 		}
 	}
+}
+
+function checkIfFileExistsInFolder(sFullPath) {
+
+	var oFileInfo = new DzFileInfo(sFullPath);
+
+	return oFileInfo.exists();
 }
 
 // Obtain the desired name out of a filepath or filename.
@@ -192,12 +200,25 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 			var sZipPath = sOutputDirectory + '/' + sSubjectName + (bIsShadow ? ' shadow' : '')
 				+ '/' + sAnimationName + '/' + sAnimationName + '_' + nOutputAngle + '.zip';
 
-			if (checkIfFileExistsInZip(sZipPath, sFinalName)) {
+			if (bStraightToConstruct) {
 
-				App.log(sFinalNameWithExtension + ' already exists in zip. Skipping this frame.');
+				if (checkIfFileExistsInFolder(sOutputDirectory + '/' + sFinalNameWithExtension)) {
 
-				continue;
+					App.log(sFinalNameWithExtension + ' already exists in folder. Skipping this frame.');
+
+					continue;
+				}
+			} else {
+
+				if (checkIfFileExistsInZip(sZipPath, sFinalName)) {
+
+					App.log(sFinalNameWithExtension + ' already exists in zip. Skipping this frame.');
+
+					continue;
+				}
 			}
+
+
 
 			App.log('Setting frame to ' + nFrame);
 			Scene.setFrame(nFrame);
