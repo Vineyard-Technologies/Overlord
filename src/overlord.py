@@ -318,12 +318,11 @@ def cleanup_iray_files_in_directory(cleanup_dir, with_retries=True):
     """Clean up all Iray-related files and folders in a specific directory."""
     items_cleaned = []
     
-    # Files and folders to clean up
+    # Files and folders to clean up (excluding results directory)
     cleanup_items = [
         ("iray_server.db", "file"),
         ("cache", "folder"),
         ("preview", "folder"),
-        ("results", "folder"),
         ("iray_server.log", "file")
     ]
     
