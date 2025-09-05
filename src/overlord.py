@@ -8,11 +8,9 @@ import datetime
 import gc
 import re
 import webbrowser
-import zipfile
 import time
 import threading
 import glob
-import numpy as np
 import argparse
 import urllib.request
 import urllib.parse
@@ -49,7 +47,6 @@ DEFAULT_MAX_WORKERS = 8
 LOG_SIZE_MB = 100
 RENDERS_PER_SESSION = 100
 RECENT_RENDER_TIMES_LIMIT = 25
-MAX_CONCURRENT_CONVERSIONS = 4  # Allow multiple EXR conversions to run in parallel
 
 # UI update intervals (milliseconds)
 AUTO_SAVE_DELAY = 2000
@@ -66,7 +63,6 @@ SCENE_EXTENSIONS = ('.duf',)
 # Default paths
 DEFAULT_OUTPUT_SUBDIR = "Downloads/output"
 APPDATA_SUBFOLDER = "Overlord"
-SERVER_OUTPUT_SUBDIR = "results"
 
 # UI dimensions
 SPLASH_WIDTH = 400
@@ -120,12 +116,6 @@ UI_TEXT = {
     "stop_render": "Stop Render", "browse": "Browse", "clear": "Clear",
 }
 
-# Image processing constants
-IMAGE_PROCESSING = {
-    "transparent_crop_size": (2, 2), "dark_bg_color": (60, 60, 60, 255),
-    "light_bg_color": (255, 255, 255, 255), "default_mode": "RGBA", "save_optimize": True
-}
-
 # Windows registry paths
 WINDOWS_REGISTRY = {
     "theme_key": r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
@@ -149,12 +139,6 @@ def get_local_app_data_path(subfolder: str = APPDATA_SUBFOLDER) -> str:
     """Get the local application data path for the given subfolder."""
     localappdata = os.environ.get('LOCALAPPDATA', os.path.join(os.path.expanduser('~'), 'AppData', 'Local'))
     return os.path.join(localappdata, subfolder)
-
-def get_server_output_directory() -> str:
-    """Get the intermediate server output directory path - now in same location as iray_server.db."""
-    # Use the same directory as iray_server.db and cache
-    base_dir = os.path.dirname(__file__) if os.path.exists(os.path.join(os.path.dirname(__file__), "iray_server.db")) else get_local_app_data_path()
-    return os.path.join(base_dir, SERVER_OUTPUT_SUBDIR)
 
 def get_default_output_directory() -> str:
     """Get the default output directory for user files."""
@@ -226,11 +210,11 @@ def validate_directory_path(dir_path: str, must_exist: bool = True) -> bool:
     return os.path.isdir(parent) if parent else True
 
 def get_directory_stats(directory: str) -> tuple:
-    """Get directory statistics: total_size, png_count, zip_count, folder_count."""
+    """Get directory statistics: total_size, png_count, folder_count."""
     if not os.path.exists(directory):
-        return 0, 0, 0, 0
+        return 0, 0, 0
     
-    total_size = png_count = zip_count = folder_count = 0
+    total_size = png_count = folder_count = 0
     
     for rootdir, dirs, files in os.walk(directory):
         folder_count += len(dirs)
@@ -241,12 +225,10 @@ def get_directory_stats(directory: str) -> tuple:
                 total_size += file_size
                 if file.lower().endswith('.png'):
                     png_count += 1
-                elif file.lower().endswith('.zip'):
-                    zip_count += 1
             except (OSError, IOError):
                 continue
     
-    return total_size, png_count, zip_count, folder_count
+    return total_size, png_count, folder_count
 
 def find_newest_image(directory: str) -> list:
     """Find all images in directory sorted by modification time (newest first)."""
@@ -265,42 +247,6 @@ def find_newest_image(directory: str) -> list:
     # Sort by most recent first
     image_files.sort(reverse=True)
     return [fpath for mtime, fpath in image_files]
-
-def count_existing_images_in_zips(output_directory: str) -> int:
-    """Count existing images in ZIP files following the DSA script's organization structure.
-    
-    ZIP structure: {subject}[_shadow]/{animation}/{animation}_{angle}.zip
-    PNG structure: {subject}[_shadow]_{animation}_{angle}_{frame}.png
-    """
-    if not os.path.exists(output_directory):
-        return 0
-    
-    total_images = 0
-    
-    try:
-        # Walk through the output directory looking for ZIP files
-        for root, dirs, files in os.walk(output_directory):
-            for file in files:
-                if file.lower().endswith('.zip'):
-                    zip_path = os.path.join(root, file)
-                    
-                    try:
-                        with zipfile.ZipFile(zip_path, 'r') as zip_file:
-                            # Count PNG files in the ZIP
-                            png_files = [name for name in zip_file.namelist() 
-                                       if name.lower().endswith('.png')]
-                            total_images += len(png_files)
-                            
-                    except (zipfile.BadZipFile, OSError, IOError) as e:
-                        logging.warning(f"Could not read ZIP file {zip_path}: {e}")
-                        continue
-                        
-    except Exception as e:
-        logging.error(f"Error counting images in ZIP files: {e}")
-        return 0
-    
-    logging.debug(f"count_existing_images_in_zips: Found {total_images} existing images in ZIP files")
-    return total_images
 
 
 # ============================================================================
@@ -504,47 +450,6 @@ def wait_for_file_stability(file_path: str, max_wait_time: int = None) -> bool:
         wait_time += 0.25
     return False
 
-def is_image_transparent(image_path: str) -> bool:
-    """Check if an image is entirely transparent."""
-    try:
-        with Image.open(image_path) as img:
-            # Convert to RGBA if not already
-            if img.mode != 'RGBA':
-                img = img.convert('RGBA')
-            
-            # Get the alpha channel
-            alpha_channel = img.split()[-1]
-            
-            # Check if all alpha values are 0 using numpy for efficiency
-            alpha_array = np.array(alpha_channel)
-            return np.all(alpha_array == 0)
-    except Exception as e:
-        logging.error(f"Error checking transparency for {image_path}: {e}")
-        return False
-
-def crop_transparent_image(image_path: str) -> bool:
-    """Crop entirely transparent image to 2x2 pixels."""
-    try:
-        crop_size = IMAGE_PROCESSING['transparent_crop_size']
-        logging.info(f"Cropping transparent image to {crop_size[0]}x{crop_size[1]}: {image_path}")
-        
-        # Create a new 2x2 transparent image
-        cropped_img = Image.new('RGBA', crop_size, (0, 0, 0, 0))
-        
-        # Save the cropped image, overwriting the original
-        cropped_img.save(image_path, 'PNG')
-        logging.info(f"Successfully cropped transparent image: {image_path}")
-        return True
-    except Exception as e:
-        logging.error(f"Error cropping transparent image {image_path}: {e}")
-        return False
-
-def process_transparent_image(png_path: str) -> str:
-    """Check if image is entirely transparent and crop to 2x2 if needed."""
-    if is_image_transparent(png_path):
-        crop_transparent_image(png_path)
-    return png_path
-
 def remove_filename_suffixes(filename: str) -> tuple:
     """Remove '-Beauty' or '-gearCanvas' suffixes from filename."""
     name, ext = os.path.splitext(filename)
@@ -572,9 +477,9 @@ def prepare_image_for_display(image_path: str, theme: str = "light"):
             
             # Handle transparency with theme-appropriate background
             if theme == "dark":
-                bg_color = IMAGE_PROCESSING['dark_bg_color']
+                bg_color = (60, 60, 60, 255)  # Dark background
             else:
-                bg_color = IMAGE_PROCESSING['light_bg_color']
+                bg_color = (255, 255, 255, 255)  # Light background
             
             bg = Image.new("RGBA", img.size, bg_color)
             img = Image.alpha_composite(bg, img)
@@ -967,810 +872,6 @@ settings_manager = SettingsManager()
 
 
 # ============================================================================
-# ENHANCED FILE MONITORING AND EXR CONVERSION
-# ============================================================================
-
-class ExrFileHandler(FileSystemEventHandler):
-    """Enhanced EXR to PNG converter with better error handling and progress tracking."""
-    
-    def __init__(self, output_directory: str, update_gui_callback=None, progress_update_callback=None):
-        super().__init__()
-        self.output_directory = output_directory
-        self.update_gui_callback = update_gui_callback
-        self.progress_update_callback = progress_update_callback  # New callback for progress updates
-        self.image_update_callback = None 
-        self.processed_files = set()  # Track processed EXR files
-        self.processed_png_files = set()  # Track PNG files that have been transparency-processed
-        self.conversion_queue = []
-        self.executor = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_CONVERSIONS, thread_name_prefix="EXR-Converter")
-        self.stop_conversion = False
-        self.final_output_directory = output_directory
-        self._lock = threading.Lock()
-        self.conversion_stats = {
-            'total': 0,
-            'successful': 0,
-            'failed': 0,
-            'skipped': 0
-        }
-        # Session completion tracking
-        self.successful_moves = 0  # Track successful image moves to final directory
-        self.successful_move_timestamps = []  # Track timestamps of successful moves for time estimation
-        self.session_completion_callback = None  # Callback to trigger when RENDERS_PER_SESSION is reached
-    
-    def set_image_update_callback(self, callback):
-        """Set callback function to update UI when new images are available."""
-        self.image_update_callback = callback
-    
-    def set_progress_update_callback(self, callback):
-        """Set callback function to update progress when images are successfully moved."""
-        self.progress_update_callback = callback
-    
-    def set_session_completion_callback(self, callback):
-        """Set callback function to trigger when RENDERS_PER_SESSION images have been successfully moved."""
-        self.session_completion_callback = callback
-    
-    def set_final_output_directory(self, final_output_directory: str):
-        """Set the final output directory where processed PNGs should be moved."""
-        self.final_output_directory = final_output_directory
-    
-    def _process_file_event(self, file_path: str, process_png: bool = True):
-        """Common logic for processing file events (creation/move)."""
-        # Check if we should stop processing early
-        if self.stop_conversion:
-            return
-            
-        if file_path.lower().endswith('.exr'):
-            self.add_to_conversion_queue(file_path)
-        elif file_path.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif', '.tiff', '.webp')):
-            # Check again before processing
-            if self.stop_conversion:
-                return
-                
-            # Notify UI of new image file
-            self._notify_image_update(file_path)
-            if process_png and file_path.lower().endswith('.png'):
-                # Only process if not already processed and not stopping
-                if file_path not in self.processed_png_files and not self.stop_conversion:
-                    # Process PNG with transparency check before handling
-                    processed_path = self.process_transparent_image(file_path)
-                    self.handle_png_file(processed_path)
-
-    def on_created(self, event):
-        """Handle new file creation events."""
-        if not event.is_directory:
-            self._process_file_event(event.src_path, process_png=True)
-    
-    def on_moved(self, event):
-        """Handle file move events."""
-        if not event.is_directory:
-            # Don't process PNG files on move events - they're likely renames during processing
-            # PNG processing should only happen on creation or EXR conversion completion
-            self._process_file_event(event.dest_path, process_png=False)
-    
-    def _notify_image_update(self, image_path: str):
-        """Notify the UI that a new image is available."""
-        if self.stop_conversion:
-            return  # Don't notify UI if we're stopping
-            
-        if self.image_update_callback:
-            try:
-                # Schedule the UI update on the main thread
-                self.image_update_callback(image_path)
-            except Exception as e:
-                logging.error(f"Error notifying UI of image update: {e}")
-    
-    def add_to_conversion_queue(self, exr_path: str):
-        """Add EXR file to conversion queue and submit to thread pool for immediate processing."""
-        with self._lock:
-            if self.stop_conversion:
-                return  # Don't add new items if we're stopping
-                
-            if exr_path not in self.processed_files:
-                self.processed_files.add(exr_path)
-                self.conversion_stats['total'] += 1
-                logging.info(f'Submitting {exr_path} for EXR conversion (parallel processing)')
-                
-                # Submit conversion task to thread pool for immediate parallel processing
-                try:
-                    self.executor.submit(self._convert_exr_task, exr_path)
-                except Exception as e:
-                    logging.error(f'Failed to submit EXR conversion task: {e}')
-    
-    def _convert_exr_task(self, exr_path: str):
-        """Thread pool task for converting a single EXR file."""
-        try:
-            if not self.stop_conversion:
-                self.convert_exr_to_png(exr_path)
-        except Exception as e:
-            logging.error(f'Failed to convert {exr_path} to PNG: {e}')
-            with self._lock:
-                self.conversion_stats['failed'] += 1
-    
-    def stop_conversion_thread(self):
-        """Stop the conversion processing and shut down thread pool."""
-        with self._lock:
-            self.stop_conversion = True
-            
-        # Shutdown thread pool
-        if hasattr(self, 'executor') and self.executor:
-            try:
-                self.executor.shutdown(wait=False)  # Don't wait for completion
-                logging.info('EXR conversion thread pool shutdown initiated')
-            except Exception as e:
-                logging.error(f'Error shutting down EXR conversion thread pool: {e}')
-    
-    def convert_exr_to_png(self, exr_path: str) -> bool:
-        """Convert a single EXR file to PNG with enhanced error handling."""
-        try:
-            # Check if we should stop processing
-            if self.stop_conversion:
-                return False
-                
-            # Wait for file to be fully written
-            if not self._wait_for_file_stability(exr_path):
-                logging.warning(f'EXR file not stable or missing: {exr_path}')
-                with self._lock:
-                    self.conversion_stats['skipped'] += 1
-                return False
-            
-            # Check again after stability wait
-            if self.stop_conversion:
-                return False
-            
-            # Validate EXR file before attempting conversion
-            if not self._validate_exr_file(exr_path):
-                logging.warning(f'EXR file appears to be corrupted or incomplete: {exr_path}')
-                self.conversion_stats['failed'] += 1
-                # Still try to clean up the corrupted file
-                self._cleanup_exr_file(exr_path)
-                return False
-            
-            # Generate PNG path
-            png_path = os.path.splitext(exr_path)[0] + '.png'
-            
-            # Check if PNG already exists
-            if os.path.exists(png_path):
-                logging.info(f'PNG already exists, skipping conversion: {png_path}')
-                self.conversion_stats['skipped'] += 1
-                return True
-            
-            logging.info(f'Converting {exr_path} to {png_path}')
-            
-            # Try multiple methods to read the EXR file
-            img = self._read_exr_file(exr_path)
-            
-            if img is None:
-                logging.error(f'All methods failed to read EXR file: {exr_path}')
-                self.conversion_stats['failed'] += 1
-                # Clean up the failed EXR file
-                self._cleanup_exr_file(exr_path)
-                return False
-            
-            # Save as PNG with optimization
-            self._save_png_file(img, png_path)
-            
-            # Handle PNG post-processing
-            self._post_process_png(png_path)
-            
-            # Delete original EXR file to save space
-            self._cleanup_exr_file(exr_path)
-            
-            self.conversion_stats['successful'] += 1
-            logging.info(f'Successfully converted {exr_path} to {png_path}')
-            return True
-            
-        except Exception as e:
-            logging.error(f'Error converting {exr_path} to PNG: {e}')
-            self.conversion_stats['failed'] += 1
-            # Clean up the failed EXR file
-            try:
-                self._cleanup_exr_file(exr_path)
-            except Exception:
-                pass  # Ignore cleanup errors
-            return False
-    
-    def _validate_exr_file(self, exr_path: str) -> bool:
-        """Validate EXR file for basic correctness before attempting conversion."""
-        try:
-            # Check file size - corrupted EXR files often have unusual sizes
-            if not os.path.exists(exr_path):
-                return False
-            
-            file_size = os.path.getsize(exr_path)
-            if file_size < 1024:  # Less than 1KB is likely corrupted
-                logging.warning(f'EXR file too small ({file_size} bytes): {exr_path}')
-                return False
-            
-            # Quick validation using imageio first (fastest method)
-            try:
-                import imageio.v3 as iio
-                # Try to read just the metadata without loading the full image
-                with iio.imopen(exr_path, 'r') as file:
-                    meta = file.metadata()
-                    # Check if we have reasonable dimensions
-                    if hasattr(file, 'shape') and len(file.shape) >= 2:
-                        height, width = file.shape[:2]
-                        if height <= 0 or width <= 0 or height > 32768 or width > 32768:
-                            logging.warning(f'EXR file has invalid dimensions ({width}x{height}): {exr_path}')
-                            return False
-                    return True
-            except Exception as e:
-                logging.debug(f'imageio validation failed for {exr_path}: {e}')
-            
-            # Fallback validation using basic file header check
-            try:
-                with open(exr_path, 'rb') as f:
-                    # Read EXR magic number (first 4 bytes should be 0x762f3101)
-                    magic = f.read(4)
-                    if len(magic) != 4:
-                        return False
-                    
-                    # Check EXR magic number
-                    if magic != b'\x76\x2f\x31\x01':
-                        logging.warning(f'EXR file has invalid magic number: {exr_path}')
-                        return False
-                    
-                    return True
-            except Exception as e:
-                logging.debug(f'File header validation failed for {exr_path}: {e}')
-                return False
-                
-        except Exception as e:
-            logging.warning(f'EXR validation failed for {exr_path}: {e}')
-            return False
-    
-    def _wait_for_file_stability(self, file_path: str, max_wait: int = 10) -> bool:  # Reduced default from 30 to 10
-        """Wait for file to be stable and fully written."""
-        wait_time = 0
-        while wait_time < max_wait:
-            # Check if we should stop processing
-            if self.stop_conversion:
-                return False
-                
-            try:
-                if not os.path.exists(file_path):
-                    return False
-                    
-                size1 = os.path.getsize(file_path)
-                time.sleep(0.2)  # Reduced from 0.5s to 0.2s
-                
-                # Check again after sleep
-                if self.stop_conversion:
-                    return False
-                
-                if not os.path.exists(file_path):
-                    return False
-                    
-                size2 = os.path.getsize(file_path)
-                if size1 == size2 and size1 > 0:
-                    return True
-                    
-            except (OSError, FileNotFoundError):
-                return False
-                
-            time.sleep(0.3)  # Reduced from 1s to 0.3s
-            wait_time += 0.5  # Adjusted timing
-        
-        return False
-    
-    def _read_exr_file(self, exr_path: str):
-        """Try multiple methods to read EXR file with enhanced error handling."""
-        # Method 1: imageio (with warning suppression for corrupted files)
-        try:
-            import imageio.v3 as iio
-            import warnings
-            
-            # Suppress specific warnings about corrupted frame headers
-            with warnings.catch_warnings():
-                warnings.filterwarnings("ignore", message=".*claims there are .* frames, but there are actually .* frames.*")
-                warnings.filterwarnings("ignore", message=".*tile cannot extend outside image.*")
-                
-                img_array = iio.imread(exr_path)
-                
-                # Validate the loaded image array
-                if img_array is None or img_array.size == 0:
-                    raise ValueError("Loaded image array is empty")
-                
-                # Check for reasonable dimensions
-                if len(img_array.shape) < 2:
-                    raise ValueError(f"Invalid image shape: {img_array.shape}")
-                
-                height, width = img_array.shape[:2]
-                if height <= 0 or width <= 0:
-                    raise ValueError(f"Invalid image dimensions: {width}x{height}")
-            
-            if img_array.dtype != 'uint8':
-                img_array = np.clip(img_array, 0, 1)
-                img_array = (img_array * 255).astype('uint8')
-            
-            if len(img_array.shape) >= 3 and img_array.shape[-1] == 4:
-                return Image.fromarray(img_array)
-            else:
-                if len(img_array.shape) == 2:
-                    # Grayscale image, convert to RGB
-                    img_array = np.stack([img_array, img_array, img_array], axis=2)
-                return Image.fromarray(img_array)
-                
-        except Exception as e:
-            logging.debug(f'imageio failed to read EXR: {e}')
-        
-        # Method 2: OpenEXR (if available)
-        try:
-            import OpenEXR
-            import Imath
-            
-            exrfile = OpenEXR.InputFile(exr_path)
-            header = exrfile.header()
-            dw = header['dataWindow']
-            width = dw.max.x - dw.min.x + 1
-            height = dw.max.y - dw.min.y + 1
-            
-            # Validate dimensions
-            if width <= 0 or height <= 0 or width > 32768 or height > 32768:
-                raise ValueError(f"Invalid image dimensions: {width}x{height}")
-            
-            FLOAT = Imath.PixelType(Imath.PixelType.FLOAT)
-            r_str = exrfile.channel('R', FLOAT)
-            g_str = exrfile.channel('G', FLOAT)
-            b_str = exrfile.channel('B', FLOAT)
-            
-            # Check for alpha channel
-            try:
-                a_str = exrfile.channel('A', FLOAT)
-                has_alpha = True
-            except:
-                has_alpha = False
-            
-            # Convert to numpy arrays with validation
-            expected_size = height * width * 4  # 4 bytes per float32
-            if len(r_str) != expected_size or len(g_str) != expected_size or len(b_str) != expected_size:
-                raise ValueError(f"Channel data size mismatch for {width}x{height} image")
-            
-            r = np.frombuffer(r_str, dtype=np.float32).reshape((height, width))
-            g = np.frombuffer(g_str, dtype=np.float32).reshape((height, width))
-            b = np.frombuffer(b_str, dtype=np.float32).reshape((height, width))
-            
-            if has_alpha:
-                if len(a_str) != expected_size:
-                    raise ValueError(f"Alpha channel data size mismatch for {width}x{height} image")
-                a = np.frombuffer(a_str, dtype=np.float32).reshape((height, width))
-                rgba = np.stack([r, g, b, a], axis=2)
-                rgba = np.clip(rgba, 0, 1)
-                rgba = (rgba * 255).astype(np.uint8)
-                return Image.fromarray(rgba)
-            else:
-                rgb = np.stack([r, g, b], axis=2)
-                rgb = np.clip(rgb, 0, 1)
-                rgb = (rgb * 255).astype(np.uint8)
-                return Image.fromarray(rgb)
-                
-        except Exception as e:
-            logging.debug(f'OpenEXR failed to read EXR: {e}')
-        
-        # Method 3: PIL (as last resort)
-        try:
-            img = Image.open(exr_path)
-            # Validate the image
-            if img.size[0] <= 0 or img.size[1] <= 0:
-                raise ValueError(f"Invalid image dimensions: {img.size}")
-            return img
-        except Exception as e:
-            logging.debug(f'PIL failed to read EXR: {e}')
-        
-        return None
-    
-    def _save_png_file(self, img, png_path: str):
-        """Save image as PNG with appropriate format."""
-        if img.mode == 'RGBA':
-            img.save(png_path, 'PNG', optimize=True)
-        else:
-            if img.mode != 'RGB':
-                img = img.convert('RGB')
-            img.save(png_path, 'PNG', optimize=True)
-    
-    def _post_process_png(self, png_path: str):
-        """Post-process PNG file including transparency check and moving."""
-        try:
-            # Process transparent images
-            png_path = self.process_transparent_image(png_path)
-            
-            # Wait for file to be fully written
-            time.sleep(0.1)
-            
-            # Handle PNG file (renaming and moving)
-            if os.path.exists(png_path) and os.path.getsize(png_path) > 0:
-                self.handle_png_file(png_path)
-            else:
-                logging.warning(f'PNG file was not created properly: {png_path}')
-                
-        except Exception as e:
-            logging.error(f'Error post-processing PNG file {png_path}: {e}')
-    
-    def _cleanup_exr_file(self, exr_path: str):
-        """Clean up original EXR file."""
-        try:
-            os.remove(exr_path)
-            logging.info(f'Deleted original EXR file: {exr_path}')
-        except Exception as e:
-            logging.warning(f'Failed to delete original EXR file {exr_path}: {e}')
-    
-    def process_transparent_image(self, png_path: str) -> str:
-        """Check if image is entirely transparent and crop to 2x2 if needed."""
-        # Skip if already processed to avoid double processing
-        if png_path in self.processed_png_files:
-            return png_path
-        
-        # Wait for file to be stable before processing
-        if not self._wait_for_file_stability(png_path, max_wait=10):
-            logging.debug(f"PNG file not stable or missing for transparency check: {png_path}")
-            return png_path
-            
-        try:
-            with Image.open(png_path) as img:
-                if img.mode != 'RGBA':
-                    img = img.convert('RGBA')
-                
-                alpha_channel = img.split()[-1]
-                alpha_array = np.array(alpha_channel)
-                
-                if np.all(alpha_array == 0):
-                    logging.info(f"Detected entirely transparent image: {png_path}, cropping to 2x2")
-                    cropped_img = Image.new('RGBA', (2, 2), (0, 0, 0, 0))
-                    cropped_img.save(png_path, 'PNG')
-                    logging.info(f"Successfully cropped transparent image to 2x2: {png_path}")
-            
-            # Mark as processed regardless of whether it was transparent or not
-            self.processed_png_files.add(png_path)
-                    
-        except Exception as e:
-            logging.error(f"Error checking/processing transparency for {png_path}: {e}")
-        
-        return png_path
-    
-    def handle_png_file(self, png_path: str):
-        """Handle PNG files with enhanced stability checks and error handling."""
-        try:
-            # Check if we should stop processing
-            if self.stop_conversion:
-                return
-                
-            # Enhanced stability check - reduced wait time for faster processing
-            if not self._wait_for_file_stability(png_path, max_wait=3):  # Reduced from 10 to 3 seconds
-                logging.debug(f"PNG file not stable or missing: {png_path}")
-                return
-            
-            # Check again after stability wait
-            if self.stop_conversion:
-                return
-            
-            directory = os.path.dirname(png_path)
-            filename = os.path.basename(png_path)
-            name, ext = os.path.splitext(filename)
-            
-            # Remove suffixes
-            new_name = name
-            if new_name.endswith('-Beauty'):
-                new_name = new_name[:-7]
-            if new_name.endswith('-gearCanvas'):
-                new_name = new_name[:-11]
-            
-            # Rename if necessary
-            if new_name != name:
-                # Check if we should stop before file operations
-                if self.stop_conversion:
-                    return
-                    
-                new_filename = new_name + ext
-                new_path = os.path.join(directory, new_filename)
-                
-                if not os.path.exists(png_path):
-                    logging.debug(f"PNG file disappeared before rename: {png_path}")
-                    return
-                
-                # Final check before file operation
-                if self.stop_conversion:
-                    return
-                
-                try:
-                    os.rename(png_path, new_path)
-                    logging.info(f"Renamed: {filename} → {new_filename}")
-                    # Update processed files tracking for the new path
-                    if png_path in self.processed_png_files:
-                        self.processed_png_files.remove(png_path)
-                        self.processed_png_files.add(new_path)
-                    png_path = new_path
-                except (OSError, FileNotFoundError) as e:
-                    logging.warning(f"Failed to rename PNG file {png_path}: {e}")
-                    return
-            
-            # Check if we should stop before UI operations
-            if self.stop_conversion:
-                return
-            
-            # Notify UI of new image before moving to archive (while file is still accessible)
-            self._notify_image_update(png_path)
-            
-            # Check again before file movement
-            if self.stop_conversion:
-                return
-            
-            # Move to final output directory
-            final_path = self._move_to_final_directory(png_path)
-            # After moving, notify UI again with the final path (which may be a zip "virtual" path)
-            if final_path and not self.stop_conversion:
-                self._notify_image_update(final_path)
-            
-        except Exception as e:
-            logging.error(f"Error handling PNG file {png_path}: {e}")
-    
-    def _parse_filename_for_organization(self, filename: str) -> tuple:
-        """
-        Parse filename to extract organization components.
-        Example: "man simpleMace shadow_idle_0_000.png" -> ("man simpleMace shadow", "idle", "0")
-        Returns: (base_name, animation, frame_group) or (None, None, None) if parsing fails
-        """
-        try:
-            # Remove file extension
-            name_without_ext = os.path.splitext(filename)[0]
-            
-            # Split by underscores
-            parts = name_without_ext.split('_')
-            
-            if len(parts) < 4:
-                # Not enough parts for expected format, use simple organization
-                return (None, None, None)
-            
-            # Expected format: "basename_animation_framegroup_framenumber"
-            # Join all parts except the last 3 as the base name
-            base_name = '_'.join(parts[:-3])
-            animation = parts[-3]
-            frame_group = parts[-2]
-            
-            return (base_name, animation, frame_group)
-            
-        except Exception as e:
-            logging.debug(f"Failed to parse filename for organization: {filename}, error: {e}")
-            return (None, None, None)
-
-    def _move_to_final_directory(self, png_path: str) -> str:
-        """Move PNG file to final output directory with organized zip archive structure. Returns final path if successful."""
-        # Check if we should stop processing
-        if self.stop_conversion:
-            return png_path  # Return original path without moving
-            
-        if not self.final_output_directory or not os.path.exists(self.final_output_directory):
-            if not self.final_output_directory:
-                logging.warning(f"Final output directory not set, PNG remains: {png_path}")
-            else:
-                logging.warning(f"Final output directory does not exist: {self.final_output_directory}")
-            return png_path  # Return original path if can't move
-        
-        if not os.path.exists(png_path):
-            logging.debug(f"PNG file disappeared before move: {png_path}")
-            return None
-        
-        # Check again before processing
-        if self.stop_conversion:
-            return png_path
-        
-        filename = os.path.basename(png_path)
-        base_name, animation, frame_group = self._parse_filename_for_organization(filename)
-        
-        # Create organized structure with zip archives if parsing succeeded
-        if base_name and animation and frame_group:
-            # Check before creating directories
-            if self.stop_conversion:
-                return png_path
-                
-            # Create folder structure: final_output_directory/base_name/animation/
-            animation_dir = os.path.join(self.final_output_directory, base_name, animation)
-            try:
-                os.makedirs(animation_dir, exist_ok=True)
-                
-                # Check again after directory creation
-                if self.stop_conversion:
-                    return png_path
-                
-                # Create zip archive name: animation_framegroup.zip (e.g., "idle_0.zip")
-                zip_filename = f"{animation}_{frame_group}.zip"
-                zip_path = os.path.join(animation_dir, zip_filename)
-                
-                # Add file to zip archive
-                final_png_path = self._add_to_zip_archive(png_path, zip_path, filename)
-                
-                if final_png_path:
-                    logging.debug(f"Organized path: {base_name}/{animation}/{zip_filename}")
-                    return final_png_path
-                else:
-                    # If zip creation failed, fall back to root directory
-                    logging.warning(f"Failed to add to zip archive, falling back to root directory")
-                    final_png_path = os.path.join(self.final_output_directory, filename)
-                    
-            except OSError as e:
-                logging.warning(f"Failed to create organized directory structure: {e}, falling back to root directory")
-                # Fall back to root directory if folder creation fails
-                final_png_path = os.path.join(self.final_output_directory, filename)
-        else:
-            # If parsing fails, use root directory
-            final_png_path = os.path.join(self.final_output_directory, filename)
-            logging.debug(f"Using root directory for file: {filename}")
-        
-        # Check one more time before the file move operation
-        if self.stop_conversion:
-            return png_path
-        
-        # For fallback cases, use regular file move
-        try:
-            shutil.move(png_path, final_png_path)
-            logging.info(f"Moved PNG to final output: {png_path} → {final_png_path}")
-            
-            # Track successful move and check for session completion
-            with self._lock:
-                self.successful_moves += 1
-                # Record timestamp for time estimation
-                self.successful_move_timestamps.append(time.time())
-                # Keep only recent timestamps for accurate estimation (last 50 moves)
-                if len(self.successful_move_timestamps) > 50:
-                    self.successful_move_timestamps.pop(0)
-                logging.debug(f"Successful moves: {self.successful_moves}/{RENDERS_PER_SESSION}")
-                
-                # Trigger progress update callback
-                if self.progress_update_callback:
-                    try:
-                        # Call directly - the callback should handle thread safety
-                        self.progress_update_callback()
-                    except Exception as e:
-                        logging.error(f"Error calling progress update callback: {e}")
-                
-                # Check if we've reached the session completion threshold
-                if self.successful_moves >= RENDERS_PER_SESSION and self.session_completion_callback:
-                    logging.info(f"Reached {RENDERS_PER_SESSION} successful moves - triggering session completion")
-                    # Reset counter for next session
-                    self.successful_moves = 0
-                    # Trigger callback on a separate thread to avoid blocking file operations
-                    completion_thread = threading.Thread(target=self.session_completion_callback, daemon=True)
-                    completion_thread.start()
-            
-            return final_png_path
-        except (OSError, FileNotFoundError, shutil.Error) as e:
-            logging.warning(f"Failed to move PNG file from {png_path} to {final_png_path}: {e}")
-            return png_path  # Return original path if move failed
-
-    def _add_to_zip_archive(self, png_path: str, zip_path: str, filename: str) -> str:
-        """Add PNG file to zip archive. Returns a UI-friendly path of the file inside the zip (zipfile\\filename) if successful, None if failed."""
-        try:
-            # Check if we should stop processing
-            if self.stop_conversion:
-                return None
-                
-            # Determine the mode: 'a' (append) if zip exists, 'w' (write) if new
-            mode = 'a' if os.path.exists(zip_path) else 'w'
-            
-            with zipfile.ZipFile(zip_path, mode, compression=zipfile.ZIP_STORED) as zipf:
-                # Check again inside the zip operation
-                if self.stop_conversion:
-                    return None
-                    
-                # Check if file already exists in zip
-                existing_files = zipf.namelist()
-                if filename not in existing_files:
-                    zipf.write(png_path, filename)
-                    logging.info(f"Added {filename} to zip archive: {zip_path}")
-                else:
-                    logging.info(f"File {filename} already exists in zip archive: {zip_path}")
-            
-            # Remove the original PNG file after successful addition to zip
-            try:
-                os.remove(png_path)
-                logging.debug(f"Removed original PNG file: {png_path}")
-            except OSError as e:
-                logging.warning(f"Failed to remove original PNG file {png_path}: {e}")
-            
-            # Track successful move to zip and check for session completion
-            with self._lock:
-                self.successful_moves += 1
-                # Record timestamp for time estimation
-                self.successful_move_timestamps.append(time.time())
-                # Keep only recent timestamps for accurate estimation (last 50 moves)
-                if len(self.successful_move_timestamps) > 50:
-                    self.successful_move_timestamps.pop(0)
-                logging.debug(f"Successful moves (to zip): {self.successful_moves}/{RENDERS_PER_SESSION}")
-                
-                # Trigger progress update callback
-                if self.progress_update_callback:
-                    try:
-                        # Call directly - the callback should handle thread safety
-                        self.progress_update_callback()
-                    except Exception as e:
-                        logging.error(f"Error calling progress update callback: {e}")
-                
-                # Check if we've reached the session completion threshold
-                if self.successful_moves >= RENDERS_PER_SESSION and self.session_completion_callback:
-                    logging.info(f"Reached {RENDERS_PER_SESSION} successful moves - triggering session completion")
-                    # Reset counter for next session
-                    self.successful_moves = 0
-                    # Trigger callback on a separate thread to avoid blocking file operations
-                    completion_thread = threading.Thread(target=self.session_completion_callback, daemon=True)
-                    completion_thread.start()
-            
-            # Return a UI-friendly path that looks like a file inside the zip when viewed in Explorer
-            return os.path.join(zip_path, filename)
-            
-        except Exception as e:
-            logging.error(f"Failed to add {png_path} to zip archive {zip_path}: {e}")
-            return None
-    
-    def get_conversion_stats(self) -> dict:
-        """Get conversion statistics."""
-        return self.conversion_stats.copy()
-    
-    def reset_stats(self):
-        """Reset conversion statistics."""
-        self.conversion_stats = {
-            'total': 0,
-            'successful': 0,
-            'failed': 0,
-            'skipped': 0
-        }
-        self.processed_files.clear()
-        self.processed_png_files.clear()
-        
-        # Reset session tracking
-        with self._lock:
-            self.successful_moves = 0
-            self.successful_move_timestamps.clear()
-    
-    def get_average_time_between_moves(self) -> float:
-        """Calculate average time between successful moves in seconds.
-        Returns 0 if not enough data is available."""
-        with self._lock:
-            if len(self.successful_move_timestamps) < 2:
-                return 0.0
-            
-            # Calculate time differences between consecutive moves
-            time_diffs = []
-            for i in range(1, len(self.successful_move_timestamps)):
-                diff = self.successful_move_timestamps[i] - self.successful_move_timestamps[i-1]
-                time_diffs.append(diff)
-            
-            # Return average time difference
-            return sum(time_diffs) / len(time_diffs) if time_diffs else 0.0
-
-
-class ZipFileHandler(FileSystemEventHandler):
-    """Monitor and delete .zip files in the results directory."""
-    
-    def __init__(self):
-        super().__init__()
-        self.deleted_zip_count = 0
-    
-    def on_created(self, event):
-        """Handle new file creation events."""
-        if not event.is_directory and event.src_path.lower().endswith('.zip'):
-            self._delete_zip_file(event.src_path)
-    
-    def on_moved(self, event):
-        """Handle file move events."""
-        if not event.is_directory and event.dest_path.lower().endswith('.zip'):
-            self._delete_zip_file(event.dest_path)
-    
-    def _delete_zip_file(self, zip_path):
-        """Delete a .zip file immediately."""
-        try:
-            # Small delay to ensure file is fully written
-            time.sleep(0.1)
-            
-            if os.path.exists(zip_path):
-                os.remove(zip_path)
-                self.deleted_zip_count += 1
-                logging.info(f'Deleted .zip file: {zip_path} (total deleted: {self.deleted_zip_count})')
-            else:
-                logging.warning(f'Zip file not found for deletion: {zip_path}')
-        except Exception as e:
-            logging.error(f'Failed to delete .zip file {zip_path}: {e}')
-
-
-# ============================================================================
 # ENHANCED CLEANUP MANAGER
 # ============================================================================
 class CleanupManager:
@@ -1781,9 +882,7 @@ class CleanupManager:
         self.cleanup_registered = False
         self.save_settings_callback = None
         self.settings_saved_on_close = False
-        self.file_observer = None
-        self.exr_handler = None
-        self.zip_handler = None
+        # Remove file monitoring functionality
     
     def register_temp_file(self, filepath):
         """Register a temporary file for cleanup"""
@@ -1805,82 +904,11 @@ class CleanupManager:
         """Mark that settings have been saved to prevent duplicate saves"""
         self.settings_saved_on_close = True
     
-    def start_file_monitoring(self, server_output_dir, final_output_dir, image_update_callback=None, session_completion_callback=None, progress_update_callback=None):
-        """Start monitoring the server output directory for new .exr files and .zip files"""
-        try:
-            if self.file_observer is not None:
-                self.stop_file_monitoring()
-            
-            if not os.path.exists(server_output_dir):
-                os.makedirs(server_output_dir, exist_ok=True)
-            
-            if not os.path.exists(final_output_dir):
-                os.makedirs(final_output_dir, exist_ok=True)
-            
-            self.exr_handler = ExrFileHandler(final_output_dir)
-            self.zip_handler = ZipFileHandler()
-            
-            # Set up the image update callback for UI notifications
-            if image_update_callback:
-                self.exr_handler.set_image_update_callback(image_update_callback)
-            
-            # Set up progress update callback to trigger UI updates when images are moved
-            if progress_update_callback:
-                self.exr_handler.set_progress_update_callback(progress_update_callback)
-            
-            # Set up the session completion callback for Iray Server restart
-            if session_completion_callback:
-                self.exr_handler.set_session_completion_callback(session_completion_callback)
-            
-            self.file_observer = Observer()
-            self.file_observer.schedule(self.exr_handler, server_output_dir, recursive=True)
-            # Also monitor the final output directory for any direct image additions
-            self.file_observer.schedule(self.exr_handler, final_output_dir, recursive=True)
-            # Monitor server output directory for .zip files to delete
-            self.file_observer.schedule(self.zip_handler, server_output_dir, recursive=True)
-            self.file_observer.start()
-            logging.info(f'Started file monitoring for .exr files in server output: {server_output_dir}')
-            logging.info(f'Started .zip file monitoring and deletion in server output: {server_output_dir}')
-            logging.info(f'Processed PNGs will be moved to final output: {final_output_dir}')
-            if session_completion_callback:
-                logging.info(f'Session completion monitoring enabled - will restart Iray Server after {RENDERS_PER_SESSION} successful moves')
-        except Exception as e:
-            logging.error(f'Failed to start file monitoring: {e}')
-    
     def stop_file_monitoring(self):
-        """Stop monitoring files and clean up the observer"""
-        try:
-            # First signal the handler to stop processing any remaining events
-            if self.exr_handler is not None:
-                logging.info('Signaling EXR handler to stop processing...')
-                with self.exr_handler._lock:
-                    self.exr_handler.stop_conversion = True
-            
-            # Then stop the file observer to prevent new events
-            if self.file_observer is not None:
-                logging.info('Stopping file observer...')
-                self.file_observer.stop()
-                self.file_observer.join(timeout=5.0)  # Wait up to 5 seconds
-                self.file_observer = None
-                logging.info('Stopped file monitoring')
-            
-            # Finally stop the conversion thread
-            if self.exr_handler is not None:
-                logging.info('Stopping EXR conversion handler...')
-                self.exr_handler.stop_conversion_thread()
-                self.exr_handler = None
-                logging.info('Stopped EXR conversion handler')
-            
-            # Clean up zip handler
-            if self.zip_handler is not None:
-                logging.info(f'Zip handler deleted {self.zip_handler.deleted_zip_count} .zip files during session')
-                self.zip_handler = None
-        except Exception as e:
-            logging.error(f'Error stopping file monitoring: {e}')
-            # Force cleanup even if there were errors
-            self.file_observer = None
-            self.exr_handler = None
-            self.zip_handler = None
+        """Stop file monitoring (no-op since file monitoring was removed)"""
+        # This method is called by various parts of the code but does nothing
+        # since we removed all file monitoring functionality
+        pass
     
     def stop_iray_server(self):
         """Stop all iray_server.exe and iray_server_worker.exe processes"""
@@ -2516,58 +1544,21 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
         ]
     
     def update_estimated_time_remaining(images_remaining):
-        """Calculate estimated time remaining based on average time between successful image moves."""
+        """Update time estimation display (simplified since EXR processing was removed)."""
         try:
-            # Get average time between successful moves from ExrFileHandler
-            if hasattr(cleanup_manager, 'exr_handler') and cleanup_manager.exr_handler is not None:
-                avg_time_per_image = cleanup_manager.exr_handler.get_average_time_between_moves()
-                
-                if avg_time_per_image > 0 and images_remaining > 0:
-                    # Calculate total estimated seconds remaining
-                    total_seconds = int(avg_time_per_image * images_remaining)
-                    
-                    # Format as H:MM:SS or M:SS
-                    hours = total_seconds // 3600
-                    minutes = (total_seconds % 3600) // 60
-                    seconds = total_seconds % 60
-                    
-                    if hours > 0:
-                        formatted = f"Estimated time remaining: {hours}:{minutes:02}:{seconds:02}"
-                    else:
-                        formatted = f"Estimated time remaining: {minutes}:{seconds:02}"
-                    
-                    estimated_time_remaining_var.set(formatted)
-                    
-                    # Calculate and set estimated completion time
-                    completion_time = datetime.datetime.now() + datetime.timedelta(seconds=total_seconds)
-                    
-                    def ordinal(n):
-                        if 10 <= n % 100 <= 20:
-                            suffix = 'th'
-                        else:
-                            suffix = {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')
-                        return str(n) + suffix
-
-                    weekday = completion_time.strftime('%A')
-                    month = completion_time.strftime('%B')
-                    day = ordinal(completion_time.day)
-                    year = completion_time.year
-                    hour = completion_time.strftime('%I').lstrip('0') or '12'
-                    minute = completion_time.strftime('%M')
-                    ampm = completion_time.strftime('%p')
-                    completion_str = f"Estimated completion at: {weekday}, {month} {day}, {year} {hour}:{minute} {ampm}"
-                    estimated_completion_at_var.set(completion_str)
-                    
-                    logging.debug(f"Time estimation: {avg_time_per_image:.1f}s per image, {images_remaining} remaining = {formatted}")
-                    return
-            
-            # Fallback if no timing data available
-            estimated_time_remaining_var.set("Estimated time remaining: --")
-            estimated_completion_at_var.set("Estimated completion at: --")
+            # Since we removed EXR conversion and processing, time estimation
+            # is no longer meaningful - just show a simple message
+            if images_remaining > 0:
+                estimated_time_remaining_var.set(f"Images remaining: {images_remaining}")
+                estimated_completion_at_var.set("Direct output to final directory")
+            else:
+                estimated_time_remaining_var.set("All images processed")
+                estimated_completion_at_var.set("Render complete")
             
         except Exception as e:
-            logging.error(f"Error calculating estimated time remaining: {e}")
-            estimated_time_remaining_var.set("Estimated time remaining: --")
+            logging.error(f"Error updating status display: {e}")
+            estimated_time_remaining_var.set("--")
+            estimated_completion_at_var.set("--")
             estimated_completion_at_var.set("Estimated completion at: --")
     
     # Check for existing instance before showing splash screen
@@ -3658,9 +2649,6 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
     output_png_count = tk.Label(output_details_frame, text="PNG Files: ", font=("Arial", 10))
     output_png_count.pack(anchor="nw", pady=(0, 5))
     theme_manager.register_widget(output_png_count, "label")
-    output_zip_count = tk.Label(output_details_frame, text="ZIP Files: ", font=("Arial", 10))
-    output_zip_count.pack(anchor="nw", pady=(0, 5))
-    theme_manager.register_widget(output_zip_count, "label")
 
     output_folder_count = tk.Label(output_details_frame, text="Sub-folders: ", font=("Arial", 10))
     output_folder_count.pack(anchor="nw", pady=(0, 5))
@@ -3681,7 +2669,6 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
         if not os.path.exists(output_dir):
             output_folder_size.config(text="Folder Size: N/A")
             output_png_count.config(text="PNG Files: N/A")
-            output_zip_count.config(text="ZIP Files: N/A")
             output_folder_count.config(text="Sub-folders: N/A")
             progress_var.set(0)
             images_remaining_var.set("Images remaining: --")
@@ -3690,7 +2677,6 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
         try:
             total_size = 0
             png_count = 0
-            zip_count = 0
             folder_count = 0
             for rootdir, dirs, files in os.walk(output_dir):
                 for dir_name in dirs:
@@ -3702,15 +2688,12 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                         total_size += file_size
                         if file.lower().endswith('.png'):
                             png_count += 1
-                        elif file.lower().endswith('.zip'):
-                            zip_count += 1
                     except (OSError, IOError):
                         continue
             
             size_str = format_file_size(total_size)
             output_folder_size.config(text=f"Folder Size: {size_str}")
             output_png_count.config(text=f"PNG Files: {png_count}")
-            output_zip_count.config(text=f"ZIP Files: {zip_count}")
             output_folder_count.config(text=f"Sub-folders: {folder_count}")
             logging.debug(f"update_output_details: Found {png_count} PNG files")
             
@@ -3729,25 +2712,19 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 total_images = int(total_images_str) if total_images_str.isdigit() else None
                 logging.debug(f"update_output_details: Parsed total images: {total_images}")
                 
-                # Get count of images that already exist in ZIP files (from previous runs)
-                existing_images_in_zips = count_existing_images_in_zips(output_dir)
-                logging.debug(f"update_output_details: Found {existing_images_in_zips} existing images in ZIP files")
-                
-                # Get count of successfully processed images from current session (ExrFileHandler)
-                current_session_images = 0
-                if hasattr(cleanup_manager, 'exr_handler') and cleanup_manager.exr_handler is not None:
-                    current_session_images = cleanup_manager.exr_handler.successful_moves
-                    logging.debug(f"update_output_details: Current session successful_moves: {current_session_images}")
-                
-                # Total completed images = existing in ZIPs + current session moves
-                completed_images = existing_images_in_zips + current_session_images
+                # Since we removed EXR conversion and ZIP functionality,
+                # progress tracking is simplified to just count PNG files in output directory
+                # Get the directory stats without ZIP counting
+                total_size, png_count, folder_count = get_directory_stats(output_dir)
                 
                 if total_images and total_images > 0:
+                    # Use PNG count as a simple approximation of progress
+                    completed_images = png_count
                     percent = min(100, (completed_images / total_images) * 100)
                     progress_var.set(percent)
                     remaining = max(0, total_images - completed_images)
                     images_remaining_var.set(f"Images remaining: {remaining}")
-                    logging.info(f"update_output_details: Updated progress - {completed_images}/{total_images} images ({percent:.1f}%), {remaining} remaining (existing: {existing_images_in_zips}, current session: {current_session_images})")
+                    logging.info(f"update_output_details: Updated progress - {completed_images}/{total_images} images ({percent:.1f}%), {remaining} remaining")
                     update_estimated_time_remaining(remaining)
                 else:
                     progress_var.set(0)
@@ -3764,7 +2741,6 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
         except Exception as e:
             output_folder_size.config(text="Folder Size: Error")
             output_png_count.config(text="PNG Files: Error")
-            output_zip_count.config(text="ZIP Files: Error")
             output_folder_count.config(text="Sub-folders: Error")
             progress_var.set(0)
             images_remaining_var.set("Images remaining: --")
@@ -3882,22 +2858,8 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
         gc.collect()
 
     def map_server_path_to_output_path(server_path):
-        """Map a server output directory path to the corresponding final output directory path."""
-        try:
-            server_output_dir = get_server_output_directory()
-            output_dir = value_entries["Output Directory"].get()
-            
-            # If the path starts with server output directory, map it to output directory
-            if server_path.startswith(server_output_dir):
-                relative_path = os.path.relpath(server_path, server_output_dir)
-                mapped_path = os.path.join(output_dir, relative_path)
-                return mapped_path.replace('/', '\\')
-            
-            # If it's already in the output directory or not a server path, return as-is
-            return server_path.replace('/', '\\')
-        except Exception:
-            # Fallback to original path if mapping fails
-            return server_path.replace('/', '\\')
+        """Since we removed the intermediate server directory, just return the path as-is."""
+        return server_path.replace('/', '\\') if server_path else server_path
 
     def display_specific_image(image_path):
         """Display a specific image in the UI."""
@@ -3964,47 +2926,18 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
         gc.collect()
 
     def watchdog_image_update(new_image_path):
-        """Called by watchdog when a new image is detected. Schedules UI update on main thread."""
+        """Simplified callback for when new images are available (no EXR processing)."""
         def update_ui():
             try:
                 output_dir = value_entries["Output Directory"].get()
-                server_output_dir = get_server_output_directory()
                 
-                # Update if the new image is in either the final output directory OR the server temp directory
-                if (os.path.dirname(new_image_path) == output_dir or 
-                    new_image_path.startswith(output_dir)):
-                    # If the path points to an actual file, update image normally
-                    if os.path.exists(new_image_path):
-                        show_last_rendered_image()
-                        logging.debug(f'UI updated for new image in output directory: {new_image_path}')
-                    else:
-                        # Handle virtual zip path like "...\\some.zip\\image.png" – update details only
-                        if ".zip" in new_image_path.lower():
-                            # Always display the mapped output path instead of server path
-                            display_path = map_server_path_to_output_path(new_image_path)
-                            update_details_path(display_path)  # Process and display path
-                            # Optionally update size by reading from zip
-                            try:
-                                parts = new_image_path.split('\\')
-                                # Find the zip segment
-                                zip_index = next(i for i, p in enumerate(parts) if p.lower().endswith('.zip'))
-                                zip_file = '\\'.join(parts[:zip_index+1])
-                                inner_name = '\\'.join(parts[zip_index+1:])
-                                with zipfile.ZipFile(zip_file, 'r') as zf:
-                                    if inner_name in zf.namelist():
-                                        info = zf.getinfo(inner_name)
-                                        size_str = format_file_size(info.file_size)
-                                        details_size.config(text=f"Size: {size_str}")
-                                    # We keep previously computed dimensions to avoid heavy I/O
-                            except Exception:
-                                pass
-                        else:
-                            # Fallback: just refresh the last rendered image
-                            show_last_rendered_image()
-                elif new_image_path.startswith(server_output_dir):
-                    # Image is in temp directory, display it directly
-                    display_specific_image(new_image_path)
-                    logging.debug(f'UI updated for new image in temp directory: {new_image_path}')
+                # Update if the new image is in the output directory and exists
+                if (new_image_path.startswith(output_dir) and os.path.exists(new_image_path)):
+                    show_last_rendered_image()
+                    logging.debug(f'UI updated for new image: {new_image_path}')
+                else:
+                    # Fallback: just refresh the last rendered image
+                    show_last_rendered_image()
             except Exception as e:
                 logging.error(f'Error updating UI for new image {new_image_path}: {e}')
         
@@ -4019,28 +2952,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
         new_output_dir = value_entries["Output Directory"].get()
         logging.info(f'Output Directory changed to: {new_output_dir}')
         
-        # Update the final output directory in the ExrFileHandler if it exists
-        if hasattr(cleanup_manager, 'exr_handler') and cleanup_manager.exr_handler is not None:
-            cleanup_manager.exr_handler.set_final_output_directory(new_output_dir)
-            logging.info(f'Updated ExrFileHandler final output directory to: {new_output_dir}')
-        
-        # Restart file monitoring to include the new output directory
-        if hasattr(cleanup_manager, 'file_observer') and cleanup_manager.file_observer is not None:
-            try:
-                server_output_dir = get_server_output_directory()
-                # Create thread-safe progress update callback
-                def safe_progress_update():
-                    """Thread-safe progress update that schedules on main thread."""
-                    try:
-                        root.after_idle(update_output_details)
-                    except Exception as e:
-                        logging.error(f"Error scheduling progress update: {e}")
-                
-                cleanup_manager.start_file_monitoring(server_output_dir, new_output_dir, watchdog_image_update, None, safe_progress_update)  # Pass thread-safe progress update callback
-                logging.info(f'Restarted file monitoring for new output directory: {new_output_dir}')
-            except Exception as e:
-                logging.error(f'Failed to restart file monitoring: {e}')
-        
+        # Since we removed EXR processing, just refresh the image display
         root.after(200, show_last_rendered_image)
         root.after(200, update_output_details)
     value_entries["Output Directory"].bind("<FocusOut>", lambda e: on_output_dir_change())
@@ -4159,21 +3071,10 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 
                 logging.info('All previous instances closed. Starting fresh Iray Server...')
                 
-                # Get server output directory path
-                server_output_dir = get_server_output_directory()
-                
-                # Additional cleanup in script directory (for redundancy)
+                # Since we removed the intermediate server directory, just clean up the main script directory
                 script_dir = os.path.dirname(os.path.abspath(__file__))
-                logging.info(f"Additional cleanup in script directory: {script_dir}")
+                logging.info(f"Cleanup in script directory: {script_dir}")
                 cleanup_iray_files_in_directory(script_dir, with_retries=False)
-
-                # Clean up server output directory to start fresh
-                if os.path.exists(server_output_dir):
-                    shutil.rmtree(server_output_dir)
-                    logging.info(f"Successfully deleted server output folder at: {server_output_dir}")
-                os.makedirs(server_output_dir, exist_ok=True)
-                logging.info(f"Created fresh server output directory at: {server_output_dir}")
-
                 
                 if not start_iray_server():  # Start Iray Server
                     logging.error('Failed to start Iray Server')
@@ -4203,20 +3104,11 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                             
                             logging.info('Iray Server restarted successfully')
                             
-                            # Get server output directory path for restart
-                            server_output_dir = get_server_output_directory()
+                            # Since we removed server output directory, no need to clean/recreate it
                             
-                            # Clean up and recreate server output directory
-                            if os.path.exists(server_output_dir):
-                                shutil.rmtree(server_output_dir)
-                                logging.info(f"Cleaned server output directory: {server_output_dir}")
-                            os.makedirs(server_output_dir, exist_ok=True)
-                            logging.info(f"Recreated server output directory: {server_output_dir}")
-                            
-                            # Since DAZ Studio continues running, just restart file monitoring
-                            logging.info('Restarting file monitoring for existing DAZ Studio instances')
+                            # Since DAZ Studio continues running, just refresh the UI
+                            logging.info('Session restart complete for existing DAZ Studio instances')
                             image_output_dir = value_entries["Output Directory"].get().replace("\\", "/")
-                            cleanup_manager.start_file_monitoring(server_output_dir, image_output_dir, watchdog_image_update, on_session_complete, update_output_details)
                             
                             logging.info('Session restart complete - ready for next cycle')
                         except Exception as e:
@@ -4249,24 +3141,14 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                                         logging.error('Failed to restart Iray Server')
                                         raise Exception("Iray Server restart failed")
                                     logging.info('Iray Server restarted')
-                                    # Get server output directory path for reconfiguration
-                                    server_output_dir = get_server_output_directory()
-                                    
-                                    # Clean up and recreate server output directory
-                                    if os.path.exists(server_output_dir):
-                                        shutil.rmtree(server_output_dir)
-                                        logging.info(f"Cleaned server output directory: {server_output_dir}")
-                                    os.makedirs(server_output_dir, exist_ok=True)
-                                    logging.info(f"Recreated server output directory: {server_output_dir}")
+                                    # Since we removed server output directory, no cleanup needed
                                     
                                     logging.info('Iray Server restarted - skipping web UI reconfiguration')
                                     
                                     # Since DAZ Studio no longer needs to restart when Iray Server restarts,
-                                    # we just need to restart file monitoring for the existing DAZ instances
-                                    logging.info('Restarting file monitoring for existing DAZ Studio instances')
-                                    server_output_dir = get_server_output_directory()
+                                    # just refresh the UI for the existing DAZ instances
+                                    logging.info('UI refresh for existing DAZ Studio instances')
                                     image_output_dir = value_entries["Output Directory"].get().replace("\\", "/")
-                                    cleanup_manager.start_file_monitoring(server_output_dir, image_output_dir, watchdog_image_update)
                                     
                                     logging.info('Render completion cycle finished successfully - Iray Server restarted, DAZ Studio instances continue running')
                                 except Exception as cleanup_e:
@@ -4510,7 +3392,8 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
 
         # Add render_shadows to json_map
         render_shadows = render_shadows_var.get()
-        results_directory_path = get_server_output_directory().replace("\\", "/")
+        # Since we removed the intermediate server directory, use the final output directory
+        results_directory_path = image_output_dir
         json_map = (
             f'{{'
             f'"num_instances": "{num_instances}", '
@@ -4547,18 +3430,8 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 root.after(DAZ_STUDIO_STARTUP_DELAY, lambda: run_all_instances(i + 1))
             else:
                 logging.info('All render instances launched')
-                # Start file monitoring for .exr files in server output directory, move processed PNGs to final output
-                server_output_dir = get_server_output_directory()
-                
-                # Create thread-safe progress update callback
-                def safe_progress_update():
-                    """Thread-safe progress update that schedules on main thread."""
-                    try:
-                        root.after_idle(update_output_details)
-                    except Exception as e:
-                        logging.error(f"Error scheduling progress update: {e}")
-                
-                cleanup_manager.start_file_monitoring(server_output_dir, image_output_dir, watchdog_image_update, session_completion_callback, safe_progress_update)
+                # Since we removed EXR file monitoring, just log completion
+                logging.info('Render instances launched successfully, images will be saved directly to output directory')
 
         run_all_instances()
 
