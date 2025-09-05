@@ -3392,8 +3392,9 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
 
         # Add render_shadows to json_map
         render_shadows = render_shadows_var.get()
-        # Since we removed the intermediate server directory, use the final output directory
-        results_directory_path = image_output_dir
+        # Create results directory path (admin subfolder in results directory, same location as Iray server files)
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        results_directory_path = os.path.join(script_dir, "results", "admin").replace("\\", "/")
         json_map = (
             f'{{'
             f'"num_instances": "{num_instances}", '

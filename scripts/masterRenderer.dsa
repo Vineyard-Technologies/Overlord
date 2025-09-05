@@ -7,6 +7,8 @@ var sScriptPath = oScriptFileInfo.path();
 var nInstanceNumber = App.instanceName();
 var sOutputDirectory = oScriptArgs['image_output_dir'];
 var oOutputDirectory = new DzDir(sOutputDirectory);
+var sResultsDirectory = oScriptArgs['results_directory_path'];
+var oResultsDirectory = new DzDir(sResultsDirectory);
 var sSubjectFilepath = oScriptArgs['subject_file'];
 var aAnimationFilepaths = oScriptArgs['animations'].toString().split(',');
 var aPropAnimationFilepaths = oScriptArgs['prop_animations'].toString().split(',');
@@ -48,27 +50,6 @@ oSettings.setBoolValue('Secure', sSecurity == sSecureProtocol);
 oSettings.setIntValue('Port', sPort);
 oSettings.setStringValue('Username', 'admin');
 oSettings.setStringValue('Password', 'admin');
-
-function checkIfFileExistsInZip(sZipPath, sFinalName) {
-
-	var oZipFile = new DzZipFile(sZipPath);
-
-	oZipFile.open(DzZipFile.ReadOnly);
-
-	var aFileNames = oZipFile.getFileNames();
-
-	oZipFile.close();
-
-	for (var nFileNameCounter = 0; nFileNameCounter < aFileNames.length; nFileNameCounter++) {
-
-		var sFileNameInZip = aFileNames[nFileNameCounter];
-
-		if (sFileNameInZip === sFinalName + '.png') {
-
-			return true;
-		}
-	}
-}
 
 // Obtain the desired name out of a filepath or filename.
 function getName(sFileName) {
@@ -189,12 +170,9 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 			+ sAnimationName + '_' + nOutputAngle + '_' + ('000' + nFrame).slice(-3);
 			var sFinalNameWithExtension = sFinalName + '.png';
 
-			var sZipPath = sOutputDirectory + '/' + sSubjectName + (bIsShadow ? ' shadow' : '')
-				+ '/' + sAnimationName + '/' + sAnimationName + '_' + nOutputAngle + '.zip';
+			if (oResultsDirectory.exists(sFinalName)) {
 
-			if (checkIfFileExistsInZip(sZipPath, sFinalName)) {
-
-				App.log(sFinalNameWithExtension + ' already exists in zip. Skipping this frame.');
+				App.log(sFinalNameWithExtension + ' already exists. Skipping this frame.');
 
 				continue;
 			}
@@ -252,9 +230,9 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 
 			var nAttempts = 0;
 			var nAllowedAttempts = 20;
-			while (!checkIfFileExistsInZip(sZipPath, sFinalName)) {
+			while (!oResultsDirectory.exists(sFinalName)) {
 
-				App.log('Attempt ' + nAttempts + ': Waiting for ' + sFinalName + ' to appear in ' + sZipPath);
+				App.log('Attempt ' + nAttempts + ': Waiting for ' + sFinalName + ' to appear in ' + sResultsDirectory);
 
 				sleep(1000);
 				nAttempts++;
