@@ -251,6 +251,7 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 			oRenderer.exportRenderToBridgeQueue(sFinalName, 'png', oCamera, oRenderOptions, 0);
 
 			var nAttempts = 0;
+			var nAllowedAttempts = 20;
 			while (!checkIfFileExistsInZip(sZipPath, sFinalName)) {
 
 				App.log('Attempt ' + nAttempts + ': Waiting for ' + sFinalName + ' to appear in ' + sZipPath);
@@ -258,8 +259,8 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 				sleep(1000);
 				nAttempts++;
 
-				if (nAttempts > 10) {
-					App.log('Waited more than 10 seconds for ' + sFinalName + '. Retrying this frame.');
+				if (nAttempts > nAllowedAttempts) {
+					App.log('Waited more than ' + nAllowedAttempts + ' seconds for ' + sFinalName + '. Retrying this frame.');
 					nFrame--; // retry this frame
 					break;
 				}
