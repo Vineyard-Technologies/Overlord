@@ -45,7 +45,7 @@ def get_display_version() -> str:
 # Application constants
 DEFAULT_MAX_WORKERS = 8
 LOG_SIZE_MB = 100
-RENDERS_PER_SESSION = 100
+IRAY_CACHE_DB_SIZE_LIMIT_GB = 10
 RECENT_RENDER_TIMES_LIMIT = 25
 
 # UI update intervals (milliseconds)
@@ -421,6 +421,58 @@ def cleanup_iray_database_and_cache():
                 
     except Exception as e:
         logging.error(f"Error during comprehensive Iray cleanup: {e}")
+
+
+def check_iray_database_size() -> tuple:
+    """Check the size of cache/cache.db files and return (total_size_gb, max_size_gb, needs_restart)."""
+    try:
+        total_size_bytes = 0
+        max_size_bytes = 0
+        db_files_found = []
+        
+        # Check in all possible locations
+        check_locations = []
+        
+        # Add source directory (src folder where cache should be)
+        check_locations.append(os.path.dirname(__file__))
+        
+        # Add LocalAppData directory if different
+        local_app_data_dir = get_local_app_data_path()
+        if local_app_data_dir not in check_locations:
+            check_locations.append(local_app_data_dir)
+        
+        for check_dir in check_locations:
+            # Look for cache/cache.db instead of iray_server.db
+            cache_db_path = os.path.join(check_dir, "cache", "cache.db")
+            if os.path.exists(cache_db_path):
+                try:
+                    file_size = os.path.getsize(cache_db_path)
+                    total_size_bytes += file_size
+                    max_size_bytes = max(max_size_bytes, file_size)
+                    db_files_found.append(f"{cache_db_path} ({format_file_size(file_size)})")
+                    logging.debug(f"Found cache.db at {cache_db_path}: {format_file_size(file_size)}")
+                except (OSError, IOError) as e:
+                    logging.warning(f"Could not get size of {cache_db_path}: {e}")
+        
+        # Convert to GB
+        total_size_gb = total_size_bytes / (1024 * 1024 * 1024)
+        max_size_gb = max_size_bytes / (1024 * 1024 * 1024)
+        
+        # Check if restart is needed
+        needs_restart = max_size_gb >= IRAY_CACHE_DB_SIZE_LIMIT_GB
+        
+        if db_files_found:
+            logging.debug(f"Cache database size check: Total {total_size_gb:.2f} GB, Max {max_size_gb:.2f} GB, "
+                         f"Limit {IRAY_CACHE_DB_SIZE_LIMIT_GB} GB, Needs restart: {needs_restart}")
+            logging.debug(f"Cache database files found: {', '.join(db_files_found)}")
+        else:
+            logging.debug("No cache/cache.db files found during size check")
+        
+        return total_size_gb, max_size_gb, needs_restart
+        
+    except Exception as e:
+        logging.error(f"Error checking iray database size: {e}")
+        return 0.0, 0.0, False
 
 
 # ============================================================================
@@ -1530,6 +1582,10 @@ def start_headless_render(settings):
         cleanup_manager.cleanup_all()
 
 def main(auto_start_render=False, cmd_args=None, headless=False):
+    # Initialize global monitoring state
+    global database_monitoring_active
+    database_monitoring_active = False
+    
     def create_daz_command_array(daz_executable_path, json_map, log_size, render_script_path):
         """Create the DAZ Studio command array with all required parameters."""
         return [
@@ -2957,6 +3013,57 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
     value_entries["Output Directory"].bind("<FocusOut>", lambda e: on_output_dir_change())
     value_entries["Output Directory"].bind("<Return>", lambda e: on_output_dir_change())
 
+    def start_database_monitoring(restart_callback):
+        """Start monitoring cache/cache.db file size and call restart_callback when limit is exceeded."""
+        global database_monitoring_active
+        database_monitoring_active = True
+        
+        def check_database_size_periodically():
+            """Periodically check cache database size and trigger restart if needed."""
+            global database_monitoring_active
+            if not database_monitoring_active:
+                return
+                
+            try:
+                total_size_gb, max_size_gb, needs_restart = check_iray_database_size()
+                
+                if needs_restart:
+                    logging.info(f"Database size monitoring: Size limit exceeded ({max_size_gb:.2f} GB >= {IRAY_CACHE_DB_SIZE_LIMIT_GB} GB)")
+                    database_monitoring_active = False  # Stop monitoring during restart
+                    
+                    # Call the restart callback
+                    try:
+                        restart_callback()
+                        # Restart monitoring after the restart completes (with delay)
+                        def restart_monitoring():
+                            global database_monitoring_active
+                            database_monitoring_active = True
+                            start_database_monitoring(restart_callback)
+                        root.after(65000, restart_monitoring)  # Resume monitoring after 65 seconds
+                    except Exception as e:
+                        logging.error(f"Error during database size restart: {e}")
+                        database_monitoring_active = True  # Re-enable monitoring on error
+                else:
+                    # Continue monitoring - check every 30 seconds
+                    if database_monitoring_active:
+                        root.after(30000, check_database_size_periodically)
+                        
+            except Exception as e:
+                logging.error(f"Error in database size monitoring: {e}")
+                # Continue monitoring despite error
+                if database_monitoring_active:
+                    root.after(30000, check_database_size_periodically)
+        
+        logging.info(f"Starting database size monitoring (limit: {IRAY_CACHE_DB_SIZE_LIMIT_GB} GB)")
+        # Start the first check after 60 seconds to give the render time to start
+        root.after(60000, check_database_size_periodically)
+
+    def stop_database_monitoring():
+        """Stop cache database size monitoring."""
+        global database_monitoring_active
+        database_monitoring_active = False
+        logging.info("Cache database size monitoring stopped")
+
     def start_render():
         # Prevent multiple render starts
         if button.cget("state") == "disabled":
@@ -3082,9 +3189,10 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 logging.info('Iray Server started - skipping web UI configuration')
                 
                 # Define session completion callback for Iray Server restart
-                def on_session_complete():
-                    """Called when RENDERS_PER_SESSION images have been successfully processed"""
-                    logging.info(f'Session complete: {RENDERS_PER_SESSION} images processed - starting Iray Server restart')
+                def on_database_size_restart():
+                    """Called when cache/cache.db exceeds size limit"""
+                    total_size_gb, max_size_gb, _ = check_iray_database_size()
+                    logging.info(f'Cache database size limit exceeded: {max_size_gb:.2f} GB (limit: {IRAY_CACHE_DB_SIZE_LIMIT_GB} GB) - starting Iray Server restart')
                     
                     def restart_iray_background():
                         try:
@@ -3106,10 +3214,10 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                             # Since we removed server output directory, no need to clean/recreate it
                             
                             # Since DAZ Studio continues running, just refresh the UI
-                            logging.info('Session restart complete for existing DAZ Studio instances')
+                            logging.info('Database size restart complete for existing DAZ Studio instances')
                             image_output_dir = value_entries["Output Directory"].get().replace("\\", "/")
                             
-                            logging.info('Session restart complete - ready for next cycle')
+                            logging.info('Database size restart complete - ready for next cycle')
                         except Exception as e:
                             logging.error(f'Error during session restart: {e}')
                     
@@ -3165,7 +3273,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                         logging.error(f'Error in render completion monitoring: {e}')
                 
                 # Continue with the rest of the render setup on UI thread
-                root.after(0, lambda: continue_render_setup(on_session_complete))
+                root.after(0, lambda: continue_render_setup(on_database_size_restart))
                 
             except Exception as e:
                 logging.error(f"Failed to start render: {e}")
@@ -3432,6 +3540,10 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 logging.info('All render instances launched')
                 # Since we removed EXR file monitoring, just log completion
                 logging.info('Render instances launched successfully, images will be saved directly to output directory')
+                
+                # Start database size monitoring
+                if session_completion_callback:
+                    start_database_monitoring(session_completion_callback)
 
         run_all_instances()
 
@@ -3479,6 +3591,9 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             # Stop file monitoring first to prevent race conditions
             logging.info('Stopping file monitoring and conversion...')
             cleanup_manager.stop_file_monitoring()
+            
+            # Stop database monitoring
+            stop_database_monitoring()
             
             # Then kill render processes
             logging.info('Stopping render processes...')

@@ -51,6 +51,24 @@ oSettings.setIntValue('Port', sPort);
 oSettings.setStringValue('Username', 'admin');
 oSettings.setStringValue('Password', 'admin');
 
+// Make the output directory if it doesn't exist
+if (!oOutputDirectory.exists()) {
+
+	App.log('"' + sOutputDirectory + '" does not exist. Creating directory...');
+
+	oOutputDirectory.mkdir();
+
+	App.log('Created "' + sOutputDirectory + '".');
+}
+
+// Check if a file exists and isn't 0 bytes
+function exists(sFilePath) {
+
+	var oFileInfo = new DzFileInfo(sFilePath);
+
+	return oFileInfo.exists() && oFileInfo.size() > 0;
+}
+
 // Obtain the desired name out of a filepath or filename.
 function getName(sFileName) {
 	return new DzFileInfo(sFileName).completeBaseName();
@@ -167,12 +185,13 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 			if ((nFrame - (nInstanceNumber - 1)) % nTotalNumberOfInstances != 0) continue;
 
 			var sFinalName = sSubjectName + (bIsShadow ? ' shadow_' : '_')
-			+ sAnimationName + '_' + nOutputAngle + '_' + ('000' + nFrame).slice(-3);
-			var sFinalNameWithExtension = sFinalName + '.png';
+				+ sAnimationName + '_' + nOutputAngle + '_' + ('000' + nFrame).slice(-3);
+			var sFinalNameWithSuffix = sFinalName + (bIsGear ? '-Gear' : '-Beauty') + '.png';
+			var sFinalNameInFolder = sFinalName + '/' + sFinalNameWithSuffix;
 
-			if (oResultsDirectory.exists(sFinalName)) {
+			if (exists(sResultsDirectory + '/' + sFinalNameInFolder)) {
 
-				App.log(sFinalNameWithExtension + ' already exists. Skipping this frame.');
+				App.log(sFinalNameWithSuffix + ' already exists. Skipping this frame.');
 
 				continue;
 			}
@@ -230,9 +249,9 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 
 			var nAttempts = 0;
 			var nAllowedAttempts = 20;
-			while (!oResultsDirectory.exists(sFinalName)) {
+			while (!exists(sResultsDirectory + '/' + sFinalNameInFolder)) {
 
-				App.log('Attempt ' + nAttempts + ': Waiting for ' + sFinalName + ' to appear in ' + sResultsDirectory);
+				App.log('Attempt ' + nAttempts + ': Waiting for ' + sFinalNameInFolder + ' to appear in ' + sResultsDirectory);
 
 				sleep(1000);
 				nAttempts++;
@@ -243,6 +262,11 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 					break;
 				}
 			}
+
+			// We can also rename the file with this function
+			oResultsDirectory.move(sResultsDirectory + '/' + sFinalNameInFolder, sOutputDirectory + '/' + sFinalName + '.png');
+			oResultsDirectory.rmdir(sFinalName);
+			oResultsDirectory.remove(sFinalName + '.zip');
 		}
 	}
 	if (bRenderShadows) {
