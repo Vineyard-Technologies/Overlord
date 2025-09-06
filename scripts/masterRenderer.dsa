@@ -264,9 +264,14 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 			}
 
 			// We can also rename the file with this function
+			App.log('Moving ' + sFinalNameInFolder + ' to ' + sOutputDirectory + '/' + sFinalName + '.png');
 			oResultsDirectory.move(sResultsDirectory + '/' + sFinalNameInFolder, sOutputDirectory + '/' + sFinalName + '.png');
-			oResultsDirectory.rmdir(sFinalName);
+
+			App.log('Deleting canvas .zip file: ' + sResultsDirectory + '/' + sFinalName + '.zip');
 			oResultsDirectory.remove(sFinalName + '.zip');
+			
+			App.log('Deleting folder: ' + sResultsDirectory + '/' + sFinalName);
+			oResultsDirectory.rmdir(sFinalName);
 		}
 	}
 	if (bRenderShadows) {

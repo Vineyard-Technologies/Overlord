@@ -293,10 +293,28 @@ def is_iray_server_running() -> bool:
 
 def stop_iray_server() -> int:
     """Stop all iray_server.exe and iray_server_worker.exe processes."""
-    killed_count = kill_processes_by_name(IRAY_SERVER_PROCESSES)
-    if killed_count > 0:
-        logging.info(f'Stopped {killed_count} Iray Server process(es)')
-    return killed_count
+    killed_processes = []
+    try:
+        for proc in psutil.process_iter(['name']):
+            try:
+                proc_name = proc.info['name']
+                if proc_name and any(name.lower() in proc_name.lower() for name in ['iray_server.exe', 'iray_server_worker.exe']):
+                    proc.kill()
+                    killed_processes.append(proc_name)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+        
+        if killed_processes:
+            logging.info(f'Stopped Iray Server processes: {", ".join(killed_processes)}')
+            
+    except Exception as e:
+        logging.error(f'Failed to stop Iray Server processes: {e}')
+        
+    # Always clean up results directory when stopping Iray Server, regardless of whether processes were found
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    cleanup_results_directory(script_dir)
+    
+    return len(killed_processes)
 
 def stop_all_render_processes() -> dict:
     """Stop all render-related processes. Returns counts of stopped processes."""
@@ -313,6 +331,20 @@ def stop_all_render_processes() -> dict:
                 f'{results["iray_server"]} Iray Server')
     
     return results
+
+def cleanup_results_directory(script_dir):
+    """Clean up the results directory when stopping Iray Server."""
+    results_dir = os.path.join(script_dir, "results")
+    
+    if os.path.exists(results_dir):
+        try:
+            import shutil
+            shutil.rmtree(results_dir)
+            logging.info(f'Cleaned up results directory: {results_dir}')
+        except Exception as e:
+            logging.warning(f'Could not clean up results directory {results_dir}: {e}')
+    else:
+        logging.debug(f'Results directory does not exist: {results_dir}')
 
 def cleanup_iray_files_in_directory(cleanup_dir, with_retries=True):
     """Clean up all Iray-related files and folders in a specific directory."""
@@ -961,31 +993,14 @@ class CleanupManager:
         # since we removed all file monitoring functionality
         pass
     
-    def stop_iray_server(self):
-        """Stop all iray_server.exe and iray_server_worker.exe processes"""
-        killed_processes = []
-        try:
-            for proc in psutil.process_iter(['name']):
-                try:
-                    proc_name = proc.info['name']
-                    if proc_name and any(name.lower() in proc_name.lower() for name in ['iray_server.exe', 'iray_server_worker.exe']):
-                        proc.kill()
-                        killed_processes.append(proc_name)
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    continue
-            if killed_processes:
-                logging.info(f'Stopped Iray Server processes: {", ".join(killed_processes)}')
-        except Exception as e:
-            logging.error(f'Failed to stop Iray Server processes: {e}')
-    
     def cleanup_all(self):
         """Clean up all registered resources"""
         try:
             # Stop file monitoring first
             self.stop_file_monitoring()
             
-            # Stop Iray Server processes
-            self.stop_iray_server()
+            # Stop Iray Server processes using the global function
+            stop_iray_server()
             
             # Only save settings if callback is available, widgets are still valid, and settings haven't been saved already
             if self.save_settings_callback and not self.settings_saved_on_close:
@@ -1051,56 +1066,6 @@ def register_cleanup():
     if not cleanup_manager.cleanup_registered:
         atexit.register(cleanup_manager.cleanup_all)
         cleanup_manager.cleanup_registered = True
-
-def format_file_size(size_bytes):
-    """Format file size in bytes to human readable format"""
-    if size_bytes < 1024:
-        return f"{size_bytes} B"
-    elif size_bytes < 1024 * 1024:
-        return f"{size_bytes / 1024:.1f} KB"
-    elif size_bytes < 1024 * 1024 * 1024:
-        return f"{size_bytes / (1024 * 1024):.1f} MB"
-    else:
-        return f"{size_bytes / (1024 * 1024 * 1024):.1f} GB"
-
-def resource_path(relative_path):
-    """ Get absolute path to resource, works for dev and for PyInstaller """
-    try:
-        base_path = sys._MEIPASS
-    except AttributeError:
-        # When running from source, images are in the parent directory
-        base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    return os.path.join(base_path, relative_path)
-
-def setup_logger():
-    # Try to write log to %APPDATA%/Overlord/log.txt (user-writable)
-    log_dir = get_app_data_path()
-    os.makedirs(log_dir, exist_ok=True)
-    log_path = os.path.join(log_dir, 'log.txt')
-    from logging.handlers import RotatingFileHandler
-    max_bytes = LOG_SIZE_MB * 1024 * 1024  # Convert MB to bytes
-    file_handler = RotatingFileHandler(log_path, maxBytes=max_bytes, backupCount=1, encoding='utf-8')
-    stream_handler = logging.StreamHandler()
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s %(levelname)s: %(message)s',
-        handlers=[file_handler, stream_handler]
-    )
-    logging.info(f'--- Overlord started --- (log file: {log_path}, max size: {LOG_SIZE_MB} MB)')
-
-def check_process_running(process_names):
-    """Check if any processes with the given names are running"""
-    try:
-        for proc in psutil.process_iter(['name']):
-            try:
-                proc_name = proc.info['name']
-                if proc_name and any(name.lower() in proc_name.lower() for name in process_names):
-                    return True
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                continue
-    except Exception:
-        pass
-    return False
 
 def is_iray_server_running():
     """Check if Iray Server processes are already running"""
@@ -1583,8 +1548,9 @@ def start_headless_render(settings):
 
 def main(auto_start_render=False, cmd_args=None, headless=False):
     # Initialize global monitoring state
-    global database_monitoring_active
+    global database_monitoring_active, image_monitoring_active
     database_monitoring_active = False
+    image_monitoring_active = False
     
     def create_daz_command_array(daz_executable_path, json_map, log_size, render_script_path):
         """Create the DAZ Studio command array with all required parameters."""
@@ -2806,33 +2772,14 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
     no_img_label.lower()  # Hide initially
     theme_manager.register_widget(no_img_label, "label")
 
-    def find_newest_image(directory):
-        image_exts = ('.png', '.jpg', '.jpeg', '.bmp', '.gif', '.tiff', '.webp')
-        # Collect all image files and their modification times
-        image_files = []
-        for rootdir, _, files in os.walk(directory):
-            for fname in files:
-                if fname.lower().endswith(image_exts):
-                    fpath = os.path.join(rootdir, fname)
-                    try:
-                        mtime = os.path.getmtime(fpath)
-                        image_files.append((mtime, fpath))
-                    except Exception:
-                        continue
-        # Sort by most recent first
-        image_files.sort(reverse=True)
-        return [fpath for mtime, fpath in image_files]
-
     def show_last_rendered_image():
         """Display the most recent image from the output directory."""
-        output_dir = value_entries["Output Directory"].get()
-        image_paths = find_newest_image(output_dir)
-        displayed = False
-        for newest_img_path in image_paths:
-            if not os.path.exists(newest_img_path):
-                continue
-            try:
-                # Clean up previous image reference if it exists
+        global image_monitoring_active
+        
+        try:
+            output_dir = value_entries["Output Directory"].get()
+            if not output_dir or not os.path.exists(output_dir):
+                # Clear the display if output directory doesn't exist
                 if hasattr(img_label, 'image') and img_label.image:
                     try:
                         old_img = img_label.image
@@ -2842,75 +2789,110 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                     except Exception:
                         pass
                 
-                # First, verify the image integrity
-                with Image.open(newest_img_path) as verify_img:
-                    verify_img.verify()  # Will raise if the image is incomplete or corrupt
+                img_label.config(image="")
+                img_label.image = None
+                update_details_path("")  # Clear the path
+                details_dim.config(text="Dimensions: ")
+                details_size.config(text="Size: ")
+                no_img_label.lift()
                 
-                # If verification passes, reopen for display
-                with Image.open(newest_img_path) as img:
-                    img = img.convert("RGBA")  # Ensure image is in RGBA mode
-                    # Handle transparency by adding a theme-appropriate background
-                    if theme_manager.current_theme == "dark":
-                        # Dark grey background for dark theme
-                        bg_color = (60, 60, 60, 255)  # Dark grey
-                    else:
-                        # White background for light theme
-                        bg_color = (255, 255, 255, 255)  # White
-                    bg = Image.new("RGBA", img.size, bg_color)
-                    img = Image.alpha_composite(bg, img)
-                    
-                    # Create a copy to avoid keeping the file handle open
-                    img_copy = img.copy()
-                    width, height = img.size
-                
-                with Image.open(newest_img_path) as orig_img:
-                    width, height = orig_img.size
-                
-                file_size = os.path.getsize(newest_img_path)
-                # Always display the mapped output path instead of server path
-                display_path = map_server_path_to_output_path(newest_img_path)
-                update_details_path(display_path)  # Process and display path
-                details_dim.config(text=f"Dimensions: {width} x {height}")
-                details_size.config(text=f"Size: {file_size/1024:.1f} KB")
-                
-                tk_img = ImageTk.PhotoImage(img_copy)
-                cleanup_manager.register_image_reference(tk_img)  # Register for cleanup
-                img_label.config(image=tk_img)
-                img_label.image = tk_img
-                no_img_label.lower()
-                
-                # Only log if the image path has changed
-                if getattr(show_last_rendered_image, 'last_logged_img_path', None) != newest_img_path:
-                    logging.info(f'Displaying image: {newest_img_path}')
-                    show_last_rendered_image.last_logged_img_path = newest_img_path
-                show_last_rendered_image.last_no_img_logged = False
-                displayed = True
-                break
-            except Exception:
-                continue
-        
-        if not displayed:
-            # Clean up image reference
-            if hasattr(img_label, 'image') and img_label.image:
-                try:
-                    old_img = img_label.image
-                    if hasattr(old_img, 'close'):
-                        old_img.close()
-                    del old_img
-                except Exception:
-                    pass
+                # Schedule next check if monitoring is active
+                if image_monitoring_active:
+                    root.after(1000, show_last_rendered_image)
+                return
             
-            img_label.config(image="")
-            img_label.image = None
-            update_details_path("")  # Clear the path
-            details_dim.config(text="Dimensions: ")
-            details_size.config(text="Size: ")
-            no_img_label.lift()
-            if not getattr(show_last_rendered_image, 'last_no_img_logged', False):
-                show_last_rendered_image.last_no_img_logged = True
+            image_paths = find_newest_image(output_dir)
+            displayed = False
+            for newest_img_path in image_paths:
+                if not os.path.exists(newest_img_path):
+                    continue
+                try:
+                    # Clean up previous image reference if it exists
+                    if hasattr(img_label, 'image') and img_label.image:
+                        try:
+                            old_img = img_label.image
+                            if hasattr(old_img, 'close'):
+                                old_img.close()
+                            del old_img
+                        except Exception:
+                            pass
+                    
+                    # First, verify the image integrity
+                    with Image.open(newest_img_path) as verify_img:
+                        verify_img.verify()  # Will raise if the image is incomplete or corrupt
+                    
+                    # If verification passes, reopen for display
+                    with Image.open(newest_img_path) as img:
+                        img = img.convert("RGBA")  # Ensure image is in RGBA mode
+                        # Handle transparency by adding a theme-appropriate background
+                        if theme_manager.current_theme == "dark":
+                            # Dark grey background for dark theme
+                            bg_color = (60, 60, 60, 255)  # Dark grey
+                        else:
+                            # White background for light theme
+                            bg_color = (255, 255, 255, 255)  # White
+                        bg = Image.new("RGBA", img.size, bg_color)
+                        img = Image.alpha_composite(bg, img)
+                        
+                        # Create a copy to avoid keeping the file handle open
+                        img_copy = img.copy()
+                        width, height = img.size
+                    
+                    with Image.open(newest_img_path) as orig_img:
+                        width, height = orig_img.size
+                    
+                    file_size = os.path.getsize(newest_img_path)
+                    # Always display the mapped output path instead of server path
+                    display_path = map_server_path_to_output_path(newest_img_path)
+                    update_details_path(display_path)  # Process and display path
+                    details_dim.config(text=f"Dimensions: {width} x {height}")
+                    details_size.config(text=f"Size: {file_size/1024:.1f} KB")
+                    
+                    tk_img = ImageTk.PhotoImage(img_copy)
+                    cleanup_manager.register_image_reference(tk_img)  # Register for cleanup
+                    img_label.config(image=tk_img)
+                    img_label.image = tk_img
+                    no_img_label.lower()
+                    
+                    # Only log if the image path has changed
+                    if getattr(show_last_rendered_image, 'last_logged_img_path', None) != newest_img_path:
+                        logging.info(f'Displaying image: {newest_img_path}')
+                        show_last_rendered_image.last_logged_img_path = newest_img_path
+                    show_last_rendered_image.last_no_img_logged = False
+                    displayed = True
+                    break
+                except Exception:
+                    continue
+            
+            if not displayed:
+                # Clean up image reference
+                if hasattr(img_label, 'image') and img_label.image:
+                    try:
+                        old_img = img_label.image
+                        if hasattr(old_img, 'close'):
+                            old_img.close()
+                        del old_img
+                    except Exception:
+                        pass
+                
+                img_label.config(image="")
+                img_label.image = None
+                update_details_path("")  # Clear the path
+                details_dim.config(text="Dimensions: ")
+                details_size.config(text="Size: ")
+                no_img_label.lift()
+                if not getattr(show_last_rendered_image, 'last_no_img_logged', False):
+                    show_last_rendered_image.last_no_img_logged = True
+            
+            # Force garbage collection to clean up any remaining references
+            gc.collect()
+            
+        except Exception as e:
+            logging.error(f"Error in show_last_rendered_image: {e}")
         
-        # Force garbage collection to clean up any remaining references
-        gc.collect()
+        # Schedule next check if monitoring is active
+        if image_monitoring_active:
+            root.after(1000, show_last_rendered_image)
 
     def map_server_path_to_output_path(server_path):
         """Since we removed the intermediate server directory, just return the path as-is."""
@@ -2986,15 +2968,11 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             try:
                 output_dir = value_entries["Output Directory"].get()
                 
-                # Update if the new image is in the output directory and exists
+                # Just log the new image - periodic monitoring will handle display updates
                 if (new_image_path.startswith(output_dir) and os.path.exists(new_image_path)):
-                    show_last_rendered_image()
-                    logging.debug(f'UI updated for new image: {new_image_path}')
-                else:
-                    # Fallback: just refresh the last rendered image
-                    show_last_rendered_image()
+                    logging.debug(f'New image detected: {new_image_path}')
             except Exception as e:
-                logging.error(f'Error updating UI for new image {new_image_path}: {e}')
+                logging.error(f'Error processing new image notification {new_image_path}: {e}')
         
         # Schedule the update on the main thread
         try:
@@ -3007,8 +2985,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
         new_output_dir = value_entries["Output Directory"].get()
         logging.info(f'Output Directory changed to: {new_output_dir}')
         
-        # Since we removed EXR processing, just refresh the image display
-        root.after(200, show_last_rendered_image)
+        # Update output details (image display is handled by periodic monitoring)
         root.after(200, update_output_details)
     value_entries["Output Directory"].bind("<FocusOut>", lambda e: on_output_dir_change())
     value_entries["Output Directory"].bind("<Return>", lambda e: on_output_dir_change())
@@ -3063,6 +3040,21 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
         global database_monitoring_active
         database_monitoring_active = False
         logging.info("Cache database size monitoring stopped")
+
+    def start_image_monitoring():
+        """Start periodic monitoring of the output directory for new images."""
+        global image_monitoring_active
+        if not image_monitoring_active:
+            image_monitoring_active = True
+            logging.info("Image monitoring started (checking every 1 second)")
+            # Start the monitoring immediately
+            show_last_rendered_image()
+
+    def stop_image_monitoring():
+        """Stop periodic image monitoring."""
+        global image_monitoring_active
+        image_monitoring_active = False
+        logging.info("Image monitoring stopped")
 
     def start_render():
         # Prevent multiple render starts
@@ -3197,7 +3189,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                     def restart_iray_background():
                         try:
                             # Stop Iray Server processes only (keep DAZ Studio running)
-                            cleanup_manager.stop_iray_server()
+                            stop_iray_server()
                             
                             # Clean up database and cache
                             cleanup_iray_database_and_cache()
@@ -3236,7 +3228,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                             def cleanup_and_restart_background():
                                 try:
                                     # Stop Iray Server processes only (keep DAZ Studio running)
-                                    cleanup_manager.stop_iray_server()
+                                    stop_iray_server()
                                     
                                     # Clean up database and cache
                                     cleanup_iray_database_and_cache()
@@ -3562,10 +3554,10 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                         killed_daz += 1
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     continue
-            # Kill Iray Server processes using cleanup manager
-            cleanup_manager.stop_iray_server()
+            # Kill Iray Server processes using global function
+            stop_iray_server()
             main.dazstudio_killed_by_user = True
-            logging.info(f'Killed {killed_daz} DAZStudio process(es). Iray Server stopped via cleanup manager.')
+            logging.info(f'Killed {killed_daz} DAZStudio process(es). Iray Server stopped via global function.')
         except Exception as e:
             logging.error(f'Failed to stop render processes: {e}')
         # Reset progress and time labels, and total images label (always reset regardless of error)
@@ -3595,6 +3587,9 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             # Stop database monitoring
             stop_database_monitoring()
             
+            # Stop image monitoring
+            stop_image_monitoring()
+            
             # Then kill render processes
             logging.info('Stopping render processes...')
             kill_render_related_processes()
@@ -3611,7 +3606,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             logging.info('Stop render completed')
 
     # Initial display setup
-    root.after(500, show_last_rendered_image)  # Initial image load
+    root.after(500, start_image_monitoring)  # Start continuous image monitoring
 
     # --- Buttons Section ---
     buttons_frame = tk.Frame(root)
