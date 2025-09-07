@@ -14,6 +14,9 @@ import urllib.request
 import tempfile
 from PIL import Image, ImageTk
 import tkinter as tk
+import OpenEXR
+import Imath
+import numpy as np
 from tkinter import filedialog
 from tkinter import ttk
 from tkinter import messagebox
@@ -47,7 +50,9 @@ OVERLORD_CLOSE_DELAY = 2000
 IRAY_STARTUP_DELAY = 10000
 
 # File extensions
-IMAGE_EXTENSIONS = ('.png', '.jpg', '.jpeg', '.bmp', '.gif', '.tiff', '.webp')
+IMAGE_EXTENSIONS = ('.png', '.jpg', '.jpeg', '.bmp', '.gif', '.tiff', '.webp', '.exr')
+RENDER_OUTPUT_EXTENSIONS = ('.png', '.exr')  # Extensions that need conversion
+WEBP_EXTENSION = '.webp'
 
 # Default paths
 DEFAULT_OUTPUT_SUBDIR = "Downloads/output"
@@ -112,6 +117,11 @@ def get_local_app_data_path(subfolder: str = APPDATA_SUBFOLDER) -> str:
     """Get the local application data path for the given subfolder."""
     localappdata = os.environ.get('LOCALAPPDATA', os.path.join(os.path.expanduser('~'), 'AppData', 'Local'))
     return os.path.join(localappdata, subfolder)
+
+# Global rendering state
+is_rendering = False
+file_monitor_thread = None
+file_monitor_stop_event = None
 
 def get_default_output_directory() -> str:
     """Get the default output directory for user files."""
@@ -251,6 +261,274 @@ def find_newest_image(directory: str) -> list:
     # Sort by most recent first
     image_files.sort(reverse=True)
     return [fpath for mtime, fpath in image_files]
+
+def find_newest_webp_image(directory: str) -> list:
+    """Find all WebP images in directory sorted by modification time (newest first)."""
+    webp_files = []
+    
+    for rootdir, _, files in os.walk(directory):
+        for fname in files:
+            if fname.lower().endswith('.webp'):
+                fpath = os.path.join(rootdir, fname)
+                try:
+                    mtime = os.path.getmtime(fpath)
+                    webp_files.append((mtime, fpath))
+                except Exception:
+                    continue
+    
+    # Sort by most recent first
+    webp_files.sort(reverse=True)
+    return [fpath for mtime, fpath in webp_files]
+
+def convert_to_webp(input_path: str, delete_original: bool = True) -> str:
+    """Convert PNG or EXR image to lossless WebP format."""
+    try:
+        # Create output path with .webp extension
+        base_path = os.path.splitext(input_path)[0]
+        output_path = base_path + '.webp'
+        
+        # Skip if WebP already exists and is newer
+        if os.path.exists(output_path):
+            input_mtime = os.path.getmtime(input_path)
+            output_mtime = os.path.getmtime(output_path)
+            if output_mtime >= input_mtime:
+                logging.debug(f"WebP already exists and is newer: {output_path}")
+                if delete_original and os.path.exists(input_path):
+                    try:
+                        os.remove(input_path)
+                        logging.info(f"Removed original file after WebP conversion: {normalize_path_for_logging(input_path)}")
+                    except Exception as e:
+                        logging.warning(f"Could not remove original file {normalize_path_for_logging(input_path)}: {e}")
+                return output_path
+        
+        # Check if this is an EXR file
+        if input_path.lower().endswith('.exr'):
+            # Handle EXR files with OpenEXR
+            img = convert_exr_to_pil(input_path)
+            if img is None:
+                logging.error(f"Failed to convert EXR file {normalize_path_for_logging(input_path)}")
+                return input_path
+        else:
+            # Handle other formats with PIL
+            with Image.open(input_path) as img:
+                # Convert to RGB if necessary
+                if img.mode not in ('RGB', 'RGBA'):
+                    if img.mode == 'L':  # Grayscale
+                        img = img.convert('RGB')
+                    elif img.mode == 'P':  # Palette
+                        img = img.convert('RGB')
+                    else:
+                        img = img.convert('RGB')
+                
+                # Create a copy to avoid keeping the file handle open
+                img = img.copy()
+        
+        # Save as lossless WebP
+        img.save(output_path, 'WEBP', lossless=True, quality=100)
+        
+        # Verify the conversion was successful
+        if os.path.exists(output_path):
+            logging.info(f"Successfully converted to WebP: {normalize_path_for_logging(input_path)} -> {normalize_path_for_logging(output_path)}")
+            
+            # Delete original file if requested
+            if delete_original:
+                try:
+                    os.remove(input_path)
+                    logging.info(f"Removed original file after WebP conversion: {normalize_path_for_logging(input_path)}")
+                except Exception as e:
+                    logging.warning(f"Could not remove original file {normalize_path_for_logging(input_path)}: {e}")
+            
+            return output_path
+        else:
+            logging.error(f"WebP conversion failed - output file not created: {normalize_path_for_logging(output_path)}")
+            return input_path
+            
+    except Exception as e:
+        logging.error(f"Error converting {normalize_path_for_logging(input_path)} to WebP: {e}")
+        return input_path
+
+def convert_exr_to_pil(exr_path: str) -> Image.Image:
+    """Convert EXR file to PIL Image using OpenEXR."""
+    try:
+        # Open the EXR file
+        exr_file = OpenEXR.InputFile(exr_path)
+        
+        # Get the header to understand the image properties
+        header = exr_file.header()
+        dw = header['dataWindow']
+        width = dw.max.x - dw.min.x + 1
+        height = dw.max.y - dw.min.y + 1
+        
+        # Get the channel names
+        channels = header['channels'].keys()
+        
+        # Determine which channels to use (prefer RGB, fallback to available channels)
+        if 'R' in channels and 'G' in channels and 'B' in channels:
+            channel_names = ['R', 'G', 'B']
+            has_alpha = 'A' in channels
+            if has_alpha:
+                channel_names.append('A')
+        elif 'Y' in channels:
+            # Luminance channel
+            channel_names = ['Y']
+            has_alpha = 'A' in channels
+            if has_alpha:
+                channel_names.append('A')
+        else:
+            # Use the first available channel
+            channel_names = [list(channels)[0]]
+            has_alpha = False
+        
+        # Read the pixel data for each channel
+        pixel_data = []
+        for channel in channel_names:
+            if channel in channels:
+                channel_data = exr_file.channel(channel, Imath.PixelType(Imath.PixelType.FLOAT))
+                # Convert to numpy array
+                channel_array = np.frombuffer(channel_data, dtype=np.float32)
+                channel_array = channel_array.reshape((height, width))
+                pixel_data.append(channel_array)
+        
+        # Close the EXR file
+        exr_file.close()
+        
+        # Combine channels and convert to 8-bit
+        if len(pixel_data) == 1:
+            # Grayscale
+            combined = pixel_data[0]
+            # Convert to 8-bit (clamp values and scale)
+            combined = np.clip(combined, 0, 1)
+            combined = (combined * 255).astype(np.uint8)
+            # Create PIL image
+            pil_image = Image.fromarray(combined, mode='L')
+            # Convert to RGB for consistency
+            pil_image = pil_image.convert('RGB')
+        elif len(pixel_data) == 3:
+            # RGB
+            combined = np.stack(pixel_data, axis=2)
+            # Convert to 8-bit (clamp values and scale)
+            combined = np.clip(combined, 0, 1)
+            combined = (combined * 255).astype(np.uint8)
+            # Create PIL image
+            pil_image = Image.fromarray(combined, mode='RGB')
+        elif len(pixel_data) == 4:
+            # RGBA
+            combined = np.stack(pixel_data, axis=2)
+            # Convert to 8-bit (clamp values and scale)
+            combined = np.clip(combined, 0, 1)
+            combined = (combined * 255).astype(np.uint8)
+            # Create PIL image
+            pil_image = Image.fromarray(combined, mode='RGBA')
+        else:
+            logging.error(f"Unsupported channel configuration in EXR file: {channel_names}")
+            return None
+        
+        return pil_image
+        
+    except Exception as e:
+        logging.error(f"Error converting EXR file {normalize_path_for_logging(exr_path)}: {e}")
+        return None
+
+def monitor_output_folder(output_directory: str, stop_event):
+    """Monitor output folder for PNG and EXR files and convert them to WebP."""
+    global is_rendering
+    
+    logging.info(f"Starting file monitoring for: {normalize_path_for_logging(output_directory)}")
+    
+    # Keep track of processed files to avoid reprocessing
+    processed_files = set()
+    
+    while not stop_event.is_set() and is_rendering:
+        try:
+            if not os.path.exists(output_directory):
+                time.sleep(1)
+                continue
+                
+            # Find all PNG and EXR files in the output directory
+            for root, dirs, files in os.walk(output_directory):
+                for file in files:
+                    if stop_event.is_set() or not is_rendering:
+                        break
+                        
+                    file_path = os.path.join(root, file)
+                    file_lower = file.lower()
+                    
+                    # Only process PNG and EXR files
+                    if file_lower.endswith(RENDER_OUTPUT_EXTENSIONS):
+                        # Skip if already processed
+                        if file_path in processed_files:
+                            continue
+                            
+                        # Check if file is complete (not being written to)
+                        try:
+                            # Wait a moment to ensure file write is complete
+                            initial_size = os.path.getsize(file_path)
+                            time.sleep(0.5)
+                            final_size = os.path.getsize(file_path)
+                            
+                            if initial_size != final_size:
+                                # File is still being written, skip for now
+                                continue
+                                
+                        except (OSError, IOError):
+                            # File might be locked or still being written
+                            continue
+                        
+                        # Convert to WebP
+                        logging.info(f"Converting render output to WebP: {normalize_path_for_logging(file_path)}")
+                        webp_path = convert_to_webp(file_path, delete_original=True)
+                        
+                        # Mark as processed
+                        processed_files.add(file_path)
+                        if webp_path != file_path:
+                            processed_files.add(webp_path)
+                
+                if stop_event.is_set() or not is_rendering:
+                    break
+            
+            # Sleep before next check
+            time.sleep(2)
+            
+        except Exception as e:
+            logging.error(f"Error in file monitoring: {e}")
+            time.sleep(5)  # Wait longer on error
+    
+    logging.info("File monitoring stopped")
+
+def start_file_monitoring(output_directory: str):
+    """Start monitoring the output folder for file conversion."""
+    global file_monitor_thread, file_monitor_stop_event
+    
+    # Stop any existing monitoring
+    stop_file_monitoring()
+    
+    # Create new monitoring thread
+    file_monitor_stop_event = threading.Event()
+    file_monitor_thread = threading.Thread(
+        target=monitor_output_folder,
+        args=(output_directory, file_monitor_stop_event),
+        daemon=True
+    )
+    file_monitor_thread.start()
+    logging.info("File monitoring started")
+
+def stop_file_monitoring():
+    """Stop the file monitoring thread."""
+    global file_monitor_thread, file_monitor_stop_event
+    
+    if file_monitor_stop_event:
+        file_monitor_stop_event.set()
+    
+    if file_monitor_thread and file_monitor_thread.is_alive():
+        try:
+            file_monitor_thread.join(timeout=5)
+            if file_monitor_thread.is_alive():
+                logging.warning("File monitoring thread did not stop gracefully")
+        except Exception as e:
+            logging.error(f"Error stopping file monitoring thread: {e}")
+    
+    file_monitor_thread = None
+    file_monitor_stop_event = None
 
 
 # ============================================================================
@@ -1000,15 +1278,16 @@ class CleanupManager:
         self.settings_saved_on_close = True
     
     def stop_file_monitoring(self):
-        """Stop file monitoring (no-op since file monitoring was removed)"""
-        # This method is called by various parts of the code but does nothing
-        # since we removed all file monitoring functionality
-        pass
+        """Stop file monitoring when cleanup is called."""
+        # Stop the global file monitoring
+        stop_file_monitoring()
     
     def cleanup_all(self):
         """Clean up all registered resources"""
         try:
-            # Stop file monitoring first
+            # Stop file monitoring first and reset rendering state
+            global is_rendering
+            is_rendering = False
             self.stop_file_monitoring()
             
             # Stop Iray Server processes using the global function
@@ -3052,7 +3331,12 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                     root.after(1000, show_last_rendered_image)
                 return
             
-            image_paths = find_newest_image(output_dir)
+            # Prioritize WebP files over other formats
+            webp_paths = find_newest_webp_image(output_dir)
+            if webp_paths:
+                image_paths = webp_paths
+            else:
+                image_paths = find_newest_image(output_dir)
             displayed = False
             for newest_img_path in image_paths:
                 if not os.path.exists(newest_img_path):
@@ -3408,6 +3692,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
         
         # Start the render process in a background thread to keep UI responsive
         def start_render_background():
+            global is_rendering
             try:
                 # Get cache limit from UI at start of render process
                 try:
@@ -3440,6 +3725,12 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                     return  # Exit early if server startup failed
                 
                 logging.info('Iray Server started - skipping web UI configuration')
+                
+                # Set rendering state and start file monitoring
+                is_rendering = True
+                output_directory = value_entries["Output Directory"].get().strip()
+                start_file_monitoring(output_directory)
+                logging.info('File monitoring started for WebP conversion')
                 
                 # Define session completion callback for Iray Server restart
                 def on_database_size_restart():
@@ -3483,10 +3774,12 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                     try:
                         # Define callback to run on main thread when renders complete
                         def on_renders_complete():
+                            global is_rendering
                             logging.info('Starting render completion cleanup...')
                             
                             # Move heavy operations to background thread to avoid freezing UI
                             def cleanup_and_restart_background():
+                                global is_rendering
                                 try:
                                     # Stop Iray Server processes only (keep DAZ Studio running)
                                     stop_iray_server()
@@ -3511,8 +3804,15 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                                     image_output_dir = value_entries["Output Directory"].get().replace("\\", "/")
                                     
                                     logging.info('Render completion cycle finished successfully - Iray Server restarted, DAZ Studio instances continue running')
+                                    
+                                    # Stop file monitoring and reset rendering state
+                                    is_rendering = False
+                                    stop_file_monitoring()
                                 except Exception as cleanup_e:
                                     logging.error(f'Error during render completion cleanup/restart: {cleanup_e}')
+                                    # Reset rendering state on error
+                                    is_rendering = False
+                                    stop_file_monitoring()
                                     # Still re-enable buttons even if cleanup fails - schedule on main thread
                                     root.after(0, lambda: (button.config(state="normal"), stop_button.config(state="disabled")))
                             
@@ -3530,10 +3830,14 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 
             except Exception as e:
                 logging.error(f"Failed to start render: {e}")
+                # Reset rendering state on error
+                is_rendering = False
+                stop_file_monitoring()
                 # Re-enable Start Render button and disable Stop Render button on error
                 root.after(0, lambda: (button.config(state="normal"), stop_button.config(state="disabled")))
         
         def continue_render_setup(session_completion_callback):
+            global is_rendering
             try:
                 logging.info("continue_render_setup: Starting render setup continuation...")
                 # Continue with rest of render setup
@@ -3544,6 +3848,9 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 logging.error(f"Failed to continue render setup: {e}")
                 import traceback
                 logging.error(f"Full traceback: {traceback.format_exc()}")
+                # Reset rendering state on error
+                is_rendering = False
+                stop_file_monitoring()
                 # Re-enable Start Render button and disable Stop Render button on error
                 button.config(state="normal")
                 stop_button.config(state="disabled")
@@ -3840,6 +4147,11 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
         root.update_idletasks()  # Force UI update
         
         try:
+            # Set rendering state to false and stop file monitoring
+            global is_rendering
+            is_rendering = False
+            stop_file_monitoring()
+            
             # Signal any running IrayServerActions operations to stop
             if hasattr(cleanup_manager, 'iray_actions') and cleanup_manager.iray_actions:
                 cleanup_manager.iray_actions.request_stop()
