@@ -141,9 +141,7 @@ def detect_windows_theme() -> str:
 
 def format_file_size(size_bytes: int) -> str:
     """Format file size in bytes to human readable format."""
-    if size_bytes < 1024:
-        return f"{size_bytes} B"
-    elif size_bytes < 1024 * 1024:
+    if size_bytes < 1024 * 1024:
         return f"{size_bytes / 1024:.1f} KB"
     elif size_bytes < 1024 * 1024 * 1024:
         return f"{size_bytes / (1024 * 1024):.1f} MB"
@@ -3197,13 +3195,9 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
     output_folder_size = tk.Label(output_details_frame, text="Folder Size: ", font=("Arial", 10))
     output_folder_size.pack(anchor="nw", pady=(0, 5))
     theme_manager.register_widget(output_folder_size, "label")
-    output_png_count = tk.Label(output_details_frame, text="PNG Files: ", font=("Arial", 10))
-    output_png_count.pack(anchor="nw", pady=(0, 5))
-    theme_manager.register_widget(output_png_count, "label")
-
-    output_folder_count = tk.Label(output_details_frame, text="Sub-folders: ", font=("Arial", 10))
-    output_folder_count.pack(anchor="nw", pady=(0, 5))
-    theme_manager.register_widget(output_folder_count, "label")
+    output_file_count = tk.Label(output_details_frame, text="Total Files: ", font=("Arial", 10))
+    output_file_count.pack(anchor="nw", pady=(0, 5))
+    theme_manager.register_widget(output_file_count, "label")
 
     # Add Total Images to Render label (updated only on Start Render)
     output_total_images = tk.Label(output_details_frame, text="Total Images to Render: ", font=("Arial", 10))
@@ -3219,34 +3213,28 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
         
         if not os.path.exists(output_dir):
             output_folder_size.config(text="Folder Size: N/A")
-            output_png_count.config(text="PNG Files: N/A")
-            output_folder_count.config(text="Sub-folders: N/A")
+            output_file_count.config(text="Total Files: 0")
             progress_var.set(0)
             images_remaining_var.set("Images remaining: --")
             logging.debug("update_output_details: Output directory doesn't exist")
             return
         try:
             total_size = 0
-            png_count = 0
-            folder_count = 0
+            file_count = 0
             for rootdir, dirs, files in os.walk(output_dir):
-                for dir_name in dirs:
-                    folder_count += 1
                 for file in files:
                     file_path = os.path.join(rootdir, file)
                     try:
                         file_size = os.path.getsize(file_path)
                         total_size += file_size
-                        if file.lower().endswith('.png'):
-                            png_count += 1
+                        file_count += 1
                     except (OSError, IOError):
                         continue
             
             size_str = format_file_size(total_size)
             output_folder_size.config(text=f"Folder Size: {size_str}")
-            output_png_count.config(text=f"PNG Files: {png_count}")
-            output_folder_count.config(text=f"Sub-folders: {folder_count}")
-            logging.debug(f"update_output_details: Found {png_count} PNG files")
+            output_file_count.config(text=f"Total Files: {file_count}")
+            logging.debug(f"update_output_details: Found {file_count} total files")
             
             # Update progress bar and images remaining label using successful moves count
             try:
@@ -3263,10 +3251,12 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 total_images = int(total_images_str) if total_images_str.isdigit() else None
                 logging.debug(f"update_output_details: Parsed total images: {total_images}")
                 
-                # Since we removed EXR conversion and ZIP functionality,
-                # progress tracking is simplified to just count PNG files in output directory
-                # Get the directory stats without ZIP counting
-                total_size, png_count, folder_count = get_directory_stats(output_dir)
+                # Count PNG files for progress tracking
+                png_count = 0
+                for rootdir, dirs, files in os.walk(output_dir):
+                    for file in files:
+                        if file.lower().endswith('.png'):
+                            png_count += 1
                 
                 if total_images and total_images > 0:
                     # Use PNG count as a simple approximation of progress
@@ -3291,8 +3281,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 logging.error(f"update_output_details: Error updating progress: {e}")
         except Exception as e:
             output_folder_size.config(text="Folder Size: Error")
-            output_png_count.config(text="PNG Files: Error")
-            output_folder_count.config(text="Sub-folders: Error")
+            output_file_count.config(text="Total Files: Error")
             progress_var.set(0)
             images_remaining_var.set("Images remaining: --")
             logging.error(f"update_output_details: Error in folder stats: {e}")
@@ -3325,6 +3314,9 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 details_dim.config(text="Dimensions: ")
                 details_size.config(text="Size: ")
                 no_img_label.lift()
+                
+                # Update output details even when folder doesn't exist
+                update_output_details()
                 
                 # Schedule next check if monitoring is active
                 if image_monitoring_active:
@@ -3588,6 +3580,19 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             logging.info("Image monitoring started (checking every 1 second)")
             # Start the monitoring immediately
             show_last_rendered_image()
+
+    def start_output_details_monitoring():
+        """Start periodic monitoring of output details independently of image monitoring."""
+        def periodic_update_output_details():
+            try:
+                update_output_details()
+            except Exception as e:
+                logging.error(f"Error in periodic output details update: {e}")
+            # Schedule next update in 1 second
+            root.after(1000, periodic_update_output_details)
+        
+        logging.info("Output details monitoring started (checking every 1 second)")
+        periodic_update_output_details()
 
     def stop_image_monitoring():
         """Stop periodic image monitoring."""
@@ -4184,6 +4189,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
 
     # Initial display setup
     root.after(500, start_image_monitoring)  # Start continuous image monitoring
+    root.after(600, start_output_details_monitoring)  # Start continuous output details monitoring
 
     # --- Buttons Section ---
     buttons_frame = tk.Frame(root)
