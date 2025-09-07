@@ -79,7 +79,7 @@ IRAY_SERVER_PROCESSES = ['iray_server.exe', 'iray_server_worker.exe']
 
 # Validation limits
 VALIDATION_LIMITS = {
-    "max_instances": 16, "min_instances": 1, "max_frame_rate": 120, "min_frame_rate": 1,
+    "max_instances": 99, "min_instances": 1, "max_frame_rate": 999, "min_frame_rate": 1,
 }
 
 # UI text constants
@@ -187,6 +187,31 @@ def validate_directory_path(dir_path: str, must_exist: bool = True) -> bool:
     # For new directories, check if parent exists
     parent = os.path.dirname(dir_path)
     return os.path.isdir(parent) if parent else True
+
+def get_free_disk_space_gb() -> float:
+    """Get available free disk space in GB where Overlord is running."""
+    try:
+        # Get the directory where Overlord is running
+        if getattr(sys, 'frozen', False):
+            # Running as PyInstaller executable
+            app_dir = os.path.dirname(sys.executable)
+        else:
+            # Running from source
+            app_dir = os.path.dirname(os.path.abspath(__file__))
+        
+        # Get free space for the disk/drive containing the app directory
+        if os.name == 'nt':  # Windows
+            import shutil
+            total, used, free = shutil.disk_usage(app_dir)
+            return free / (1024 * 1024 * 1024)  # Convert bytes to GB
+        else:  # Unix/Linux
+            statvfs = os.statvfs(app_dir)
+            free_bytes = statvfs.f_frsize * statvfs.f_bavail
+            return free_bytes / (1024 * 1024 * 1024)  # Convert bytes to GB
+    except Exception as e:
+        logging.warning(f"Could not determine free disk space: {e}")
+        # Return a reasonable default if we can't determine free space
+        return 100.0  # Assume 100 GB available as fallback
 
 def get_directory_stats(directory: str) -> tuple:
     """Get directory statistics: total_size, png_count, folder_count."""
@@ -697,7 +722,29 @@ class SettingsValidator:
         """Validate max cache size setting."""
         try:
             size = float(value)
-            return 0.1 <= size <= 100.0  # Between 0.1 GB and 100 GB
+            
+            # Check if the value is positive and not zero
+            if size <= 0:
+                return False
+            
+            # Check if the value is an integer (no decimal places)
+            if size != int(size):
+                return False
+            
+            # Check if the value is within reasonable bounds (1 to 9999 GB)
+            if not (1 <= size <= 9999):
+                return False
+            
+            # Check if the value is larger than available free disk space
+            try:
+                free_space_gb = get_free_disk_space_gb()
+                if size > free_space_gb:
+                    return False
+            except Exception:
+                # If we can't check disk space, allow the value (fallback)
+                pass
+            
+            return True
         except ValueError:
             return False
     
@@ -854,7 +901,7 @@ class SettingsManager:
                 "output_directory": value_entries["Output Directory"].get(),
                 "number_of_instances": value_entries["Number of Instances"].get(),
                 "frame_rate": value_entries["Frame Rate"].get(),
-                "max_cache_size": value_entries["Max Cache Size"].get(),
+                "max_cache_size": value_entries["Max Cache Size (GBs)"].get(),
                 "render_shadows": render_shadows_var.get()
             }
         except tk.TclError:
@@ -902,8 +949,8 @@ class SettingsManager:
             value_entries["Frame Rate"].insert(0, settings["frame_rate"])
             
             # Max Cache Size
-            value_entries["Max Cache Size"].delete(0, tk.END)
-            value_entries["Max Cache Size"].insert(0, settings["max_cache_size"])
+            value_entries["Max Cache Size (GBs)"].delete(0, tk.END)
+            value_entries["Max Cache Size (GBs)"].insert(0, settings["max_cache_size"])
             
             # Checkboxes
             render_shadows_var.set(settings["render_shadows"])
@@ -1791,8 +1838,8 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             value_entries["Number of Instances"].insert(0, "1")
             value_entries["Frame Rate"].delete(0, tk.END)
             value_entries["Frame Rate"].insert(0, "30")
-            value_entries["Max Cache Size"].delete(0, tk.END)
-            value_entries["Max Cache Size"].insert(0, "10")
+            value_entries["Max Cache Size (GBs)"].delete(0, tk.END)
+            value_entries["Max Cache Size (GBs)"].insert(0, "10")
             render_shadows_var.set(True)
             
             # Clear remembered folder locations
@@ -2204,7 +2251,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
     param_params = [
         "Number of Instances",
         "Frame Rate",
-        "Max Cache Size"
+        "Max Cache Size (GBs)"
     ]
     value_entries = {}
 
@@ -2276,6 +2323,153 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                         text_widget.delete(0, tk.END)
                         text_widget.insert(0, "\n".join(filenames))
         return browse_files
+
+    # Validation function for Max Cache Size with user feedback
+    def validate_and_save_max_cache_size(event=None):
+        """Validate Max Cache Size field and show warning if invalid."""
+        try:
+            from tkinter import messagebox
+            
+            current_value = value_entries["Max Cache Size (GBs)"].get().strip()
+            
+            # Check if empty - allow empty values
+            if not current_value:
+                auto_save_settings()
+                return
+            
+            try:
+                size_value = float(current_value)
+            except ValueError:
+                messagebox.showwarning(
+                    "Invalid Cache Size",
+                    "Cache size must be a valid number."
+                )
+                # Restore previous valid value
+                value_entries["Max Cache Size (GBs)"].delete(0, tk.END)
+                value_entries["Max Cache Size (GBs)"].insert(0, "10")
+                return
+            
+            # Check if negative or zero
+            if size_value <= 0:
+                messagebox.showwarning(
+                    "Invalid Cache Size",
+                    "Cache size must be greater than zero."
+                )
+                # Restore previous valid value
+                value_entries["Max Cache Size (GBs)"].delete(0, tk.END)
+                value_entries["Max Cache Size (GBs)"].insert(0, "10")
+                return
+            
+            # Check if not an integer
+            if size_value != int(size_value):
+                messagebox.showwarning(
+                    "Invalid Cache Size",
+                    "Cache size must be a whole number (no decimal places)."
+                )
+                # Restore previous valid value
+                value_entries["Max Cache Size (GBs)"].delete(0, tk.END)
+                value_entries["Max Cache Size (GBs)"].insert(0, "10")
+                return
+            
+            # Check if larger than available free space
+            try:
+                free_space_gb = get_free_disk_space_gb()
+                if size_value > free_space_gb:
+                    messagebox.showwarning(
+                        "Insufficient Disk Space",
+                        f"Cache size ({int(size_value)} GB) cannot be larger than available free disk space ({free_space_gb:.1f} GB)."
+                    )
+                    # Restore previous valid value
+                    value_entries["Max Cache Size (GBs)"].delete(0, tk.END)
+                    value_entries["Max Cache Size (GBs)"].insert(0, "10")
+                    return
+            except Exception as e:
+                logging.warning(f"Could not check disk space for cache size validation: {e}")
+                # Continue without disk space check
+            
+            # Check reasonable bounds (1 to 9999 GB)
+            if not (1 <= size_value <= 9999):
+                messagebox.showwarning(
+                    "Invalid Cache Size",
+                    "Cache size must be between 1 and 9999 GB."
+                )
+                # Restore previous valid value
+                value_entries["Max Cache Size (GBs)"].delete(0, tk.END)
+                value_entries["Max Cache Size (GBs)"].insert(0, "10")
+                return
+            
+            # If we get here, the value is valid
+            auto_save_settings()
+            
+        except Exception as e:
+            logging.error(f"Error validating cache size: {e}")
+            auto_save_settings()  # Fallback to normal save
+
+    def validate_and_save_number_of_instances(event=None):
+        """Validate and save number of instances with automatic correction."""
+        try:
+            current_value = value_entries["Number of Instances"].get().strip()
+            
+            try:
+                # Try to convert to float first to handle decimal inputs
+                float_value = float(current_value)
+                
+                # If negative or zero, set to 1
+                if float_value <= 0:
+                    corrected_value = "1"
+                else:
+                    # Round up to nearest integer using math.ceil
+                    import math
+                    corrected_value = str(math.ceil(float_value))
+                
+                # Update the field with corrected value
+                value_entries["Number of Instances"].delete(0, tk.END)
+                value_entries["Number of Instances"].insert(0, corrected_value)
+                
+            except ValueError:
+                # If not a valid number, set to default
+                value_entries["Number of Instances"].delete(0, tk.END)
+                value_entries["Number of Instances"].insert(0, "1")
+            
+            # Save the corrected value
+            auto_save_settings()
+            
+        except Exception as e:
+            logging.error(f"Error validating number of instances: {e}")
+            auto_save_settings()  # Fallback to normal save
+
+    def validate_and_save_frame_rate(event=None):
+        """Validate and save frame rate with automatic correction."""
+        try:
+            current_value = value_entries["Frame Rate"].get().strip()
+            
+            try:
+                # Try to convert to float first to handle decimal inputs
+                float_value = float(current_value)
+                
+                # If negative or zero, set to 1
+                if float_value <= 0:
+                    corrected_value = "1"
+                else:
+                    # Round up to nearest integer using math.ceil
+                    import math
+                    corrected_value = str(math.ceil(float_value))
+                
+                # Update the field with corrected value
+                value_entries["Frame Rate"].delete(0, tk.END)
+                value_entries["Frame Rate"].insert(0, corrected_value)
+                
+            except ValueError:
+                # If not a valid number, set to default
+                value_entries["Frame Rate"].delete(0, tk.END)
+                value_entries["Frame Rate"].insert(0, "30")
+            
+            # Save the corrected value
+            auto_save_settings()
+            
+        except Exception as e:
+            logging.error(f"Error validating frame rate: {e}")
+            auto_save_settings()  # Fallback to normal save
 
     # Auto-save settings when important values change
     def auto_save_settings(*args):
@@ -2449,7 +2643,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             value_entry.insert(0, "1")
         elif param == "Frame Rate":
             value_entry.insert(0, "30")
-        elif param == "Max Cache Size":
+        elif param == "Max Cache Size (GBs)":
             value_entry.insert(0, "10")
         value_entry.grid(row=1, column=current_column+1, padx=(0, 20), pady=5, sticky="w")
         theme_manager.register_widget(value_entry, "entry")
@@ -2527,9 +2721,12 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
     
     # Bind auto-save to key widgets
     value_entries["Output Directory"].bind("<FocusOut>", lambda e: auto_save_settings())
-    value_entries["Number of Instances"].bind("<FocusOut>", lambda e: auto_save_settings())
-    value_entries["Frame Rate"].bind("<FocusOut>", lambda e: auto_save_settings())
-    value_entries["Max Cache Size"].bind("<FocusOut>", lambda e: auto_save_settings())
+    value_entries["Number of Instances"].bind("<FocusOut>", validate_and_save_number_of_instances)
+    value_entries["Number of Instances"].bind("<Return>", validate_and_save_number_of_instances)
+    value_entries["Frame Rate"].bind("<FocusOut>", validate_and_save_frame_rate)
+    value_entries["Frame Rate"].bind("<Return>", validate_and_save_frame_rate)
+    value_entries["Max Cache Size (GBs)"].bind("<FocusOut>", validate_and_save_max_cache_size)
+    value_entries["Max Cache Size (GBs)"].bind("<Return>", validate_and_save_max_cache_size)
     
     # For checkboxes, bind to the variable change
     render_shadows_var.trace_add('write', auto_save_settings)
@@ -3214,7 +3411,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             try:
                 # Get cache limit from UI at start of render process
                 try:
-                    cache_limit_gb = float(value_entries["Max Cache Size"].get())
+                    cache_limit_gb = float(value_entries["Max Cache Size (GBs)"].get())
                 except (ValueError, KeyError):
                     cache_limit_gb = IRAY_CACHE_DB_SIZE_LIMIT_GB  # Fall back to global constant
                 
@@ -3600,7 +3797,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 # Start database size monitoring
                 if session_completion_callback:
                     try:
-                        cache_limit_gb = float(value_entries["Max Cache Size"].get())
+                        cache_limit_gb = float(value_entries["Max Cache Size (GBs)"].get())
                     except (ValueError, KeyError):
                         cache_limit_gb = None  # Will fall back to global constant
                     start_database_monitoring(session_completion_callback, cache_limit_gb)

@@ -186,7 +186,7 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 
 			var sFinalName = sSubjectName + (bIsShadow ? '_shadow-' : '-')
 				+ sAnimationName + '_' + nOutputAngle + '-' + ('000' + nFrame).slice(-3);
-			var sFinalNameWithSuffix = sFinalName + (bIsGear ? '-Gear.exr' : '-Beauty.png');
+			var sFinalNameWithSuffix = sFinalName + (bIsGear ? '-GearCanvas-Beauty.exr' : '-Beauty.png');
 			var sFinalNameInFolder = sFinalName + '/' + sFinalNameWithSuffix;
 
 			if (exists(sResultsDirectory + '/' + sFinalNameInFolder)) {
@@ -265,7 +265,7 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 
 			// We can also rename the file with this function
 			App.log('Moving ' + sFinalNameInFolder + ' to ' + sOutputDirectory + '/' + sFinalName + '.png');
-			oResultsDirectory.move(sResultsDirectory + '/' + sFinalNameInFolder, sOutputDirectory + '/' + sFinalName + '.png');
+			oResultsDirectory.move(sResultsDirectory + '/' + sFinalNameInFolder, sOutputDirectory + '/' + sFinalName + (bIsGear ? '.exr' : '.png'));
 
 			App.log('Deleting canvas .zip file: ' + sResultsDirectory + '/' + sFinalName + '.zip');
 			oResultsDirectory.remove(sFinalName + '.zip');
@@ -386,7 +386,7 @@ if (thereAre(aAnimationFilepaths)) {
 
 				var aGearChildren = oGear.getNodeChildren(false);
 
-				renderCore(sSubjectName + ' ' + sGearName, sAnimationName, true, false);
+				renderCore(sSubjectName + '_' + sGearName + '_gear', sAnimationName, true, false);
 
 				Scene.removeNode(oGear);
 			}
