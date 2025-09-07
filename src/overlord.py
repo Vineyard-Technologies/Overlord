@@ -4,17 +4,14 @@ import subprocess
 import shutil
 import json
 import logging
-import datetime
 import gc
-import re
 import webbrowser
 import time
 import threading
 import glob
 import argparse
 import urllib.request
-import urllib.parse
-from concurrent.futures import ThreadPoolExecutor
+import tempfile
 from PIL import Image, ImageTk
 import tkinter as tk
 from tkinter import filedialog
@@ -23,9 +20,6 @@ from tkinter import messagebox
 import winreg
 import psutil
 import atexit
-import tempfile
-from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler
 from version import __version__ as overlord_version
 
 def get_display_version() -> str:
@@ -43,13 +37,9 @@ def get_display_version() -> str:
 # ============================================================================
 
 # Application constants
-DEFAULT_MAX_WORKERS = 8
 LOG_SIZE_MB = 100
 IRAY_CACHE_DB_SIZE_LIMIT_GB = 10
 RECENT_RENDER_TIMES_LIMIT = 25
-
-# UI update intervals (milliseconds)
-AUTO_SAVE_DELAY = 2000
 
 # Process startup delays (milliseconds)
 DAZ_STUDIO_STARTUP_DELAY = 5000
@@ -58,7 +48,6 @@ IRAY_STARTUP_DELAY = 10000
 
 # File extensions
 IMAGE_EXTENSIONS = ('.png', '.jpg', '.jpeg', '.bmp', '.gif', '.tiff', '.webp')
-SCENE_EXTENSIONS = ('.duf',)
 
 # Default paths
 DEFAULT_OUTPUT_SUBDIR = "Downloads/output"
@@ -67,9 +56,6 @@ APPDATA_SUBFOLDER = "Overlord"
 # UI dimensions
 SPLASH_WIDTH = 400
 SPLASH_HEIGHT = 400
-RIGHT_FRAME_SIZE = 1024
-DETAILS_FRAME_WIDTH = 350
-DETAILS_FRAME_HEIGHT = 200
 
 # Theme colors
 THEME_COLORS = {
@@ -91,22 +77,9 @@ THEME_COLORS = {
 DAZ_STUDIO_PROCESSES = ['DAZStudio']
 IRAY_SERVER_PROCESSES = ['iray_server.exe', 'iray_server_worker.exe']
 
-# Error messages
-ERROR_MESSAGES = {
-    "missing_subject": "Please specify a Subject file before starting the render.",
-    "missing_animation": "Please specify at least one animation before starting the render.",
-    "missing_output_dir": "Please specify an Output Directory before starting the render.",
-    "daz_running_warning": "DAZ Studio is already running.\n\nDo you want to continue?",
-    "iray_config_failed": "Iray Server configuration failed",
-    "render_start_failed": "Failed to start render",
-    "file_not_found": "File Validation Error",
-    "invalid_file_extension": "Invalid File Extension",
-}
-
 # Validation limits
 VALIDATION_LIMITS = {
     "max_instances": 16, "min_instances": 1, "max_frame_rate": 120, "min_frame_rate": 1,
-    "max_file_wait_time": 10, "png_stability_wait": 3,
 }
 
 # UI text constants
@@ -176,13 +149,19 @@ def resource_path(relative_path: str) -> str:
         base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     return os.path.join(base_path, relative_path)
 
+def normalize_path_for_logging(path: str) -> str:
+    """Normalize file path to use Unix-style slashes for consistent logging."""
+    if path:
+        return path.replace('\\', '/')
+    return path
+
 def ensure_directory_exists(directory: str) -> bool:
     """Ensure a directory exists, create if necessary."""
     try:
         os.makedirs(directory, exist_ok=True)
         return True
     except Exception as e:
-        logging.error(f"Failed to create directory {directory}: {e}")
+        logging.error(f"Failed to create directory {normalize_path_for_logging(directory)}: {e}")
         return False
 
 def validate_file_path(file_path: str, must_exist: bool = True) -> bool:
@@ -340,11 +319,11 @@ def cleanup_results_directory(script_dir):
         try:
             import shutil
             shutil.rmtree(results_dir)
-            logging.info(f'Cleaned up results directory: {results_dir}')
+            logging.info(f'Cleaned up results directory: {normalize_path_for_logging(results_dir)}')
         except Exception as e:
-            logging.warning(f'Could not clean up results directory {results_dir}: {e}')
+            logging.warning(f'Could not clean up results directory {normalize_path_for_logging(results_dir)}: {e}')
     else:
-        logging.debug(f'Results directory does not exist: {results_dir}')
+        logging.debug(f'Results directory does not exist: {normalize_path_for_logging(results_dir)}')
 
 def cleanup_iray_files_in_directory(cleanup_dir, with_retries=True):
     """Clean up all Iray-related files and folders in a specific directory."""
@@ -374,11 +353,11 @@ def cleanup_iray_files_in_directory(cleanup_dir, with_retries=True):
                             elif item_type == "folder":
                                 shutil.rmtree(item_path)
                             items_cleaned.append(f"{item_type}: {item_path}")
-                            logging.info(f"Cleaned up {item_type} at: {item_path}")
+                            logging.info(f"Cleaned up {item_type} at: {normalize_path_for_logging(item_path)}")
                             break
                         except (OSError, PermissionError) as e:
                             if attempt < max_retries - 1:
-                                logging.debug(f"Attempt {attempt + 1} failed to delete {item_path}, retrying in {retry_delay}s: {e}")
+                                logging.debug(f"Attempt {attempt + 1} failed to delete {normalize_path_for_logging(item_path)}, retrying in {retry_delay}s: {e}")
                                 time.sleep(retry_delay)
                             else:
                                 logging.warning(f"Failed to delete {item_type} after {max_retries} attempts: {e}")
@@ -389,9 +368,9 @@ def cleanup_iray_files_in_directory(cleanup_dir, with_retries=True):
                     elif item_type == "folder":
                         shutil.rmtree(item_path)
                     items_cleaned.append(f"{item_type}: {item_path}")
-                    logging.info(f"Cleaned up {item_type} at: {item_path}")
+                    logging.info(f"Cleaned up {item_type} at: {normalize_path_for_logging(item_path)}")
             except Exception as e:
-                logging.warning(f"Failed to delete {item_type} at {item_path}: {e}")
+                logging.warning(f"Failed to delete {item_type} at {normalize_path_for_logging(item_path)}: {e}")
     
     # Clean up worker log files (worker_*.log)
     try:
@@ -407,11 +386,11 @@ def cleanup_iray_files_in_directory(cleanup_dir, with_retries=True):
                         try:
                             os.remove(worker_log_file)
                             items_cleaned.append(f"worker log: {worker_log_file}")
-                            logging.info(f"Cleaned up worker log file at: {worker_log_file}")
+                            logging.info(f"Cleaned up worker log file at: {normalize_path_for_logging(worker_log_file)}")
                             break
                         except (OSError, PermissionError) as e:
                             if attempt < max_retries - 1:
-                                logging.debug(f"Attempt {attempt + 1} failed to delete {worker_log_file}, retrying in {retry_delay}s: {e}")
+                                logging.debug(f"Attempt {attempt + 1} failed to delete {normalize_path_for_logging(worker_log_file)}, retrying in {retry_delay}s: {e}")
                                 time.sleep(retry_delay)
                             else:
                                 logging.warning(f"Failed to delete worker log file after {max_retries} attempts: {e}")
@@ -419,11 +398,11 @@ def cleanup_iray_files_in_directory(cleanup_dir, with_retries=True):
                     # Simple deletion without retries
                     os.remove(worker_log_file)
                     items_cleaned.append(f"worker log: {worker_log_file}")
-                    logging.info(f"Cleaned up worker log file at: {worker_log_file}")
+                    logging.info(f"Cleaned up worker log file at: {normalize_path_for_logging(worker_log_file)}")
             except Exception as e:
-                logging.warning(f"Failed to delete worker log file at {worker_log_file}: {e}")
+                logging.warning(f"Failed to delete worker log file at {normalize_path_for_logging(worker_log_file)}: {e}")
     except Exception as e:
-        logging.warning(f"Error finding worker log files in {cleanup_dir}: {e}")
+        logging.warning(f"Error finding worker log files in {normalize_path_for_logging(cleanup_dir)}: {e}")
     
     return items_cleaned
 
@@ -442,7 +421,7 @@ def cleanup_iray_database_and_cache():
             cleanup_locations.append(local_app_data_dir)
         
         for cleanup_dir in cleanup_locations:
-            logging.info(f"Cleaning up Iray files in directory: {cleanup_dir}")
+            logging.info(f"Cleaning up Iray files in directory: {normalize_path_for_logging(cleanup_dir)}")
             cleaned_items = cleanup_iray_files_in_directory(cleanup_dir, with_retries=True)
             all_cleaned_items.extend(cleaned_items)
         
@@ -482,9 +461,9 @@ def check_iray_database_size() -> tuple:
                     total_size_bytes += file_size
                     max_size_bytes = max(max_size_bytes, file_size)
                     db_files_found.append(f"{cache_db_path} ({format_file_size(file_size)})")
-                    logging.debug(f"Found cache.db at {cache_db_path}: {format_file_size(file_size)}")
+                    logging.debug(f"Found cache.db at {normalize_path_for_logging(cache_db_path)}: {format_file_size(file_size)}")
                 except (OSError, IOError) as e:
-                    logging.warning(f"Could not get size of {cache_db_path}: {e}")
+                    logging.warning(f"Could not get size of {normalize_path_for_logging(cache_db_path)}: {e}")
         
         # Convert to GB
         total_size_gb = total_size_bytes / (1024 * 1024 * 1024)
@@ -508,86 +487,6 @@ def check_iray_database_size() -> tuple:
 
 
 # ============================================================================
-# IMAGE PROCESSING
-# ============================================================================
-
-def wait_for_file_stability(file_path: str, max_wait_time: int = None) -> bool:
-    """Wait for a file to be stable (fully written)."""
-    if max_wait_time is None:
-        max_wait_time = VALIDATION_LIMITS['max_file_wait_time']
-    
-    wait_time = 0
-    while wait_time < max_wait_time:
-        try:
-            # Try to get file size twice with a small delay
-            size1 = os.path.getsize(file_path)
-            time.sleep(0.05)
-            if not os.path.exists(file_path):
-                return False
-            size2 = os.path.getsize(file_path)
-            if size1 == size2 and size1 > 0:
-                return True
-        except (OSError, FileNotFoundError):
-            return False
-        time.sleep(0.2)
-        wait_time += 0.25
-    return False
-
-def remove_filename_suffixes(filename: str) -> tuple:
-    """Remove '-Beauty' or '-gearCanvas' suffixes from filename."""
-    name, ext = os.path.splitext(filename)
-    original_name = name
-    
-    # Remove both '-gearCanvas' and '-Beauty' suffixes if present
-    if name.endswith('-Beauty'):
-        name = name[:-7]  # Remove '-Beauty' (7 characters)
-    if name.endswith('-gearCanvas'):
-        name = name[:-11]  # Remove '-gearCanvas' (11 characters)
-    
-    modified = name != original_name
-    return name + ext if modified else filename, modified
-
-def prepare_image_for_display(image_path: str, theme: str = "light"):
-    """Prepare an image for display in tkinter with proper background handling."""
-    try:
-        # Verify image integrity first
-        with Image.open(image_path) as verify_img:
-            verify_img.verify()
-        
-        # Reopen for processing
-        with Image.open(image_path) as img:
-            img = img.convert("RGBA")
-            
-            # Handle transparency with theme-appropriate background
-            if theme == "dark":
-                bg_color = (60, 60, 60, 255)  # Dark background
-            else:
-                bg_color = (255, 255, 255, 255)  # Light background
-            
-            bg = Image.new("RGBA", img.size, bg_color)
-            img = Image.alpha_composite(bg, img)
-            
-            # Create a copy to avoid keeping file handle open
-            img_copy = img.copy()
-        
-        return ImageTk.PhotoImage(img_copy)
-    except Exception as e:
-        logging.error(f'Failed to prepare image for display {image_path}: {e}')
-        return None
-
-def get_image_info(image_path: str) -> tuple:
-    """Get image dimensions and file size."""
-    try:
-        with Image.open(image_path) as img:
-            width, height = img.size
-        file_size = os.path.getsize(image_path)
-        return width, height, file_size
-    except Exception as e:
-        logging.error(f'Failed to get image info for {image_path}: {e}')
-        return None, None, None
-
-
-# ============================================================================
 # APPLICATION SETUP AND LOGGING
 # ============================================================================
 
@@ -606,7 +505,7 @@ def setup_logger() -> None:
         format='%(asctime)s %(levelname)s: %(message)s',
         handlers=[file_handler, stream_handler]
     )
-    logging.info(f'--- Overlord started --- (log file: {log_path}, max size: {LOG_SIZE_MB} MB)')
+    logging.info(f'--- Overlord started --- (log file: {normalize_path_for_logging(log_path)}, max size: {LOG_SIZE_MB} MB)')
 
 def create_splash_screen() -> tuple:
     """Create and show splash screen during startup."""
@@ -1386,7 +1285,7 @@ def run_headless_mode(cmd_args):
     
     for file_path in all_files:
         if not file_path.lower().endswith('.duf'):
-            logging.error(f"File is not a .duf file: {file_path}")
+            logging.error(f"File is not a .duf file: {normalize_path_for_logging(file_path)}")
             return 1
     
     logging.info("Headless mode validation passed, starting render...")
@@ -2856,7 +2755,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                     
                     # Only log if the image path has changed
                     if getattr(show_last_rendered_image, 'last_logged_img_path', None) != newest_img_path:
-                        logging.info(f'Displaying image: {newest_img_path}')
+                        logging.info(f'Displaying image: {normalize_path_for_logging(newest_img_path)}')
                         show_last_rendered_image.last_logged_img_path = newest_img_path
                     show_last_rendered_image.last_no_img_logged = False
                     displayed = True
@@ -2953,11 +2852,11 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             
             # Only log if the image path has changed
             if getattr(display_specific_image, 'last_logged_img_path', None) != image_path:
-                logging.info(f'Displaying image: {image_path}')
+                logging.info(f'Displaying image: {normalize_path_for_logging(image_path)}')
                 display_specific_image.last_logged_img_path = image_path
             
         except Exception as e:
-            logging.error(f'Error displaying specific image {image_path}: {e}')
+            logging.error(f'Error displaying specific image {normalize_path_for_logging(image_path)}: {e}')
         
         # Force garbage collection to clean up any remaining references
         gc.collect()
@@ -2970,9 +2869,9 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 
                 # Just log the new image - periodic monitoring will handle display updates
                 if (new_image_path.startswith(output_dir) and os.path.exists(new_image_path)):
-                    logging.debug(f'New image detected: {new_image_path}')
+                    logging.debug(f'New image detected: {normalize_path_for_logging(new_image_path)}')
             except Exception as e:
-                logging.error(f'Error processing new image notification {new_image_path}: {e}')
+                logging.error(f'Error processing new image notification {normalize_path_for_logging(new_image_path)}: {e}')
         
         # Schedule the update on the main thread
         try:
@@ -3361,14 +3260,14 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 total_frames = 0
                 animation_count = 0
                 for animation_path in animations:
-                    logging.info(f"complete_render_setup: Processing animation: {animation_path}")
+                    logging.info(f"complete_render_setup: Processing animation: {normalize_path_for_logging(animation_path)}")
                     if animation_path.lower().endswith('.duf'):
                         frames = get_frames_from_animation(animation_path)
                         total_frames += frames
                         animation_count += 1
-                        logging.info(f"complete_render_setup: Animation {animation_path} has {frames} frames")
+                        logging.info(f"complete_render_setup: Animation {normalize_path_for_logging(animation_path)} has {frames} frames")
                     else:
-                        logging.info(f"complete_render_setup: Skipping {animation_path} - not a .duf file")
+                        logging.info(f"complete_render_setup: Skipping {normalize_path_for_logging(animation_path)} - not a .duf file")
             
             logging.info(f"complete_render_setup: Final animation_count: {animation_count}, total_frames: {total_frames}")
             
@@ -3452,7 +3351,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                     os.path.getmtime(install_script_path) > os.path.getmtime(render_script_path)):
                     import shutil
                     shutil.copy2(install_script_path, render_script_path)
-                    logging.info(f'Copied masterRenderer.dsa to user scripts dir: {render_script_path}')
+                    logging.info(f'Copied masterRenderer.dsa to user scripts dir: {normalize_path_for_logging(render_script_path)}')
             except Exception as e:
                 logging.error(f'Could not copy masterRenderer.dsa to user scripts dir: {e}')
             # Path to masterTemplate.duf in appData
