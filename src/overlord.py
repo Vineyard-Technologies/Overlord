@@ -434,8 +434,11 @@ def cleanup_iray_database_and_cache():
         logging.error(f"Error during comprehensive Iray cleanup: {e}")
 
 
-def check_iray_database_size() -> tuple:
+def check_iray_database_size(cache_limit_gb: float = None) -> tuple:
     """Check the size of cache/cache.db files and return (total_size_gb, max_size_gb, needs_restart)."""
+    if cache_limit_gb is None:
+        cache_limit_gb = IRAY_CACHE_DB_SIZE_LIMIT_GB  # Use global default if not provided
+    
     try:
         total_size_bytes = 0
         max_size_bytes = 0
@@ -470,11 +473,11 @@ def check_iray_database_size() -> tuple:
         max_size_gb = max_size_bytes / (1024 * 1024 * 1024)
         
         # Check if restart is needed
-        needs_restart = max_size_gb >= IRAY_CACHE_DB_SIZE_LIMIT_GB
+        needs_restart = max_size_gb >= cache_limit_gb
         
         if db_files_found:
             logging.debug(f"Cache database size check: Total {total_size_gb:.2f} GB, Max {max_size_gb:.2f} GB, "
-                         f"Limit {IRAY_CACHE_DB_SIZE_LIMIT_GB} GB, Needs restart: {needs_restart}")
+                         f"Limit {cache_limit_gb} GB, Needs restart: {needs_restart}")
             logging.debug(f"Cache database files found: {', '.join(db_files_found)}")
         else:
             logging.debug("No cache/cache.db files found during size check")
@@ -690,6 +693,15 @@ class SettingsValidator:
             return False
     
     @staticmethod
+    def validate_max_cache_size(value: str) -> bool:
+        """Validate max cache size setting."""
+        try:
+            size = float(value)
+            return 0.1 <= size <= 100.0  # Between 0.1 GB and 100 GB
+        except ValueError:
+            return False
+    
+    @staticmethod
     def validate_animations(files: list) -> bool:
         """Validate animations list."""
         if not files:
@@ -700,6 +712,40 @@ class SettingsValidator:
     def validate_output_directory(directory: str) -> bool:
         """Validate output directory."""
         return validate_directory_path(directory, must_exist=False)
+
+# Directory memory helper functions
+def get_last_directory(directory_type: str) -> str:
+    """Get the last used directory for a specific picker type."""
+    try:
+        settings = settings_manager.load_settings()
+        last_dirs = settings.get("last_directories", {})
+        return last_dirs.get(directory_type, "")
+    except:
+        return ""
+
+def save_last_directory(directory_type: str, path: str):
+    """Save the last used directory for a specific picker type."""
+    try:
+        if not path:
+            return
+        
+        # Get the directory from the path
+        if os.path.isfile(path):
+            directory = os.path.dirname(path)
+        else:
+            directory = path
+            
+        if not directory or not os.path.exists(directory):
+            return
+            
+        settings = settings_manager.load_settings()
+        if "last_directories" not in settings:
+            settings["last_directories"] = {}
+        
+        settings["last_directories"][directory_type] = directory
+        settings_manager.save_settings(settings)
+    except Exception as e:
+        logging.warning(f"Failed to save last directory: {e}")
 
 class SettingsManager:
     """Enhanced settings management with validation and better error handling."""
@@ -720,7 +766,19 @@ class SettingsManager:
             "output_directory": get_default_output_directory(),
             "number_of_instances": "1",
             "frame_rate": "30",
-            "render_shadows": True
+            "max_cache_size": "10",
+            "render_shadows": True,
+            "last_directories": {
+                "subject": "",
+                "animations": "",
+                "prop_animations": "",
+                "gear": "",
+                "gear_animations": "",
+                "output_directory": "",
+                "template": "",
+                "general_file": "",
+                "general_folder": ""
+            }
         }
     
     def load_settings(self) -> dict:
@@ -767,6 +825,9 @@ class SettingsManager:
         if not SettingsValidator.validate_frame_rate(settings.get('frame_rate', '30')):
             issues.append("Invalid frame rate")
         
+        if not SettingsValidator.validate_max_cache_size(settings.get('max_cache_size', '10')):
+            issues.append("Invalid max cache size")
+        
         return issues
     
     def get_current_settings(self, value_entries: dict, render_shadows_var) -> dict:
@@ -793,6 +854,7 @@ class SettingsManager:
                 "output_directory": value_entries["Output Directory"].get(),
                 "number_of_instances": value_entries["Number of Instances"].get(),
                 "frame_rate": value_entries["Frame Rate"].get(),
+                "max_cache_size": value_entries["Max Cache Size"].get(),
                 "render_shadows": render_shadows_var.get()
             }
         except tk.TclError:
@@ -838,6 +900,10 @@ class SettingsManager:
             # Frame Rate
             value_entries["Frame Rate"].delete(0, tk.END)
             value_entries["Frame Rate"].insert(0, settings["frame_rate"])
+            
+            # Max Cache Size
+            value_entries["Max Cache Size"].delete(0, tk.END)
+            value_entries["Max Cache Size"].insert(0, settings["max_cache_size"])
             
             # Checkboxes
             render_shadows_var.set(settings["render_shadows"])
@@ -1479,7 +1545,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             logging.error(f"Error updating status display: {e}")
             estimated_time_remaining_var.set("--")
             estimated_completion_at_var.set("--")
-            estimated_completion_at_var.set("Estimated completion at: --")
+            estimated_completion_at_var.set("Est. completion at: --")
     
     # Check for existing instance before showing splash screen
     if not ensure_single_instance():
@@ -1574,73 +1640,117 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
         
         def choose_subject():
             """Open file picker for subject field"""
+            # Try to get initial directory from last used location, then current field value
+            last_dir = get_last_directory("subject")
+            if not last_dir and value_entries["Subject"].get():
+                last_dir = os.path.dirname(value_entries["Subject"].get())
+            
             filename = filedialog.askopenfilename(
                 title="Choose Subject",
                 filetypes=[("DAZ Scene Files", "*.duf"), ("All Files", "*.*")],
-                initialdir=os.path.dirname(value_entries["Subject"].get()) if value_entries["Subject"].get() else None
+                initialdir=last_dir if last_dir and os.path.exists(last_dir) else None
             )
             if filename:
                 value_entries["Subject"].delete(0, tk.END)
                 value_entries["Subject"].insert(0, filename)
+                save_last_directory("subject", filename)
                 auto_save_settings()
         
         def choose_animations():
             """Open file picker for animations field"""
+            # Try to get initial directory from last used location, then current field value
+            last_dir = get_last_directory("animations")
+            if not last_dir:
+                current_text = value_entries["Animations"].get("1.0", tk.END).strip()
+                if current_text:
+                    last_dir = os.path.dirname(current_text.split('\n')[0])
+            
             filenames = filedialog.askopenfilenames(
                 title="Choose Animations",
                 filetypes=[("DAZ Scene Files", "*.duf"), ("All Files", "*.*")],
-                initialdir=os.path.dirname(value_entries["Animations"].get("1.0", tk.END).strip()) if value_entries["Animations"].get("1.0", tk.END).strip() else None
+                initialdir=last_dir if last_dir and os.path.exists(last_dir) else None
             )
             if filenames:
                 value_entries["Animations"].delete("1.0", tk.END)
                 value_entries["Animations"].insert("1.0", "\n".join(filenames))
+                save_last_directory("animations", filenames[0])
                 auto_save_settings()
         
         def choose_prop_animations():
             """Open file picker for prop animations field"""
+            # Try to get initial directory from last used location, then current field value
+            last_dir = get_last_directory("prop_animations")
+            if not last_dir:
+                current_text = value_entries["Prop Animations"].get("1.0", tk.END).strip()
+                if current_text:
+                    last_dir = os.path.dirname(current_text.split('\n')[0])
+            
             filenames = filedialog.askopenfilenames(
                 title="Choose Prop Animations",
                 filetypes=[("DAZ Scene Files", "*.duf"), ("All Files", "*.*")],
-                initialdir=os.path.dirname(value_entries["Prop Animations"].get("1.0", tk.END).strip()) if value_entries["Prop Animations"].get("1.0", tk.END).strip() else None
+                initialdir=last_dir if last_dir and os.path.exists(last_dir) else None
             )
             if filenames:
                 value_entries["Prop Animations"].delete("1.0", tk.END)
                 value_entries["Prop Animations"].insert("1.0", "\n".join(filenames))
+                save_last_directory("prop_animations", filenames[0])
                 auto_save_settings()
         
         def choose_gear():
             """Open file picker for gear field"""
+            # Try to get initial directory from last used location, then current field value
+            last_dir = get_last_directory("gear")
+            if not last_dir:
+                current_text = value_entries["Gear"].get("1.0", tk.END).strip()
+                if current_text:
+                    last_dir = os.path.dirname(current_text.split('\n')[0])
+            
             filenames = filedialog.askopenfilenames(
                 title="Choose Gear",
                 filetypes=[("DAZ Scene Files", "*.duf"), ("All Files", "*.*")],
-                initialdir=os.path.dirname(value_entries["Gear"].get("1.0", tk.END).strip()) if value_entries["Gear"].get("1.0", tk.END).strip() else None
+                initialdir=last_dir if last_dir and os.path.exists(last_dir) else None
             )
             if filenames:
                 value_entries["Gear"].delete("1.0", tk.END)
                 value_entries["Gear"].insert("1.0", "\n".join(filenames))
+                save_last_directory("gear", filenames[0])
                 auto_save_settings()
         
         def choose_gear_animations():
             """Open file picker for gear animations field"""
+            # Try to get initial directory from last used location, then current field value
+            last_dir = get_last_directory("gear_animations")
+            if not last_dir:
+                current_text = value_entries["Gear Animations"].get("1.0", tk.END).strip()
+                if current_text:
+                    last_dir = os.path.dirname(current_text.split('\n')[0])
+            
             filenames = filedialog.askopenfilenames(
                 title="Choose Gear Animations",
                 filetypes=[("DAZ Scene Files", "*.duf"), ("All Files", "*.*")],
-                initialdir=os.path.dirname(value_entries["Gear Animations"].get("1.0", tk.END).strip()) if value_entries["Gear Animations"].get("1.0", tk.END).strip() else None
+                initialdir=last_dir if last_dir and os.path.exists(last_dir) else None
             )
             if filenames:
                 value_entries["Gear Animations"].delete("1.0", tk.END)
                 value_entries["Gear Animations"].insert("1.0", "\n".join(filenames))
+                save_last_directory("gear_animations", filenames[0])
                 auto_save_settings()
         
         def choose_output_directory():
             """Open folder picker for output directory field"""
+            # Try to get initial directory from last used location, then current field value
+            last_dir = get_last_directory("output_directory")
+            if not last_dir and value_entries["Output Directory"].get():
+                last_dir = value_entries["Output Directory"].get()
+            
             dirname = filedialog.askdirectory(
                 title="Choose Output Directory",
-                initialdir=value_entries["Output Directory"].get() if value_entries["Output Directory"].get() else None
+                initialdir=last_dir if last_dir and os.path.exists(last_dir) else None
             )
             if dirname:
                 value_entries["Output Directory"].delete(0, tk.END)
                 value_entries["Output Directory"].insert(0, dirname)
+                save_last_directory("output_directory", dirname)
                 auto_save_settings()
                 on_output_dir_change()  # Update UI
         
@@ -1681,9 +1791,27 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             value_entries["Number of Instances"].insert(0, "1")
             value_entries["Frame Rate"].delete(0, tk.END)
             value_entries["Frame Rate"].insert(0, "30")
+            value_entries["Max Cache Size"].delete(0, tk.END)
+            value_entries["Max Cache Size"].insert(0, "10")
             render_shadows_var.set(True)
+            
+            # Clear remembered folder locations
+            settings = settings_manager.load_settings()
+            settings["last_directories"] = {
+                "subject": "",
+                "animations": "",
+                "prop_animations": "",
+                "gear": "",
+                "gear_animations": "",
+                "output_directory": "",
+                "template": "",
+                "general_file": "",
+                "general_folder": ""
+            }
+            settings_manager.save_settings(settings)
+            
             auto_save_settings()
-            logging.info("Default settings restored")
+            logging.info("Default settings restored and folder memory cleared")
         
         edit_menu.add_command(label="Clear All Input Fields", command=clear_all_input_fields)
         edit_menu.add_command(label="Restore Default Settings", command=restore_default_settings)
@@ -2075,7 +2203,8 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
     # Short/simple parameters
     param_params = [
         "Number of Instances",
-        "Frame Rate"
+        "Frame Rate",
+        "Max Cache Size"
     ]
     value_entries = {}
 
@@ -2087,37 +2216,55 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
     file_table_frame.grid_columnconfigure(1, weight=1)
     file_table_frame.grid_columnconfigure(2, weight=1)
 
-    def make_browse_file(entry, initialdir=None, filetypes=None, title="Select file"):
+    def make_browse_file(entry, initialdir=None, filetypes=None, title="Select file", directory_type="general_file"):
         def browse_file():
+            # Try to get initial directory from last used location
+            last_dir = get_last_directory(directory_type)
+            if not last_dir:
+                last_dir = initialdir
+            
             filename = filedialog.askopenfilename(
-                initialdir=initialdir or "",
+                initialdir=last_dir if last_dir and os.path.exists(last_dir) else "",
                 title=title,
                 filetypes=filetypes or (("All files", "*.*"),)
             )
             if filename:
                 entry.delete(0, tk.END)
                 entry.insert(0, filename)
+                save_last_directory(directory_type, filename)
         return browse_file
 
-    def make_browse_folder(entry, initialdir=None, title="Select folder"):
+    def make_browse_folder(entry, initialdir=None, title="Select folder", directory_type="general_folder"):
         def browse_folder():
+            # Try to get initial directory from last used location
+            last_dir = get_last_directory(directory_type)
+            if not last_dir:
+                last_dir = initialdir
+            
             foldername = filedialog.askdirectory(
-                initialdir=initialdir or "",
+                initialdir=last_dir if last_dir and os.path.exists(last_dir) else "",
                 title=title
             )
             if foldername:
                 entry.delete(0, tk.END)
                 entry.insert(0, foldername)
+                save_last_directory(directory_type, foldername)
         return browse_folder
 
-    def make_browse_files(text_widget, initialdir=None, filetypes=None, title="Select files"):
+    def make_browse_files(text_widget, initialdir=None, filetypes=None, title="Select files", directory_type="general_file"):
         def browse_files():
+            # Try to get initial directory from last used location
+            last_dir = get_last_directory(directory_type)
+            if not last_dir:
+                last_dir = initialdir
+            
             filenames = filedialog.askopenfilenames(
-                initialdir=initialdir or "",
+                initialdir=last_dir if last_dir and os.path.exists(last_dir) else "",
                 title=title,
                 filetypes=filetypes or (("All files", "*.*"),)
             )
             if filenames:
+                save_last_directory(directory_type, filenames[0])
                 # Check if it's an Entry widget or Text widget
                 if hasattr(text_widget, 'delete') and hasattr(text_widget, 'insert'):
                     try:
@@ -2155,7 +2302,8 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                     value_entry,
                     initialdir=os.path.join(os.path.expanduser("~"), "Documents"),
                     title="Select Subject File",
-                    filetypes=(("DSON User File", "*.duf"),)
+                    filetypes=(("DSON User File", "*.duf"),),
+                    directory_type="template"
                 ),
                 width=8
             )
@@ -2178,7 +2326,8 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                     text_widget,
                     initialdir=os.path.join(os.path.expanduser("~"), "Documents"),
                     title="Select Animations",
-                    filetypes=(("DSON User File", "*.duf"),)
+                    filetypes=(("DSON User File", "*.duf"),),
+                    directory_type="animations"
                 ),
                 width=8
             )
@@ -2201,7 +2350,8 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                     text_widget,
                     initialdir=os.path.join(os.path.expanduser("~"), "Documents"),
                     title="Select Prop Animation Files",
-                    filetypes=(("DSON User File", "*.duf"),)
+                    filetypes=(("DSON User File", "*.duf"),),
+                    directory_type="prop_animations"
                 ),
                 width=8
             )
@@ -2224,7 +2374,8 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                     text_widget,
                     initialdir=os.path.join(os.path.expanduser("~"), "Documents"),
                     title="Select Gear Files",
-                    filetypes=(("DSON User File", "*.duf"),)
+                    filetypes=(("DSON User File", "*.duf"),),
+                    directory_type="gear"
                 ),
                 width=8
             )
@@ -2247,7 +2398,8 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                     text_widget,
                     initialdir=os.path.join(os.path.expanduser("~"), "Documents"),
                     title="Select Gear Animation Files",
-                    filetypes=(("DSON User File", "*.duf"),)
+                    filetypes=(("DSON User File", "*.duf"),),
+                    directory_type="gear_animations"
                 ),
                 width=8
             )
@@ -2297,6 +2449,8 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             value_entry.insert(0, "1")
         elif param == "Frame Rate":
             value_entry.insert(0, "30")
+        elif param == "Max Cache Size":
+            value_entry.insert(0, "10")
         value_entry.grid(row=1, column=current_column+1, padx=(0, 20), pady=5, sticky="w")
         theme_manager.register_widget(value_entry, "entry")
         value_entries[param] = value_entry
@@ -2375,6 +2529,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
     value_entries["Output Directory"].bind("<FocusOut>", lambda e: auto_save_settings())
     value_entries["Number of Instances"].bind("<FocusOut>", lambda e: auto_save_settings())
     value_entries["Frame Rate"].bind("<FocusOut>", lambda e: auto_save_settings())
+    value_entries["Max Cache Size"].bind("<FocusOut>", lambda e: auto_save_settings())
     
     # For checkboxes, bind to the variable change
     render_shadows_var.trace_add('write', auto_save_settings)
@@ -2522,7 +2677,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
     # Label for images remaining (above progress bar)
     images_remaining_var = tk.StringVar(master=root, value="Images remaining: --")
     estimated_time_remaining_var = tk.StringVar(master=root, value="Estimated time remaining: --")
-    estimated_completion_at_var = tk.StringVar(master=root, value="Estimated completion at: --")
+    estimated_completion_at_var = tk.StringVar(master=root, value="Est. completion at: --")
     images_remaining_label = tk.Label(
         root,
         textvariable=images_remaining_var,
@@ -2626,7 +2781,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                     progress_var.set(0)
                     images_remaining_var.set("Images remaining: --")
                     estimated_time_remaining_var.set("Estimated time remaining: --")
-                    estimated_completion_at_var.set("Estimated completion at: --")
+                    estimated_completion_at_var.set("Est. completion at: --")
                     logging.debug("update_output_details: Total images string is empty")
                     return
                 total_images = int(total_images_str) if total_images_str.isdigit() else None
@@ -2650,13 +2805,13 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                     progress_var.set(0)
                     images_remaining_var.set("Images remaining: --")
                     estimated_time_remaining_var.set("Estimated time remaining: --")
-                    estimated_completion_at_var.set("Estimated completion at: --")
+                    estimated_completion_at_var.set("Est. completion at: --")
                     logging.debug("update_output_details: Total images is 0 or None")
             except Exception as e:
                 progress_var.set(0)
                 images_remaining_var.set("Images remaining: --")
                 estimated_time_remaining_var.set("Estimated time remaining: --")
-                estimated_completion_at_var.set("Estimated completion at: --")
+                estimated_completion_at_var.set("Est. completion at: --")
                 logging.error(f"update_output_details: Error updating progress: {e}")
         except Exception as e:
             output_folder_size.config(text="Folder Size: Error")
@@ -2889,10 +3044,14 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
     value_entries["Output Directory"].bind("<FocusOut>", lambda e: on_output_dir_change())
     value_entries["Output Directory"].bind("<Return>", lambda e: on_output_dir_change())
 
-    def start_database_monitoring(restart_callback):
+    def start_database_monitoring(restart_callback, cache_limit_gb=None):
         """Start monitoring cache/cache.db file size and call restart_callback when limit is exceeded."""
         global database_monitoring_active
         database_monitoring_active = True
+        
+        # Default to global constant if no UI value provided
+        if cache_limit_gb is None:
+            cache_limit_gb = IRAY_CACHE_DB_SIZE_LIMIT_GB
         
         def check_database_size_periodically():
             """Periodically check cache database size and trigger restart if needed."""
@@ -2901,10 +3060,10 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 return
                 
             try:
-                total_size_gb, max_size_gb, needs_restart = check_iray_database_size()
+                total_size_gb, max_size_gb, needs_restart = check_iray_database_size(cache_limit_gb)
                 
                 if needs_restart:
-                    logging.info(f"Database size monitoring: Size limit exceeded ({max_size_gb:.2f} GB >= {IRAY_CACHE_DB_SIZE_LIMIT_GB} GB)")
+                    logging.info(f"Database size monitoring: Size limit exceeded ({max_size_gb:.2f} GB >= {cache_limit_gb} GB)")
                     database_monitoring_active = False  # Stop monitoring during restart
                     
                     # Call the restart callback
@@ -2914,7 +3073,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                         def restart_monitoring():
                             global database_monitoring_active
                             database_monitoring_active = True
-                            start_database_monitoring(restart_callback)
+                            start_database_monitoring(restart_callback, cache_limit_gb)
                         root.after(65000, restart_monitoring)  # Resume monitoring after 65 seconds
                     except Exception as e:
                         logging.error(f"Error during database size restart: {e}")
@@ -2930,7 +3089,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 if database_monitoring_active:
                     root.after(30000, check_database_size_periodically)
         
-        logging.info(f"Starting database size monitoring (limit: {IRAY_CACHE_DB_SIZE_LIMIT_GB} GB)")
+        logging.info(f"Starting database size monitoring (limit: {cache_limit_gb} GB)")
         # Start the first check after 60 seconds to give the render time to start
         root.after(60000, check_database_size_periodically)
 
@@ -3053,6 +3212,12 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
         # Start the render process in a background thread to keep UI responsive
         def start_render_background():
             try:
+                # Get cache limit from UI at start of render process
+                try:
+                    cache_limit_gb = float(value_entries["Max Cache Size"].get())
+                except (ValueError, KeyError):
+                    cache_limit_gb = IRAY_CACHE_DB_SIZE_LIMIT_GB  # Fall back to global constant
+                
                 # First, ensure all render-related processes are stopped
                 logging.info('Start Render button clicked')
                 logging.info('Closing any existing Iray Server and DAZ Studio instances...')
@@ -3082,8 +3247,8 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 # Define session completion callback for Iray Server restart
                 def on_database_size_restart():
                     """Called when cache/cache.db exceeds size limit"""
-                    total_size_gb, max_size_gb, _ = check_iray_database_size()
-                    logging.info(f'Cache database size limit exceeded: {max_size_gb:.2f} GB (limit: {IRAY_CACHE_DB_SIZE_LIMIT_GB} GB) - starting Iray Server restart')
+                    total_size_gb, max_size_gb, _ = check_iray_database_size(cache_limit_gb)
+                    logging.info(f'Cache database size limit exceeded: {max_size_gb:.2f} GB (limit: {cache_limit_gb} GB) - starting Iray Server restart')
                     
                     def restart_iray_background():
                         try:
@@ -3434,7 +3599,11 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 
                 # Start database size monitoring
                 if session_completion_callback:
-                    start_database_monitoring(session_completion_callback)
+                    try:
+                        cache_limit_gb = float(value_entries["Max Cache Size"].get())
+                    except (ValueError, KeyError):
+                        cache_limit_gb = None  # Will fall back to global constant
+                    start_database_monitoring(session_completion_callback, cache_limit_gb)
 
         run_all_instances()
 
@@ -3463,7 +3632,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
         output_total_images.config(text="Total Images to Render: ")
         images_remaining_var.set("Images remaining: --")
         estimated_time_remaining_var.set("Estimated time remaining: --")
-        estimated_completion_at_var.set("Estimated completion at: --")
+        estimated_completion_at_var.set("Est. completion at: --")
         progress_var.set(0)
 
     def stop_render():

@@ -184,9 +184,9 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 			// Check if the current Daz instance should render this frame.
 			if ((nFrame - (nInstanceNumber - 1)) % nTotalNumberOfInstances != 0) continue;
 
-			var sFinalName = sSubjectName + (bIsShadow ? ' shadow_' : '_')
-				+ sAnimationName + '_' + nOutputAngle + '_' + ('000' + nFrame).slice(-3);
-			var sFinalNameWithSuffix = sFinalName + (bIsGear ? '-Gear' : '-Beauty') + '.png';
+			var sFinalName = sSubjectName + (bIsShadow ? '_shadow-' : '-')
+				+ sAnimationName + '_' + nOutputAngle + '-' + ('000' + nFrame).slice(-3);
+			var sFinalNameWithSuffix = sFinalName + (bIsGear ? '-Gear.exr' : '-Beauty.png');
 			var sFinalNameInFolder = sFinalName + '/' + sFinalNameWithSuffix;
 
 			if (exists(sResultsDirectory + '/' + sFinalNameInFolder)) {
