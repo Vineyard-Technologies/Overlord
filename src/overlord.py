@@ -122,6 +122,8 @@ def get_local_app_data_path(subfolder: str = APPDATA_SUBFOLDER) -> str:
 is_rendering = False
 file_monitor_thread = None
 file_monitor_stop_event = None
+initial_total_images = 0  # Track the initial total images count for progress calculation
+render_start_time = None  # Track when the render started for time estimation filtering
 
 def get_default_output_directory() -> str:
     """Get the default output directory for user files."""
@@ -277,6 +279,108 @@ def find_newest_webp_image(directory: str) -> list:
     # Sort by most recent first
     webp_files.sort(reverse=True)
     return [fpath for mtime, fpath in webp_files]
+
+def get_frames_from_animation_file(animation_filepath: str) -> int:
+    """Read the animation's JSON file to see how many frames it has."""
+    default_frames = 1
+    
+    try:
+        if not animation_filepath or not os.path.isfile(animation_filepath):
+            logging.warning(f"Animation file not found: {normalize_path_for_logging(animation_filepath)}. Using default of {default_frames} frame.")
+            return default_frames
+        
+        with open(animation_filepath, 'r', encoding='utf-8') as animation_file:
+            animation_data = json.load(animation_file)
+            
+            # Try to get frames from scene.animations (following the DAZ script pattern)
+            if 'scene' in animation_data and 'animations' in animation_data['scene']:
+                animations_array = animation_data['scene']['animations']
+                
+                for animation in animations_array:
+                    if 'keys' in animation:
+                        num_frames = len(animation['keys'])
+                        if num_frames > 1:
+                            logging.info(f"Found {num_frames} frames in animation file: {normalize_path_for_logging(animation_filepath)}")
+                            return num_frames
+                
+                # If no animation with multiple frames found, use 1 frame
+                logging.info(f"No multi-frame animations found in {normalize_path_for_logging(animation_filepath)}. Using {default_frames} frame.")
+                return default_frames
+            else:
+                logging.warning(f"No scene.animations found in animation file {normalize_path_for_logging(animation_filepath)}. Using default of {default_frames} frame.")
+                return default_frames
+            
+    except json.JSONDecodeError as e:
+        logging.error(f"Failed to parse JSON in animation file {normalize_path_for_logging(animation_filepath)}: {e}. Using default of {default_frames} frame.")
+        return default_frames
+    except Exception as e:
+        logging.error(f"Error reading animation file {normalize_path_for_logging(animation_filepath)}: {e}. Using default of {default_frames} frame.")
+        return default_frames
+
+def get_angles_from_subject_file(subject_filepath: str) -> int:
+    """Read the subject's JSON file to see how many angles it has."""
+    default_angles = 16
+    
+    try:
+        if not subject_filepath or not os.path.isfile(subject_filepath):
+            logging.warning(f"Subject file not found: {normalize_path_for_logging(subject_filepath)}. Using default of {default_angles} angles.")
+            return default_angles
+        
+        with open(subject_filepath, 'r', encoding='utf-8') as subject_file:
+            subject_data = json.load(subject_file)
+            
+            # Try to get angles from asset_info.angles
+            if 'asset_info' in subject_data and 'angles' in subject_data['asset_info']:
+                angles = subject_data['asset_info']['angles']
+                if isinstance(angles, int) and angles > 0:
+                    logging.info(f"Found {angles} angles in subject file: {normalize_path_for_logging(subject_filepath)}")
+                    return angles
+            
+            # If angles not found in expected location, log warning and use default
+            logging.warning(f"Number of angles not found in the JSON for {normalize_path_for_logging(subject_filepath)}. Using default value of {default_angles} angles.")
+            return default_angles
+            
+    except json.JSONDecodeError as e:
+        logging.error(f"Failed to parse JSON in subject file {normalize_path_for_logging(subject_filepath)}: {e}. Using default of {default_angles} angles.")
+        return default_angles
+    except Exception as e:
+        logging.error(f"Error reading subject file {normalize_path_for_logging(subject_filepath)}: {e}. Using default of {default_angles} angles.")
+        return default_angles
+
+def calculate_total_images(subject_filepath: str, animation_filepaths: list, gear_filepaths: list = None) -> int:
+    """Calculate total number of images: angles × frames for each animation × gear files, summed."""
+    if not animation_filepaths or not animation_filepaths[0]:  # Handle empty or [''] case
+        logging.info("No animation files specified, using 1 frame (static render)")
+        animation_filepaths = ['static']  # Use placeholder for static render
+    
+    # Handle gear files - if no gear files specified, render count is 1x
+    if not gear_filepaths or not gear_filepaths[0] or gear_filepaths[0].strip() == '':
+        gear_count = 1
+        logging.info("No gear files specified")
+    else:
+        # Filter out empty gear file paths
+        valid_gear_files = [gear for gear in gear_filepaths if gear and gear.strip()]
+        gear_count = len(valid_gear_files)
+        logging.info(f"Found {gear_count} gear files - will multiply render count")
+    
+    angles = get_angles_from_subject_file(subject_filepath)
+    total_images = 0
+    
+    for animation_filepath in animation_filepaths:
+        if animation_filepath == 'static' or not animation_filepath.strip():
+            # Static render (no animation file)
+            frames = 1
+            images_for_this_animation = angles * frames * gear_count
+            total_images += images_for_this_animation
+            logging.info(f"Static render: {angles} angles × {frames} frame × {gear_count} gear = {images_for_this_animation} images")
+        else:
+            frames = get_frames_from_animation_file(animation_filepath.strip())
+            images_for_this_animation = angles * frames * gear_count
+            total_images += images_for_this_animation
+            logging.info(f"Animation {normalize_path_for_logging(animation_filepath)}: {angles} angles × {frames} frames × {gear_count} gear = {images_for_this_animation} images")
+    
+    logging.info(f"Total images to render: {total_images}")
+    return total_images
 
 def convert_to_webp(input_path: str, delete_original: bool = True) -> str:
     """Convert PNG or EXR image to lossless WebP format."""
@@ -2163,18 +2267,8 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
         
         def show_daz_studio_log():
             """Show DAZ Studio log with default program"""
-            # DAZ Studio logs are typically in user's Documents
-            possible_paths = [
-                os.path.join(os.path.expanduser("~"), "Documents", "DAZ 3D", "Studio", "log.txt"),
-                os.path.join(os.path.expanduser("~"), "Documents", "DAZ 3D", "Studio4", "log.txt"),
-                os.path.join(os.environ.get("APPDATA", ""), "DAZ 3D", "Studio4", "log.txt")
-            ]
-            
-            log_path = None
-            for path in possible_paths:
-                if os.path.exists(path):
-                    log_path = path
-                    break
+            # DAZ Studio log path
+            log_path = "C:\\Users\\Andrew\\AppData\\Roaming\\DAZ 3D\\Studio4 [1]\\log.txt"
             
             if log_path:
                 try:
@@ -3132,7 +3226,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
     progress_var = tk.DoubleVar(master=root, value=0)
     # Label for images remaining (above progress bar)
     images_remaining_var = tk.StringVar(master=root, value="Images remaining:")
-    estimated_time_remaining_var = tk.StringVar(master=root, value="Estimated time remaining:")
+    estimated_time_remaining_var = tk.StringVar(master=root, value="Est. time remaining:")
     estimated_completion_at_var = tk.StringVar(master=root, value="Est. completion at:")
     images_remaining_label = tk.Label(
         root,
@@ -3186,9 +3280,67 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
     theme_manager.register_widget(output_total_images, "label")
     # output_total_images.pack(anchor="nw", pady=(0, 5))
 
+    def calculate_average_render_time(output_dir, max_files=10):
+        """Calculate average time between file creations based on the most recent files."""
+        try:
+            if not output_dir or not os.path.exists(output_dir):
+                return None
+            
+            # Get the render start time for filtering
+            global render_start_time
+            
+            # Get all files with their modification times
+            files_with_times = []
+            for rootdir, dirs, files in os.walk(output_dir):
+                for file in files:
+                    file_path = os.path.join(rootdir, file)
+                    try:
+                        # Get the last modified time
+                        mtime = os.path.getmtime(file_path)
+                        
+                        # Only include files modified after render started
+                        if render_start_time is not None and mtime < render_start_time:
+                            continue
+                        
+                        files_with_times.append((file_path, mtime))
+                    except (OSError, IOError):
+                        continue
+            
+            if len(files_with_times) < 2:
+                return None  # Need at least 2 files to calculate intervals
+            
+            # Sort by modification time (newest first)
+            files_with_times.sort(key=lambda x: x[1], reverse=True)
+            
+            # Take the most recent files (up to max_files)
+            recent_files = files_with_times[:max_files]
+            
+            if len(recent_files) < 2:
+                return None
+            
+            # Calculate time intervals between consecutive files
+            intervals = []
+            for i in range(len(recent_files) - 1):
+                newer_time = recent_files[i][1]
+                older_time = recent_files[i + 1][1]
+                interval = newer_time - older_time
+                if interval > 0:  # Only include positive intervals
+                    intervals.append(interval)
+            
+            if not intervals:
+                return None
+            
+            # Return average interval in seconds
+            return sum(intervals) / len(intervals)
+            
+        except Exception as e:
+            logging.error(f"Error calculating average render time: {e}")
+            return None
+
     def update_output_status():
         """Unified function to update output folder stats, image display, and image details."""
         
+        global initial_total_images
         output_dir = value_entries["Output Directory"].get()
         
         # Check if output directory path changed
@@ -3260,6 +3412,55 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             output_folder_size.config(text=f"Folder Size: {size_str}")
             output_file_count.config(text=f"Total Files: {file_count}")
             progress_var.set(0)
+            
+            # Update images remaining count by subtracting total files from initial total
+            global initial_total_images
+            if initial_total_images > 0:
+                remaining_images = max(0, initial_total_images - file_count)
+                images_remaining_var.set(f"Images remaining: {remaining_images}")
+                
+                # Calculate time estimates based on average render time
+                if remaining_images > 0:
+                    avg_render_time = calculate_average_render_time(output_dir)
+                    if avg_render_time and avg_render_time > 0:
+                        # Calculate estimated time remaining
+                        total_seconds_remaining = remaining_images * avg_render_time
+                        
+                        # Format time remaining
+                        if total_seconds_remaining < 60:
+                            time_str = f"{total_seconds_remaining:.0f} seconds"
+                        elif total_seconds_remaining < 3600:  # Less than 1 hour
+                            minutes = total_seconds_remaining / 60
+                            time_str = f"{minutes:.1f} minutes"
+                        else:  # 1 hour or more
+                            hours = total_seconds_remaining / 3600
+                            time_str = f"{hours:.1f} hours"
+                        
+                        estimated_time_remaining_var.set(f"Est. time remaining: {time_str}")
+                        
+                        # Calculate estimated completion time
+                        from datetime import datetime, timedelta
+                        completion_time = datetime.now() + timedelta(seconds=total_seconds_remaining)
+                        # Add ordinal suffix for the day
+                        day = completion_time.day
+                        if 10 <= day % 100 <= 20:
+                            suffix = "th"
+                        else:
+                            suffix = {1: "st", 2: "nd", 3: "rd"}.get(day % 10, "th")
+                        completion_str = completion_time.strftime(f"%A, %B %d{suffix}, %I:%M %p")
+                        estimated_completion_at_var.set(f"Est. completion at: {completion_str}")
+                    else:
+                        # Not enough data for estimation
+                        estimated_time_remaining_var.set("Est. time remaining: Calculating...")
+                        estimated_completion_at_var.set("Est. completion at: Calculating...")
+                else:
+                    # No images remaining
+                    estimated_time_remaining_var.set("Est. time remaining: Complete")
+                    estimated_completion_at_var.set("Est. completion at: Complete")
+            else:
+                # No initial total set
+                estimated_time_remaining_var.set("Est. time remaining:")
+                estimated_completion_at_var.set("Est. completion at:")
             
             # Find and display the newest image
             webp_paths = find_newest_webp_image(output_dir)
@@ -3634,6 +3835,71 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             logging.info(f"Start Render cancelled: File validation failed - {error_message}")
             return
         
+        # Check if output directory has existing files and show confirmation dialog
+        if os.path.exists(output_dir):
+            existing_files = []
+            for rootdir, dirs, files in os.walk(output_dir):
+                for file in files:
+                    existing_files.append(file)
+            
+            if existing_files:
+                from tkinter import messagebox
+                
+                # Create custom dialog for the three options
+                result = messagebox.askyesnocancel(
+                    "Output Directory Not Empty",
+                    f"The output directory contains {len(existing_files)} existing file(s).\n\n"
+                    "• Click 'Yes' to CONTINUE with existing files (if from interrupted render)\n"
+                    "• Click 'No' to CLEAR existing files and start fresh\n"
+                    "• Click 'Cancel' to abort the render",
+                    default='cancel'
+                )
+                
+                if result is None:  # Cancel was clicked
+                    logging.info("Start Render cancelled: User chose to cancel due to existing files")
+                    return
+                elif result is False:  # No was clicked (Clear & Continue)
+                    try:
+                        import shutil
+                        # Clear the output directory
+                        for filename in os.listdir(output_dir):
+                            file_path = os.path.join(output_dir, filename)
+                            try:
+                                if os.path.isfile(file_path) or os.path.islink(file_path):
+                                    os.unlink(file_path)
+                                elif os.path.isdir(file_path):
+                                    shutil.rmtree(file_path)
+                            except Exception as e:
+                                logging.error(f"Error deleting {file_path}: {e}")
+                        logging.info(f"Cleared {len(existing_files)} existing files from output directory")
+                    except Exception as e:
+                        messagebox.showerror("Error Clearing Files", f"Failed to clear output directory:\n{e}")
+                        logging.error(f"Failed to clear output directory: {e}")
+                        return
+                # If result is True (Yes was clicked), continue with existing files
+                else:
+                    logging.info(f"Continuing render with {len(existing_files)} existing files in output directory")
+        
+        # Get gear files for calculation
+        gear_text = value_entries["Gear"].get("1.0", tk.END).strip()
+        gear_files = []
+        if gear_text:
+            gear_files = [f.strip() for f in gear_text.split('\n') if f.strip()]
+        
+        # Calculate total images to render (angles × frames for each animation × gear files)
+        total_images = calculate_total_images(subject_file, animations, gear_files)
+        
+        # If shadows are enabled, double the image count (regular + shadow renders)
+        if render_shadows_var.get():
+            total_images *= 2
+            logging.info(f"Shadow rendering enabled - doubling image count to {total_images}")
+        
+        # Store the initial total for progress tracking
+        global initial_total_images
+        initial_total_images = total_images
+        
+        images_remaining_var.set(f"Images remaining: {total_images}")
+        
         # Disable Start Render button and enable Stop Render button
         button.config(state="disabled")
         stop_button.config(state="normal")
@@ -3641,8 +3907,13 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
         
         # Start the render process in a background thread to keep UI responsive
         def start_render_background():
-            global is_rendering
+            global is_rendering, render_start_time, initial_total_images
             try:
+                # Set the render start time for time estimation filtering
+                import time
+                render_start_time = time.time()
+                logging.info(f"Render started at {render_start_time}")
+                
                 # Get cache limit from UI at start of render process
                 try:
                     cache_limit_gb = float(value_entries["Max Cache Size (GBs)"].get())
@@ -3781,12 +4052,15 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 logging.error(f"Failed to start render: {e}")
                 # Reset rendering state on error
                 is_rendering = False
+                render_start_time = None  # Reset render start time
                 stop_file_monitoring()
+                # Reset initial total images count
+                initial_total_images = 0
                 # Re-enable Start Render button and disable Stop Render button on error
-                root.after(0, lambda: (button.config(state="normal"), stop_button.config(state="disabled")))
+                root.after(0, lambda: (button.config(state="normal"), stop_button.config(state="disabled"), images_remaining_var.set("Images remaining:")))
         
         def continue_render_setup(session_completion_callback):
-            global is_rendering
+            global is_rendering, render_start_time, initial_total_images
             try:
                 logging.info("continue_render_setup: Starting render setup continuation...")
                 # Continue with rest of render setup
@@ -3799,10 +4073,14 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 logging.error(f"Full traceback: {traceback.format_exc()}")
                 # Reset rendering state on error
                 is_rendering = False
+                render_start_time = None  # Reset render start time
                 stop_file_monitoring()
+                # Reset initial total images count
+                initial_total_images = 0
                 # Re-enable Start Render button and disable Stop Render button on error
                 button.config(state="normal")
                 stop_button.config(state="disabled")
+                images_remaining_var.set("Images remaining:")
         
         # Start the background process
         render_thread = threading.Thread(target=start_render_background, daemon=True)
@@ -3828,9 +4106,14 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             )
             if not result:
                 logging.info('Start Render cancelled by user - DAZ Studio running')
+                # Reset initial total images count
+                global initial_total_images, render_start_time
+                initial_total_images = 0
+                render_start_time = None  # Reset render start time
                 # Re-enable Start Render button and disable Stop Render button
                 button.config(state="normal")
                 stop_button.config(state="disabled")
+                images_remaining_var.set("Images remaining:")
                 return
 
         # Update button to show launching state
@@ -3977,8 +4260,10 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
         
         try:
             # Set rendering state to false and stop file monitoring
-            global is_rendering
+            global is_rendering, render_start_time, initial_total_images
             is_rendering = False
+            render_start_time = None  # Reset render start time
+            logging.info("Render start time reset")
             stop_file_monitoring()
             
             # Signal any running IrayServerActions operations to stop
@@ -4009,6 +4294,10 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
         finally:
             # Always re-enable Start Render button, even if there were errors
             button.config(state="normal")
+            # Reset Images remaining text and initial total
+            initial_total_images = 0
+            render_start_time = None  # Reset render start time
+            images_remaining_var.set("Images remaining:")
             logging.info('Stop render completed')
 
     # Initial display setup
