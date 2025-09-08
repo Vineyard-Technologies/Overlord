@@ -2838,7 +2838,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
         theme_manager.register_widget(param_label, "label")
 
         if param == "Subject":
-            value_entry = tk.Entry(file_table_frame, width=80, font=("Consolas", 10))
+            value_entry = tk.Entry(file_table_frame, width=90, font=("Consolas", 10))
             value_entry.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
             theme_manager.register_widget(value_entry, "entry")
 
@@ -2862,7 +2862,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             value_entry.bind("<KeyRelease>", lambda e: auto_save_settings())
             value_entry.bind("<FocusOut>", lambda e: auto_save_settings())
         elif param == "Animations":
-            text_widget = tk.Text(file_table_frame, width=80, height=5, font=("Consolas", 10))
+            text_widget = tk.Text(file_table_frame, width=90, height=5, font=("Consolas", 10))
             text_widget.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
             theme_manager.register_widget(text_widget, "text")
 
@@ -2886,7 +2886,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             text_widget.bind("<KeyRelease>", lambda e: auto_save_settings())
             text_widget.bind("<FocusOut>", lambda e: auto_save_settings())
         elif param == "Prop Animations":
-            text_widget = tk.Text(file_table_frame, width=80, height=5, font=("Consolas", 10))
+            text_widget = tk.Text(file_table_frame, width=90, height=5, font=("Consolas", 10))
             text_widget.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
             theme_manager.register_widget(text_widget, "text")
 
@@ -2910,7 +2910,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             text_widget.bind("<KeyRelease>", lambda e: auto_save_settings())
             text_widget.bind("<FocusOut>", lambda e: auto_save_settings())
         elif param == "Gear":
-            text_widget = tk.Text(file_table_frame, width=80, height=5, font=("Consolas", 10))
+            text_widget = tk.Text(file_table_frame, width=90, height=5, font=("Consolas", 10))
             text_widget.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
             theme_manager.register_widget(text_widget, "text")
 
@@ -2934,7 +2934,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             text_widget.bind("<KeyRelease>", lambda e: auto_save_settings())
             text_widget.bind("<FocusOut>", lambda e: auto_save_settings())
         elif param == "Gear Animations":
-            text_widget = tk.Text(file_table_frame, width=80, height=5, font=("Consolas", 10))
+            text_widget = tk.Text(file_table_frame, width=90, height=5, font=("Consolas", 10))
             text_widget.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
             theme_manager.register_widget(text_widget, "text")
 
@@ -2958,7 +2958,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             text_widget.bind("<KeyRelease>", lambda e: auto_save_settings())
             text_widget.bind("<FocusOut>", lambda e: auto_save_settings())
         elif param == "Output Directory":
-            value_entry = tk.Entry(file_table_frame, width=80, font=("Consolas", 10))
+            value_entry = tk.Entry(file_table_frame, width=90, font=("Consolas", 10))
             default_img_dir = os.path.join(
                 os.path.expanduser("~"),
                 "Downloads", "output"
