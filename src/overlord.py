@@ -1853,24 +1853,6 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             render_script_path
         ]
     
-    def update_estimated_time_remaining(images_remaining):
-        """Update time estimation display (simplified since EXR processing was removed)."""
-        try:
-            # Since we removed EXR conversion and processing, time estimation
-            # is no longer meaningful - just show a simple message
-            if images_remaining > 0:
-                estimated_time_remaining_var.set(f"Images remaining: {images_remaining}")
-                estimated_completion_at_var.set("Direct output to final directory")
-            else:
-                estimated_time_remaining_var.set("All images processed")
-                estimated_completion_at_var.set("Render complete")
-            
-        except Exception as e:
-            logging.error(f"Error updating status display: {e}")
-            estimated_time_remaining_var.set("--")
-            estimated_completion_at_var.set("--")
-            estimated_completion_at_var.set("Est. completion at: --")
-    
     # Check for existing instance before showing splash screen
     if not ensure_single_instance():
         return  # Exit silently if another instance is already running
@@ -3149,9 +3131,9 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
     from tkinter import ttk
     progress_var = tk.DoubleVar(master=root, value=0)
     # Label for images remaining (above progress bar)
-    images_remaining_var = tk.StringVar(master=root, value="Images remaining: --")
-    estimated_time_remaining_var = tk.StringVar(master=root, value="Estimated time remaining: --")
-    estimated_completion_at_var = tk.StringVar(master=root, value="Est. completion at: --")
+    images_remaining_var = tk.StringVar(master=root, value="Images remaining:")
+    estimated_time_remaining_var = tk.StringVar(master=root, value="Estimated time remaining:")
+    estimated_completion_at_var = tk.StringVar(master=root, value="Est. completion at:")
     images_remaining_label = tk.Label(
         root,
         textvariable=images_remaining_var,
@@ -3204,21 +3186,53 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
     theme_manager.register_widget(output_total_images, "label")
     # output_total_images.pack(anchor="nw", pady=(0, 5))
 
-    def update_output_details():
-        """Update the output details with current folder statistics"""
-        logging.debug("update_output_details: Starting update...")
+    def update_output_status():
+        """Unified function to update output folder stats, image display, and image details."""
         
         output_dir = value_entries["Output Directory"].get()
-        logging.debug(f"update_output_details: Output directory: {output_dir}")
         
-        if not os.path.exists(output_dir):
+        # Check if output directory path changed
+        if not hasattr(update_output_status, 'last_output_dir'):
+            update_output_status.last_output_dir = ""
+            update_output_status.last_file_count = -1
+            update_output_status.last_total_size = -1
+            update_output_status.last_displayed_image = ""
+        
+        path_changed = update_output_status.last_output_dir != output_dir
+        if path_changed:
+            logging.info(f"Output directory changed to: {output_dir}")
+            update_output_status.last_output_dir = output_dir
+        
+        # Handle case where output directory doesn't exist
+        if not output_dir or not os.path.exists(output_dir):
+            # Update folder stats
             output_folder_size.config(text="Folder Size: N/A")
             output_file_count.config(text="Total Files: 0")
             progress_var.set(0)
-            images_remaining_var.set("Images remaining: --")
-            logging.debug("update_output_details: Output directory doesn't exist")
+            
+            # Clear image display
+            if hasattr(img_label, 'image') and img_label.image:
+                try:
+                    old_img = img_label.image
+                    if hasattr(old_img, 'close'):
+                        old_img.close()
+                    del old_img
+                except Exception:
+                    pass
+            
+            img_label.config(image="")
+            img_label.image = None
+            update_details_path("")  # Clear the path
+            details_dim.config(text="Dimensions: ")
+            details_size.config(text="Size: ")
+            no_img_label.lift()
+            
+            if path_changed:
+                logging.info("Output directory doesn't exist - cleared display")
             return
+        
         try:
+            # Calculate folder statistics
             total_size = 0
             file_count = 0
             for rootdir, dirs, files in os.walk(output_dir):
@@ -3231,109 +3245,38 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                     except (OSError, IOError):
                         continue
             
+            # Check if folder stats changed
+            count_changed = update_output_status.last_file_count != file_count
+            size_changed = update_output_status.last_total_size != total_size
+            
+            if count_changed or size_changed or path_changed:
+                size_str = format_file_size(total_size)
+                logging.info(f"Folder stats - {file_count} files, {size_str}")
+                update_output_status.last_file_count = file_count
+                update_output_status.last_total_size = total_size
+            
+            # Update folder stats display
             size_str = format_file_size(total_size)
             output_folder_size.config(text=f"Folder Size: {size_str}")
             output_file_count.config(text=f"Total Files: {file_count}")
-            logging.debug(f"update_output_details: Found {file_count} total files")
-            
-            # Update progress bar and images remaining label using successful moves count
-            try:
-                total_images_str = output_total_images.cget("text").replace("Total Images to Render: ", "").strip()
-                logging.debug(f"update_output_details: Total images string: '{total_images_str}'")
-                
-                if not total_images_str:
-                    progress_var.set(0)
-                    images_remaining_var.set("Images remaining: --")
-                    estimated_time_remaining_var.set("Estimated time remaining: --")
-                    estimated_completion_at_var.set("Est. completion at: --")
-                    logging.debug("update_output_details: Total images string is empty")
-                    return
-                total_images = int(total_images_str) if total_images_str.isdigit() else None
-                logging.debug(f"update_output_details: Parsed total images: {total_images}")
-                
-                # Count PNG files for progress tracking
-                png_count = 0
-                for rootdir, dirs, files in os.walk(output_dir):
-                    for file in files:
-                        if file.lower().endswith('.png'):
-                            png_count += 1
-                
-                if total_images and total_images > 0:
-                    # Use PNG count as a simple approximation of progress
-                    completed_images = png_count
-                    percent = min(100, (completed_images / total_images) * 100)
-                    progress_var.set(percent)
-                    remaining = max(0, total_images - completed_images)
-                    images_remaining_var.set(f"Images remaining: {remaining}")
-                    logging.info(f"update_output_details: Updated progress - {completed_images}/{total_images} images ({percent:.1f}%), {remaining} remaining")
-                    update_estimated_time_remaining(remaining)
-                else:
-                    progress_var.set(0)
-                    images_remaining_var.set("Images remaining: --")
-                    estimated_time_remaining_var.set("Estimated time remaining: --")
-                    estimated_completion_at_var.set("Est. completion at: --")
-                    logging.debug("update_output_details: Total images is 0 or None")
-            except Exception as e:
-                progress_var.set(0)
-                images_remaining_var.set("Images remaining: --")
-                estimated_time_remaining_var.set("Estimated time remaining: --")
-                estimated_completion_at_var.set("Est. completion at: --")
-                logging.error(f"update_output_details: Error updating progress: {e}")
-        except Exception as e:
-            output_folder_size.config(text="Folder Size: Error")
-            output_file_count.config(text="Total Files: Error")
             progress_var.set(0)
-            images_remaining_var.set("Images remaining: --")
-            logging.error(f"update_output_details: Error in folder stats: {e}")
-
-    no_img_label = tk.Label(right_frame, font=("Arial", 12))
-    no_img_label.place(relx=0.5, rely=0.5, anchor="center")
-    no_img_label.lower()  # Hide initially
-    theme_manager.register_widget(no_img_label, "label")
-
-    def show_last_rendered_image():
-        """Display the most recent image from the output directory."""
-        global image_monitoring_active
-        
-        try:
-            output_dir = value_entries["Output Directory"].get()
-            if not output_dir or not os.path.exists(output_dir):
-                # Clear the display if output directory doesn't exist
-                if hasattr(img_label, 'image') and img_label.image:
-                    try:
-                        old_img = img_label.image
-                        if hasattr(old_img, 'close'):
-                            old_img.close()
-                        del old_img
-                    except Exception:
-                        pass
-                
-                img_label.config(image="")
-                img_label.image = None
-                update_details_path("")  # Clear the path
-                details_dim.config(text="Dimensions: ")
-                details_size.config(text="Size: ")
-                no_img_label.lift()
-                
-                # Update output details even when folder doesn't exist
-                update_output_details()
-                
-                # Schedule next check if monitoring is active
-                if image_monitoring_active:
-                    root.after(1000, show_last_rendered_image)
-                return
             
-            # Prioritize WebP files over other formats
+            # Find and display the newest image
             webp_paths = find_newest_webp_image(output_dir)
             if webp_paths:
                 image_paths = webp_paths
             else:
                 image_paths = find_newest_image(output_dir)
+            
             displayed = False
+            current_image_path = ""
+            
             for newest_img_path in image_paths:
                 if not os.path.exists(newest_img_path):
                     continue
                 try:
+                    current_image_path = newest_img_path
+                    
                     # Clean up previous image reference if it exists
                     if hasattr(img_label, 'image') and img_label.image:
                         try:
@@ -3353,10 +3296,8 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                         img = img.convert("RGBA")  # Ensure image is in RGBA mode
                         # Handle transparency by adding a theme-appropriate background
                         if theme_manager.current_theme == "dark":
-                            # Dark grey background for dark theme
                             bg_color = (60, 60, 60, 255)  # Dark grey
                         else:
-                            # White background for light theme
                             bg_color = (255, 255, 255, 255)  # White
                         bg = Image.new("RGBA", img.size, bg_color)
                         img = Image.alpha_composite(bg, img)
@@ -3365,34 +3306,31 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                         img_copy = img.copy()
                         width, height = img.size
                     
-                    with Image.open(newest_img_path) as orig_img:
-                        width, height = orig_img.size
-                    
                     file_size = os.path.getsize(newest_img_path)
-                    # Always display the mapped output path instead of server path
                     display_path = map_server_path_to_output_path(newest_img_path)
-                    update_details_path(display_path)  # Process and display path
+                    update_details_path(display_path)
                     details_dim.config(text=f"Dimensions: {width} x {height}")
                     details_size.config(text=f"Size: {file_size/1024:.1f} KB")
                     
                     tk_img = ImageTk.PhotoImage(img_copy)
-                    cleanup_manager.register_image_reference(tk_img)  # Register for cleanup
+                    cleanup_manager.register_image_reference(tk_img)
                     img_label.config(image=tk_img)
                     img_label.image = tk_img
                     no_img_label.lower()
                     
-                    # Only log if the image path has changed
-                    if getattr(show_last_rendered_image, 'last_logged_img_path', None) != newest_img_path:
-                        logging.info(f'Displaying image: {normalize_path_for_logging(newest_img_path)}')
-                        show_last_rendered_image.last_logged_img_path = newest_img_path
-                    show_last_rendered_image.last_no_img_logged = False
                     displayed = True
                     break
                 except Exception:
                     continue
             
+            # Check if displayed image changed
+            image_changed = update_output_status.last_displayed_image != current_image_path
+            if image_changed and current_image_path:
+                logging.info(f'Displaying image: {normalize_path_for_logging(current_image_path)}')
+                update_output_status.last_displayed_image = current_image_path
+            
+            # If no image was displayed, clear the display
             if not displayed:
-                # Clean up image reference
                 if hasattr(img_label, 'image') and img_label.image:
                     try:
                         old_img = img_label.image
@@ -3404,22 +3342,28 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 
                 img_label.config(image="")
                 img_label.image = None
-                update_details_path("")  # Clear the path
+                update_details_path("")
                 details_dim.config(text="Dimensions: ")
                 details_size.config(text="Size: ")
                 no_img_label.lift()
-                if not getattr(show_last_rendered_image, 'last_no_img_logged', False):
-                    show_last_rendered_image.last_no_img_logged = True
+                
+                if image_changed:
+                    logging.info("No valid images found - cleared display")
+                    update_output_status.last_displayed_image = ""
             
-            # Force garbage collection to clean up any remaining references
+            # Force garbage collection
             gc.collect()
             
         except Exception as e:
-            logging.error(f"Error in show_last_rendered_image: {e}")
-        
-        # Schedule next check if monitoring is active
-        if image_monitoring_active:
-            root.after(1000, show_last_rendered_image)
+            output_folder_size.config(text="Folder Size: Error")
+            output_file_count.config(text="Total Files: Error")
+            progress_var.set(0)
+            logging.error(f"Error in update_output_status: {e}")
+
+    no_img_label = tk.Label(right_frame, font=("Arial", 12))
+    no_img_label.place(relx=0.5, rely=0.5, anchor="center")
+    no_img_label.lower()  # Hide initially
+    theme_manager.register_widget(no_img_label, "label")
 
     def map_server_path_to_output_path(server_path):
         """Since we removed the intermediate server directory, just return the path as-is."""
@@ -3512,8 +3456,8 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
         new_output_dir = value_entries["Output Directory"].get()
         logging.info(f'Output Directory changed to: {new_output_dir}')
         
-        # Update output details (image display is handled by periodic monitoring)
-        root.after(200, update_output_details)
+        # Update everything immediately when directory changes
+        root.after(100, update_output_status)
     value_entries["Output Directory"].bind("<FocusOut>", lambda e: on_output_dir_change())
     value_entries["Output Directory"].bind("<Return>", lambda e: on_output_dir_change())
 
@@ -3573,26 +3517,26 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
         logging.info("Cache database size monitoring stopped")
 
     def start_image_monitoring():
-        """Start periodic monitoring of the output directory for new images."""
+        """Start unified monitoring - legacy compatibility function."""
         global image_monitoring_active
         if not image_monitoring_active:
             image_monitoring_active = True
-            logging.info("Image monitoring started (checking every 1 second)")
-            # Start the monitoring immediately
-            show_last_rendered_image()
+            logging.info("Image monitoring started (now using unified monitoring)")
+            # Start the unified monitoring immediately
+            update_output_status()
 
     def start_output_details_monitoring():
-        """Start periodic monitoring of output details independently of image monitoring."""
-        def periodic_update_output_details():
+        """Start unified monitoring of output directory for all changes."""
+        def periodic_update():
             try:
-                update_output_details()
+                update_output_status()
             except Exception as e:
-                logging.error(f"Error in periodic output details update: {e}")
+                logging.error(f"Error in periodic output update: {e}")
             # Schedule next update in 1 second
-            root.after(1000, periodic_update_output_details)
+            root.after(1000, periodic_update)
         
-        logging.info("Output details monitoring started (checking every 1 second)")
-        periodic_update_output_details()
+        logging.info("Unified output monitoring started (checking every 1 second)")
+        periodic_update()
 
     def stop_image_monitoring():
         """Stop periodic image monitoring."""
@@ -3865,128 +3809,12 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
         render_thread.start()
         
     def complete_render_setup(session_completion_callback=None):
-        logging.info("complete_render_setup: Starting total images calculation...")
+        logging.info("complete_render_setup: Starting render setup...")
         
-        # Get animations again (since we're in a different scope now)
+        # Get animations for the render script
         animations = value_entries["Animations"].get("1.0", tk.END).strip().replace("\\", "/").split("\n")
         animations = [file for file in animations if file]
-        logging.info(f"complete_render_setup: Found {len(animations)} animation files")
         
-        # Calculate and display total images to render (update label)
-        def get_angles_from_subject(subject_path):
-            """Read the angles property from the subject file's JSON."""
-            try:
-                with open(subject_path, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                    json_start = content.find('{')
-                    if json_start == -1:
-                        return 16  # Default value
-                    data = json.loads(content[json_start:])
-                    angles = data.get('asset_info', {}).get('angles')
-                    return angles if angles is not None else 16
-            except Exception:
-                return 16  # Default value if can't read or parse
-
-        def get_frames_from_animation(animation_path):
-            """Get the number of frames from an animation file."""
-            try:
-                with open(animation_path, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                    json_start = content.find('{')
-                    if json_start == -1:
-                        return 1  # Static animation
-                    data = json.loads(content[json_start:])
-                    animations = data.get('scene', {}).get('animations', [])
-                    for anim in animations:
-                        keys = anim.get('keys', [])
-                        if len(keys) > 1:
-                            return len(keys)
-                    return 1  # Static animation if no multi-frame animation found
-            except Exception:
-                return 1  # Default to static if can't read
-
-        def calculate_total_images():
-            """Calculate total images based on subject, animations, gear, and settings."""
-            # Get subject file
-            subject_path = value_entries["Subject"].get().strip()
-            if not subject_path:
-                return None
-                
-            # Get number of angles from subject file
-            angles = get_angles_from_subject(subject_path)
-            logging.info(f"complete_render_setup: Subject angles: {angles}")
-            
-            # Get animation files
-            animations = value_entries["Animations"].get("1.0", tk.END).strip().replace("\\", "/").split("\n")
-            animations = [file.strip() for file in animations if file.strip()]
-            
-            # Get gear files
-            gear_files = value_entries["Gear"].get("1.0", tk.END).strip().replace("\\", "/").split("\n")
-            gear_files = [file.strip() for file in gear_files if file.strip()]
-            logging.info(f"complete_render_setup: Found {len(gear_files)} gear files")
-            
-            # If no animations, it's a static render (1 frame)
-            if not animations:
-                total_frames = 1
-                animation_count = 1  # One static render
-                logging.info("complete_render_setup: No animations found - using static render")
-            else:
-                total_frames = 0
-                animation_count = 0
-                for animation_path in animations:
-                    logging.info(f"complete_render_setup: Processing animation: {normalize_path_for_logging(animation_path)}")
-                    if animation_path.lower().endswith('.duf'):
-                        frames = get_frames_from_animation(animation_path)
-                        total_frames += frames
-                        animation_count += 1
-                        logging.info(f"complete_render_setup: Animation {normalize_path_for_logging(animation_path)} has {frames} frames")
-                    else:
-                        logging.info(f"complete_render_setup: Skipping {normalize_path_for_logging(animation_path)} - not a .duf file")
-            
-            logging.info(f"complete_render_setup: Final animation_count: {animation_count}, total_frames: {total_frames}")
-            
-            if animation_count == 0:
-                logging.warning("complete_render_setup: No valid animations found, returning None")
-                return None
-                
-            # Calculate renders per animation:
-            # - Base render (without gear): angles * frames_per_animation
-            # - Gear renders: angles * frames_per_animation * number_of_gear_files
-            gear_count = len(gear_files) if gear_files else 0
-            renders_per_animation = 1 + gear_count  # 1 base render + 1 per gear file
-            
-            # Total images = animation_count * renders_per_animation * angles * avg_frames_per_animation
-            avg_frames_per_animation = total_frames / animation_count if animation_count > 0 else 1
-            total_images = animation_count * renders_per_animation * angles * avg_frames_per_animation
-            
-            # If Render Shadows is checked, double the total images
-            if render_shadows_var.get():
-                total_images *= 2
-                logging.info("complete_render_setup: Shadows enabled - doubling total images")
-                
-            logging.info(f"complete_render_setup: Calculation - {animation_count} animations × {renders_per_animation} renders/anim × {angles} angles × {avg_frames_per_animation:.1f} avg_frames = {total_images}")
-            return int(total_images)
-
-        total_images = None
-        try:
-            total_images = calculate_total_images()
-            logging.info(f"complete_render_setup: Total images calculated: {total_images}")
-        except Exception as e:
-            logging.warning(f"Error calculating total images: {e}")
-            total_images = None
-            
-        if total_images is not None:
-            output_total_images.config(text=f"Total Images to Render: {total_images}")
-            logging.info(f"complete_render_setup: Updated total images label to: {total_images}")
-        else:
-            output_total_images.config(text="Total Images to Render: ")
-            logging.info("complete_render_setup: Set total images label to empty")
-        
-        # Immediately update the progress details after setting total images
-        logging.info("complete_render_setup: Calling update_output_details()...")
-        update_output_details()
-        logging.info("complete_render_setup: update_output_details() completed")
-
         # Check if any DAZ Studio instances are running
         daz_running = check_process_running(['DAZStudio'])
 
@@ -4137,11 +3965,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             logging.info(f'Killed {killed_daz} DAZStudio process(es). Iray Server stopped via global function.')
         except Exception as e:
             logging.error(f'Failed to stop render processes: {e}')
-        # Reset progress and time labels, and total images label (always reset regardless of error)
-        output_total_images.config(text="Total Images to Render: ")
-        images_remaining_var.set("Images remaining: --")
-        estimated_time_remaining_var.set("Estimated time remaining: --")
-        estimated_completion_at_var.set("Est. completion at: --")
+        # Reset progress bar only
         progress_var.set(0)
 
     def stop_render():
