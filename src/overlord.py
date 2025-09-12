@@ -118,6 +118,17 @@ def get_local_app_data_path(subfolder: str = APPDATA_SUBFOLDER) -> str:
     localappdata = os.environ.get('LOCALAPPDATA', os.path.join(os.path.expanduser('~'), 'AppData', 'Local'))
     return os.path.join(localappdata, subfolder)
 
+def get_application_data_directory() -> str:
+    """Get the proper directory for application files, considering if running from executable."""
+    try:
+        # If sys._MEIPASS exists, we're running from a PyInstaller executable (production)
+        # In this case, use the local app data directory instead of the temp _MEIPASS directory
+        sys._MEIPASS
+        return get_local_app_data_path()
+    except AttributeError:
+        # Running from source (development mode) - use the source directory
+        return os.path.dirname(os.path.abspath(__file__))
+
 # Global rendering state
 is_rendering = False
 file_monitor_thread = None
@@ -695,8 +706,7 @@ def stop_iray_server() -> int:
         logging.error(f'Failed to stop Iray Server processes: {e}')
         
     # Always clean up results directory when stopping Iray Server, regardless of whether processes were found
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    cleanup_results_directory(script_dir)
+    cleanup_results_directory()
     
     return len(killed_processes)
 
@@ -716,8 +726,10 @@ def stop_all_render_processes() -> dict:
     
     return results
 
-def cleanup_results_directory(script_dir):
+def cleanup_results_directory(script_dir=None):
     """Clean up the results directory when stopping Iray Server."""
+    if script_dir is None:
+        script_dir = get_application_data_directory()
     results_dir = os.path.join(script_dir, "results")
     
     if os.path.exists(results_dir):
@@ -1820,12 +1832,12 @@ def start_headless_render(settings):
         logging.error(f'Failed to stop DAZ processes: {e}')
     
     # Clean up Iray database and cache
-    script_dir = os.path.dirname(os.path.abspath(__file__))
+    app_data_dir = get_application_data_directory()
     cleanup_iray_database_and_cache()
     
     # Start Iray Server
     logging.info('Starting fresh Iray Server...')
-    results_dir = os.path.join(script_dir, "results")
+    results_dir = os.path.join(app_data_dir, "results")
     final_output_dir = settings["output_directory"]
     
     # Create directories
@@ -1892,10 +1904,7 @@ def start_headless_render(settings):
     }
     
     # Start file monitoring
-    cleanup_manager.start_file_monitoring(
-        server_output_dir=results_dir,
-        final_output_dir=final_output_dir
-    )
+    start_file_monitoring(results_dir)
     
     # Launch DAZ Studio instances
     if not os.path.exists(daz_executable_path):
@@ -3935,10 +3944,10 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 
                 logging.info('All previous instances closed. Starting fresh Iray Server...')
                 
-                # Since we removed the intermediate server directory, just clean up the main script directory
-                script_dir = os.path.dirname(os.path.abspath(__file__))
-                logging.info(f"Cleanup in script directory: {script_dir}")
-                cleanup_iray_files_in_directory(script_dir, with_retries=False)
+                # Since we removed the intermediate server directory, just clean up the app data directory
+                app_data_dir = get_application_data_directory()
+                logging.info(f"Cleanup in app data directory: {app_data_dir}")
+                cleanup_iray_files_in_directory(app_data_dir, with_retries=False)
                 
                 if not start_iray_server():  # Start Iray Server
                     logging.error('Failed to start Iray Server')
@@ -4175,9 +4184,9 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
 
         # Add render_shadows to json_map
         render_shadows = render_shadows_var.get()
-        # Create results directory path (admin subfolder in results directory, same location as Iray server files)
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        results_directory_path = os.path.join(script_dir, "results", "admin").replace("\\", "/")
+        # Create results directory path (admin subfolder in results directory, in app data directory)
+        app_data_dir = get_application_data_directory()
+        results_directory_path = os.path.join(app_data_dir, "results", "admin").replace("\\", "/")
         json_map = (
             f'{{'
             f'"num_instances": "{num_instances}", '

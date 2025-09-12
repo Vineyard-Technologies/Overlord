@@ -189,7 +189,7 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 			var sFinalNameWithSuffix = sFinalName + (bIsGear ? '-GearCanvas-Beauty.exr' : '-Beauty.png');
 			var sFinalNameInFolder = sFinalName + '/' + sFinalNameWithSuffix;
 
-			if (exists(sResultsDirectory + '/' + sFinalNameInFolder)) {
+			if (exists(sOutputDirectory + '/' + sFinalName + '.webp')) {
 
 				App.log(sFinalNameWithSuffix + ' already exists. Skipping this frame.');
 
