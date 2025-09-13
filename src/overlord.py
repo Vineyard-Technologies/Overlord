@@ -871,6 +871,16 @@ def check_iray_database_size(cache_limit_gb: float = None) -> tuple:
         local_app_data_dir = get_local_app_data_path()
         if local_app_data_dir not in check_locations:
             check_locations.append(local_app_data_dir)
+            
+        # Also explicitly check the known problematic location
+        explicit_cache_dir = os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Overlord')
+        if explicit_cache_dir not in check_locations:
+            check_locations.append(explicit_cache_dir)
+        
+        # Log the directories we're checking (only during first check or when debugging)
+        if not hasattr(check_iray_database_size, 'logged_locations'):
+            check_iray_database_size.logged_locations = True
+            logging.info(f"Database size check will monitor these locations: {[normalize_path_for_logging(d) for d in check_locations]}")
         
         for check_dir in check_locations:
             # Look for cache/cache.db instead of iray_server.db
@@ -893,11 +903,13 @@ def check_iray_database_size(cache_limit_gb: float = None) -> tuple:
         needs_restart = max_size_gb >= cache_limit_gb
         
         if db_files_found:
-            logging.debug(f"Cache database size check: Total {total_size_gb:.2f} GB, Max {max_size_gb:.2f} GB, "
-                         f"Limit {cache_limit_gb} GB, Needs restart: {needs_restart}")
-            logging.debug(f"Cache database files found: {', '.join(db_files_found)}")
+            # Use INFO level for important size information, especially when close to or over limit
+            log_level = logging.INFO if (max_size_gb >= cache_limit_gb * 0.8) else logging.DEBUG
+            logging.log(log_level, f"Cache database size check: Total {total_size_gb:.2f} GB, Max {max_size_gb:.2f} GB, "
+                       f"Limit {cache_limit_gb} GB, Needs restart: {needs_restart}")
+            logging.log(log_level, f"Cache database files found: {', '.join(db_files_found)}")
         else:
-            logging.debug("No cache/cache.db files found during size check")
+            logging.warning("No cache/cache.db files found during size check - this may indicate a problem!")
         
         return total_size_gb, max_size_gb, needs_restart
         
@@ -1444,7 +1456,7 @@ class CleanupManager:
                     pass
             self.temp_files.clear()
             
-            # Additional cleanup for PIL temporary files
+            # Additional cleanup for PIL temporary files and PyInstaller directories
             try:
                 # Clear PIL's internal cache
                 Image._initialized = 0
@@ -1456,6 +1468,23 @@ class CleanupManager:
                             temp_path = os.path.join(temp_dir, filename)
                             if os.path.isfile(temp_path):
                                 os.unlink(temp_path)
+                        except Exception:
+                            pass
+                    # Clean up PyInstaller _MEI directories (be careful not to remove current one)
+                    elif filename.startswith('_MEI') and filename != getattr(sys, '_MEIPASS', '').split(os.sep)[-1]:
+                        try:
+                            mei_path = os.path.join(temp_dir, filename)
+                            if os.path.isdir(mei_path):
+                                # Only attempt to remove if it's been around for more than 10 minutes
+                                # to avoid removing currently running instances
+                                try:
+                                    import time
+                                    dir_age = time.time() - os.path.getctime(mei_path)
+                                    if dir_age > 600:  # 10 minutes
+                                        shutil.rmtree(mei_path, ignore_errors=True)
+                                        logging.info(f"Cleaned up old PyInstaller temp directory: {filename}")
+                                except:
+                                    pass
                         except Exception:
                             pass
             except Exception:
@@ -1934,6 +1963,66 @@ def start_headless_render(settings):
     
     logging.info('All render instances launched')
     
+    # Start database monitoring for headless mode
+    def on_database_size_restart_headless():
+        """Called when cache/cache.db exceeds size limit in headless mode"""
+        try:
+            cache_limit_gb = settings.get('cache_limit_gb', IRAY_CACHE_DB_SIZE_LIMIT_GB)
+            total_size_gb, max_size_gb, _ = check_iray_database_size(cache_limit_gb)
+            logging.info(f'Headless mode: Cache database size limit exceeded: {max_size_gb:.2f} GB (limit: {cache_limit_gb} GB) - restarting Iray Server')
+            
+            # Stop Iray Server processes only (keep DAZ Studio running)
+            stop_iray_server()
+            
+            # Clean up database and cache
+            cleanup_iray_database_and_cache()
+            
+            logging.info('Headless mode: Cleanup complete, restarting Iray Server...')
+            
+            # Restart Iray Server
+            if not start_iray_server():
+                logging.error('Headless mode: Failed to restart Iray Server')
+                return
+            
+            logging.info('Headless mode: Iray Server restarted successfully')
+        except Exception as e:
+            logging.error(f'Headless mode: Error during database size restart: {e}')
+    
+    # Initialize database monitoring for headless mode
+    try:
+        cache_limit_gb = settings.get('cache_limit_gb', IRAY_CACHE_DB_SIZE_LIMIT_GB)
+        logging.info(f'Headless mode: Starting database monitoring with limit: {cache_limit_gb} GB')
+        
+        # Create a simple timer-based monitoring since we don't have tkinter root.after() in headless mode
+        import threading
+        import time
+        
+        def headless_database_monitor():
+            """Monitor database size in headless mode"""
+            monitor_active = True
+            while monitor_active:
+                try:
+                    time.sleep(30)  # Check every 30 seconds
+                    total_size_gb, max_size_gb, needs_restart = check_iray_database_size(cache_limit_gb)
+                    
+                    if needs_restart:
+                        logging.info(f"Headless database monitoring: Size limit exceeded ({max_size_gb:.2f} GB >= {cache_limit_gb} GB)")
+                        on_database_size_restart_headless()
+                        # Continue monitoring after restart
+                        time.sleep(60)  # Wait 1 minute before resuming checks
+                        
+                except Exception as e:
+                    logging.error(f"Headless database monitoring error: {e}")
+                    time.sleep(60)  # Wait before retry
+        
+        # Start monitoring in a daemon thread
+        monitor_thread = threading.Thread(target=headless_database_monitor, daemon=True)
+        monitor_thread.start()
+        logging.info('Headless mode: Database monitoring thread started')
+        
+    except Exception as e:
+        logging.error(f'Headless mode: Failed to start database monitoring: {e}')
+    
     # In headless mode, we'll run until interrupted or completed
     try:
         # Keep the process alive and monitor progress
@@ -2034,16 +2123,36 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             except Exception as e:
                 logging.error(f'Error during background cleanup: {e}')
             finally:
-                # Ensure the application exits
+                # Ensure the application exits gracefully
                 logging.info('Exiting application...')
-                import os
-                os._exit(0)  # Force exit regardless of remaining threads
+                # Try graceful exit first
+                try:
+                    sys.exit(0)
+                except:
+                    # If graceful exit fails, force exit
+                    import os
+                    os._exit(0)
         
-        # Start cleanup in background daemon thread
-        cleanup_thread = threading.Thread(target=cleanup_background, daemon=True)
+        # Start cleanup in background thread (not daemon to ensure completion)
+        cleanup_thread = threading.Thread(target=cleanup_background, daemon=False)
         cleanup_thread.start()
         
-        # Don't call root.quit() or root.destroy() here - let the background thread handle exit
+        # Give cleanup thread time to complete before forcing exit
+        def check_cleanup_completion():
+            if cleanup_thread.is_alive():
+                root.after(1000, check_cleanup_completion)  # Check again in 1 second
+            else:
+                # Cleanup completed, safe to exit
+                try:
+                    root.quit()
+                    root.destroy()
+                except:
+                    pass
+                import os
+                os._exit(0)
+        
+        # Start monitoring cleanup completion
+        root.after(100, check_cleanup_completion)
     
     root.protocol("WM_DELETE_WINDOW", on_closing)
 
@@ -3687,7 +3796,25 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 return
                 
             try:
+                # Add safety check to prevent crashes during window close
+                if not hasattr(root, 'winfo_exists') or not root.winfo_exists():
+                    logging.info("Root window no longer exists, stopping database monitoring")
+                    database_monitoring_active = False
+                    return
+                    
                 total_size_gb, max_size_gb, needs_restart = check_iray_database_size(cache_limit_gb)
+                
+                # Log monitoring activity periodically
+                import time
+                current_time = time.time()
+                if not hasattr(check_database_size_periodically, 'last_log_time'):
+                    check_database_size_periodically.last_log_time = 0
+                
+                # Log every 5 minutes (300 seconds) or if size is concerning
+                should_log = (current_time - check_database_size_periodically.last_log_time > 300) or (max_size_gb >= cache_limit_gb * 0.7)
+                if should_log:
+                    logging.info(f"Database monitoring check: {max_size_gb:.2f} GB / {cache_limit_gb} GB limit ({(max_size_gb/cache_limit_gb*100):.1f}%)")
+                    check_database_size_periodically.last_log_time = current_time
                 
                 if needs_restart:
                     logging.info(f"Database size monitoring: Size limit exceeded ({max_size_gb:.2f} GB >= {cache_limit_gb} GB)")
@@ -3699,26 +3826,57 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                         # Restart monitoring after the restart completes (with delay)
                         def restart_monitoring():
                             global database_monitoring_active
-                            database_monitoring_active = True
-                            start_database_monitoring(restart_callback, cache_limit_gb)
-                        root.after(65000, restart_monitoring)  # Resume monitoring after 65 seconds
+                            if database_monitoring_active and hasattr(root, 'winfo_exists') and root.winfo_exists():
+                                database_monitoring_active = True
+                                start_database_monitoring(restart_callback, cache_limit_gb)
+                        if hasattr(root, 'after'):
+                            root.after(65000, restart_monitoring)  # Resume monitoring after 65 seconds
                     except Exception as e:
                         logging.error(f"Error during database size restart: {e}")
                         database_monitoring_active = True  # Re-enable monitoring on error
                 else:
                     # Continue monitoring - check every 30 seconds
-                    if database_monitoring_active:
+                    if database_monitoring_active and hasattr(root, 'after'):
                         root.after(30000, check_database_size_periodically)
                         
             except Exception as e:
                 logging.error(f"Error in database size monitoring: {e}")
-                # Continue monitoring despite error
-                if database_monitoring_active:
-                    root.after(30000, check_database_size_periodically)
+                # Continue monitoring despite error, but with safety checks
+                if database_monitoring_active and hasattr(root, 'after') and hasattr(root, 'winfo_exists'):
+                    try:
+                        if root.winfo_exists():
+                            root.after(30000, check_database_size_periodically)
+                    except:
+                        database_monitoring_active = False
         
         logging.info(f"Starting database size monitoring (limit: {cache_limit_gb} GB)")
+        
+        # Add periodic memory cleanup to prevent resource accumulation
+        def periodic_memory_cleanup():
+            """Perform periodic memory cleanup to prevent resource accumulation."""
+            try:
+                if database_monitoring_active and hasattr(root, 'winfo_exists') and root.winfo_exists():
+                    # Force garbage collection
+                    gc.collect()
+                    # Clear any accumulated image references periodically
+                    if hasattr(cleanup_manager, 'image_references') and len(cleanup_manager.image_references) > 50:
+                        logging.info("Performing periodic image reference cleanup")
+                        for img_ref in cleanup_manager.image_references[-20:]:  # Keep only last 20
+                            try:
+                                if hasattr(img_ref, 'close'):
+                                    img_ref.close()
+                            except:
+                                pass
+                        cleanup_manager.image_references = cleanup_manager.image_references[-20:]
+                    # Schedule next cleanup
+                    root.after(300000, periodic_memory_cleanup)  # Every 5 minutes
+            except Exception as e:
+                logging.error(f"Error in periodic memory cleanup: {e}")
+        
         # Start the first check after 60 seconds to give the render time to start
         root.after(60000, check_database_size_periodically)
+        # Start periodic memory cleanup after 5 minutes
+        root.after(300000, periodic_memory_cleanup)
 
     def stop_database_monitoring():
         """Stop cache database size monitoring."""
@@ -4226,13 +4384,47 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 # Since we removed EXR file monitoring, just log completion
                 logging.info('Render instances launched successfully, images will be saved directly to output directory')
                 
-                # Start database size monitoring
+                # Start database size monitoring - CRITICAL for preventing cache bloat
                 if session_completion_callback:
                     try:
                         cache_limit_gb = float(value_entries["Max Cache Size (GBs)"].get())
+                        logging.info(f"Starting database monitoring with UI-configured limit: {cache_limit_gb} GB")
                     except (ValueError, KeyError):
                         cache_limit_gb = None  # Will fall back to global constant
+                        logging.info(f"Starting database monitoring with default limit: {IRAY_CACHE_DB_SIZE_LIMIT_GB} GB")
                     start_database_monitoring(session_completion_callback, cache_limit_gb)
+                else:
+                    logging.warning("Database monitoring NOT started - no session_completion_callback provided")
+                    # FALLBACK: Start monitoring anyway with a simple restart function
+                    logging.info("Starting fallback database monitoring to prevent cache bloat")
+                    
+                    def fallback_restart_callback():
+                        """Fallback database restart when no session callback is available"""
+                        try:
+                            cache_limit_gb = IRAY_CACHE_DB_SIZE_LIMIT_GB
+                            total_size_gb, max_size_gb, _ = check_iray_database_size(cache_limit_gb)
+                            logging.warning(f'FALLBACK: Cache database size limit exceeded: {max_size_gb:.2f} GB (limit: {cache_limit_gb} GB)')
+                            
+                            # Simple restart: stop iray, cleanup, restart
+                            logging.info("FALLBACK: Stopping Iray Server for cache cleanup...")
+                            stop_iray_server()
+                            
+                            logging.info("FALLBACK: Cleaning up cache database...")
+                            cleanup_iray_database_and_cache()
+                            
+                            logging.info("FALLBACK: Restarting Iray Server...")
+                            start_iray_server()
+                            
+                            logging.info("FALLBACK: Database restart completed")
+                        except Exception as e:
+                            logging.error(f"FALLBACK: Error during database restart: {e}")
+                    
+                    try:
+                        cache_limit_gb = float(value_entries["Max Cache Size (GBs)"].get())
+                    except (ValueError, KeyError):
+                        cache_limit_gb = IRAY_CACHE_DB_SIZE_LIMIT_GB
+                    
+                    start_database_monitoring(fallback_restart_callback, cache_limit_gb)
 
         run_all_instances()
 
@@ -4356,6 +4548,37 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
     
     # Schedule auto-start check after UI is ready
     root.after(100, auto_start_render_if_requested)
+
+    # SAFETY NET: Start database monitoring after 2 minutes if not already started
+    def ensure_database_monitoring():
+        """Safety net to ensure database monitoring is always active"""
+        global database_monitoring_active
+        if not database_monitoring_active:
+            logging.warning("SAFETY NET: Database monitoring not active - starting emergency monitoring")
+            
+            def emergency_restart_callback():
+                """Emergency database restart callback"""
+                try:
+                    cache_limit_gb = IRAY_CACHE_DB_SIZE_LIMIT_GB
+                    total_size_gb, max_size_gb, _ = check_iray_database_size(cache_limit_gb)
+                    logging.warning(f'EMERGENCY: Cache database size limit exceeded: {max_size_gb:.2f} GB (limit: {cache_limit_gb} GB)')
+                    
+                    logging.info("EMERGENCY: Stopping all render processes...")
+                    kill_render_related_processes()
+                    
+                    logging.info("EMERGENCY: Cleaning up cache database...")
+                    cleanup_iray_database_and_cache()
+                    
+                    logging.info("EMERGENCY: Database cleanup completed - please restart render manually")
+                except Exception as e:
+                    logging.error(f"EMERGENCY: Error during database restart: {e}")
+            
+            start_database_monitoring(emergency_restart_callback, IRAY_CACHE_DB_SIZE_LIMIT_GB)
+        else:
+            logging.info("Database monitoring is already active - no emergency action needed")
+    
+    # Check after 2 minutes to ensure monitoring is active
+    root.after(120000, ensure_database_monitoring)
 
     # Run the application
     try:
