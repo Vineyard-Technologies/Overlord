@@ -1,4 +1,3 @@
-
 import subprocess
 import sys
 import os
@@ -138,7 +137,7 @@ def format_version_for_inno(version):
 def install_dependencies():
     """Install required dependencies."""
     print("Installing dependencies...")
-    dependencies = ["pyinstaller", "pillow", "psutil"]
+    dependencies = ["pyinstaller>=6.16", "pillow", "psutil"]
     
     for dep in dependencies:
         result = subprocess.run([sys.executable, "-m", "pip", "install", dep], 
@@ -195,22 +194,101 @@ def build_executable():
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_dist = os.path.join(temp_dir, "dist")
         temp_build = os.path.join(temp_dir, "build")
+        spec_file = os.path.join(temp_dir, "overlord.spec")
+        
+        # Create a custom spec file to better handle tkinter
+        spec_content = f'''# -*- mode: python ; coding: utf-8 -*-
+
+import sys
+import os
+
+block_cipher = None
+
+a = Analysis(
+    ['{main_script_path.replace(os.sep, "/")}'],
+    pathex=[],
+    binaries=[],
+    datas=[
+        ('{favicon_path.replace(os.sep, "/")}', 'images'),
+        ('{overlord_logo_path.replace(os.sep, "/")}', 'images'),
+        ('{laserwolve_logo_path.replace(os.sep, "/")}', 'images'),
+        ('{splash_screen_path.replace(os.sep, "/")}', 'images'),
+    ],
+    hiddenimports=[
+        'tkinter',
+        'tkinter.ttk',
+        'tkinter.filedialog', 
+        'tkinter.messagebox',
+        'tkinter.font',
+        'tkinter.constants',
+        'PIL.ImageTk',
+        'PIL.Image',
+        'PIL._tkinter_finder',
+        'OpenEXR',
+        'Imath',
+        'numpy',
+        'psutil',
+        'winreg',
+        'threading',
+        'json',
+        'logging',
+        'logging.handlers',
+        'urllib.request',
+        'tempfile',
+        'glob',
+        'argparse',
+        'gc',
+        'webbrowser',
+        'subprocess',
+        'shutil'
+    ],
+    hookspath=[],
+    hooksconfig={{}},
+    runtime_hooks=[],
+    excludes=[],
+    win_no_prefer_redirects=False,
+    win_private_assemblies=False,
+    cipher=block_cipher,
+    noarchive=False,
+)
+
+# Filter out problematic or unnecessary modules
+a.binaries = [x for x in a.binaries if not x[0].startswith('api-ms-win-')]
+
+pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+
+exe = EXE(
+    pyz,
+    a.scripts,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    [],
+    name='overlord',
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    runtime_tmpdir=None,
+    console=False,
+    disable_windowed_traceback=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+    icon='{favicon_path.replace(os.sep, "/")}',
+)
+'''
+        
+        # Write the spec file
+        with open(spec_file, 'w', encoding='utf-8') as f:
+            f.write(spec_content)
         
         cmd = [
             sys.executable, "-m", "PyInstaller",
-            "--onefile",
-            "--windowed",
-            "--noconsole",
-            "--icon", favicon_path,
-            "--hidden-import=psutil",
-            "--add-data", f"{favicon_path};images",
-            "--add-data", f"{overlord_logo_path};images",
-            "--add-data", f"{laserwolve_logo_path};images",
-            "--add-data", f"{splash_screen_path};images",
             "--distpath", temp_dist,
             "--workpath", temp_build,
-            "--specpath", temp_dir,
-            main_script_path
+            spec_file
         ]
         
         result = subprocess.run(cmd)

@@ -3818,22 +3818,34 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 
                 if needs_restart:
                     logging.info(f"Database size monitoring: Size limit exceeded ({max_size_gb:.2f} GB >= {cache_limit_gb} GB)")
+                    logging.info("Stopping database monitoring during restart process")
                     database_monitoring_active = False  # Stop monitoring during restart
                     
                     # Call the restart callback
                     try:
+                        logging.info("Calling database restart callback")
                         restart_callback()
                         # Restart monitoring after the restart completes (with delay)
                         def restart_monitoring():
                             global database_monitoring_active
-                            if database_monitoring_active and hasattr(root, 'winfo_exists') and root.winfo_exists():
+                            if hasattr(root, 'winfo_exists') and root.winfo_exists():
+                                logging.info("Resuming database monitoring after successful restart")
                                 database_monitoring_active = True
                                 start_database_monitoring(restart_callback, cache_limit_gb)
+                            else:
+                                logging.warning("Cannot resume database monitoring - root window no longer exists")
                         if hasattr(root, 'after'):
+                            logging.info("Scheduling database monitoring to resume in 65 seconds")
                             root.after(65000, restart_monitoring)  # Resume monitoring after 65 seconds
+                        else:
+                            logging.error("Cannot schedule database monitoring restart - root.after not available")
                     except Exception as e:
                         logging.error(f"Error during database size restart: {e}")
+                        logging.info("Re-enabling database monitoring despite restart error")
                         database_monitoring_active = True  # Re-enable monitoring on error
+                        # Schedule monitoring to continue even if restart failed
+                        if hasattr(root, 'after'):
+                            root.after(60000, check_database_size_periodically)  # Continue monitoring in 1 minute
                 else:
                     # Continue monitoring - check every 30 seconds
                     if database_monitoring_active and hasattr(root, 'after'):
@@ -3850,6 +3862,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                         database_monitoring_active = False
         
         logging.info(f"Starting database size monitoring (limit: {cache_limit_gb} GB)")
+        logging.info(f"Database monitoring state: database_monitoring_active = {database_monitoring_active}")
         
         # Add periodic memory cleanup to prevent resource accumulation
         def periodic_memory_cleanup():
@@ -3874,6 +3887,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 logging.error(f"Error in periodic memory cleanup: {e}")
         
         # Start the first check after 60 seconds to give the render time to start
+        logging.info("Scheduling first database size check in 60 seconds")
         root.after(60000, check_database_size_periodically)
         # Start periodic memory cleanup after 5 minutes
         root.after(300000, periodic_memory_cleanup)
