@@ -762,22 +762,23 @@ def cleanup_iray_files_in_directory(cleanup_dir, with_retries=True):
                 if with_retries and item_type in ["file", "folder"]:
                     # Try to delete with retries (processes might still be releasing file handles)
                     max_retries = 5
-                    retry_delay = 0.5  # seconds
+                    retry_delay = 1.0  # seconds
                     for attempt in range(max_retries):
                         try:
+                            logging.info(f"Attempting to delete {item_type} at: {normalize_path_for_logging(item_path)} (attempt {attempt + 1}/{max_retries})")
                             if item_type == "file":
                                 os.remove(item_path)
                             elif item_type == "folder":
                                 shutil.rmtree(item_path)
                             items_cleaned.append(f"{item_type}: {item_path}")
-                            logging.info(f"Cleaned up {item_type} at: {normalize_path_for_logging(item_path)}")
+                            logging.info(f"Successfully cleaned up {item_type} at: {normalize_path_for_logging(item_path)}")
                             break
                         except (OSError, PermissionError) as e:
                             if attempt < max_retries - 1:
-                                logging.debug(f"Attempt {attempt + 1} failed to delete {normalize_path_for_logging(item_path)}, retrying in {retry_delay}s: {e}")
+                                logging.warning(f"Attempt {attempt + 1} failed to delete {normalize_path_for_logging(item_path)}, retrying in {retry_delay}s: {e}")
                                 time.sleep(retry_delay)
                             else:
-                                logging.warning(f"Failed to delete {item_type} after {max_retries} attempts: {e}")
+                                logging.error(f"Failed to delete {item_type} after {max_retries} attempts: {e}")
                 else:
                     # Simple deletion without retries
                     if item_type == "file":
@@ -798,19 +799,20 @@ def cleanup_iray_files_in_directory(cleanup_dir, with_retries=True):
                 if with_retries:
                     # Try to delete with retries
                     max_retries = 5
-                    retry_delay = 0.5  # seconds
+                    retry_delay = 1.0  # seconds
                     for attempt in range(max_retries):
                         try:
+                            logging.info(f"Attempting to delete worker log file at: {normalize_path_for_logging(worker_log_file)} (attempt {attempt + 1}/{max_retries})")
                             os.remove(worker_log_file)
                             items_cleaned.append(f"worker log: {worker_log_file}")
-                            logging.info(f"Cleaned up worker log file at: {normalize_path_for_logging(worker_log_file)}")
+                            logging.info(f"Successfully cleaned up worker log file at: {normalize_path_for_logging(worker_log_file)}")
                             break
                         except (OSError, PermissionError) as e:
                             if attempt < max_retries - 1:
-                                logging.debug(f"Attempt {attempt + 1} failed to delete {normalize_path_for_logging(worker_log_file)}, retrying in {retry_delay}s: {e}")
+                                logging.warning(f"Attempt {attempt + 1} failed to delete {normalize_path_for_logging(worker_log_file)}, retrying in {retry_delay}s: {e}")
                                 time.sleep(retry_delay)
                             else:
-                                logging.warning(f"Failed to delete worker log file after {max_retries} attempts: {e}")
+                                logging.error(f"Failed to delete worker log file after {max_retries} attempts: {e}")
                 else:
                     # Simple deletion without retries
                     os.remove(worker_log_file)
