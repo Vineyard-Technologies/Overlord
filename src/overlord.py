@@ -728,7 +728,7 @@ def stop_all_render_processes() -> dict:
 def cleanup_results_directory(script_dir=None):
     """Clean up the results directory when stopping Iray Server."""
     if script_dir is None:
-        script_dir = get_application_data_directory()
+        script_dir = get_local_app_data_path()
     results_dir = os.path.join(script_dir, "results")
     
     if os.path.exists(results_dir):
@@ -1683,12 +1683,12 @@ def start_headless_render(settings):
         logging.error(f'Failed to stop DAZ processes: {e}')
     
     # Clean up Iray database and cache
-    app_data_dir = get_application_data_directory()
+    app_data_dir = get_local_app_data_path()
     cleanup_iray_database_and_cache()
     
     # Start Iray Server
     logging.info('Starting fresh Iray Server...')
-    results_dir = os.path.join(app_data_dir, "results")
+    results_dir = os.path.join(app_data_dir, "results", "admin")
     final_output_dir = settings["output_directory"]
     
     # Create directories
@@ -3711,7 +3711,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 logging.info('All previous instances closed. Cleanup completed.')
                 
                 # Since we removed the intermediate server directory, just clean up the app data directory
-                app_data_dir = get_application_data_directory()
+                app_data_dir = get_local_app_data_path()
                 logging.info(f"Cleanup in app data directory: {app_data_dir}")
                 cleanup_iray_files_in_directory(app_data_dir, with_retries=False)
                 
@@ -3905,7 +3905,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
         # Add render_shadows to json_map
         render_shadows = render_shadows_var.get()
         # Create results directory path (admin subfolder in results directory, in app data directory)
-        app_data_dir = get_application_data_directory()
+        app_data_dir = get_local_app_data_path()
         results_directory_path = os.path.join(app_data_dir, "results", "admin").replace("\\", "/")
         json_map = (
             f'{{'

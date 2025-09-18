@@ -33,8 +33,9 @@ var oSettings = new DzSettings();
 var oHttpHelper = new DzHttpHelper();
 var oHttp = new DzHttpHelper();
 var nCacheDbSizeThreshold = oScriptArgs['cache_db_size_threshold_gb'];
-// TODO: Adjust this for dev vs production
-var sCacheFolderPath = 'C:/Users/Andrew/Documents/GitHub/Overlord/src/cache';
+// Cleanest way I can find to get the active user profile name
+var sUserName = App.getAppDataPath().split('/')[2];
+var sCacheFolderPath = 'C:/Users/' + sUserName + '/AppData/Local/Overlord/cache';
 var oCacheFolder = new DzDir(sCacheFolderPath);
 var oCacheDbFile = new DzFileInfo(sCacheFolderPath + '/cache.db');
 var sScriptFileName = getScriptFileName();
@@ -243,10 +244,15 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 			// Check if cache.db is over the threshold (10GBs)
 			if (oCacheDbFile.exists() && oCacheDbFile.size() > nCacheDbSizeThreshold * 1024 * 1024 * 1024) {
 
-				App.log('Cache database is over ' + nCacheDbSizeThreshold + 'GBs.');
+				App.log('Cache database is over ' + nCacheDbSizeThreshold + 'GBs: ' + oCacheDbFile.size() / (1024 * 1024 * 1024) + 'GBs. Restarting Iray Server...');
 
 				restartIrayServer();
 
+			}
+			else {
+				App.log('Cache database path: ' + oCacheDbFile.absoluteFilePath());
+				App.log('Cache database exists? ' + oCacheDbFile.exists());
+				App.log('Cache database is under ' + nCacheDbSizeThreshold + 'GBs: ' + oCacheDbFile.size() / (1024 * 1024 * 1024) + 'GBs.');
 			}
 
 			App.log('Sending render to Iray Server...');
