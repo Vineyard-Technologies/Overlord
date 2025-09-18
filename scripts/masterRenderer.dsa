@@ -32,6 +32,16 @@ var oShadowPlane;
 var oSettings = new DzSettings();
 var oHttpHelper = new DzHttpHelper();
 var oHttp = new DzHttpHelper();
+var nCacheDbSizeThreshold = oScriptArgs['cache_db_size_threshold_gb'];
+// TODO: Adjust this for dev vs production
+var sCacheFolderPath = 'C:/Users/Andrew/Documents/GitHub/Overlord/src/cache';
+var oCacheFolder = new DzDir(sCacheFolderPath);
+var oCacheDbFile = new DzFileInfo(sCacheFolderPath + '/cache.db');
+var sScriptFileName = getScriptFileName();
+var oScriptFileInfo = new DzFileInfo(sScriptFileName);
+var oScriptDirectory = oScriptFileInfo.dir(); // DzDir object
+var sKillIrayServerScript = oScriptDirectory.absoluteFilePath('killIrayServer.vbs');
+var sStartIrayServerScript = oScriptDirectory.absoluteFilePath('startIrayServer.vbs');
 
 var sAddress = '127.0.0.1';
 var sPort = 9090;
@@ -51,16 +61,29 @@ oSettings.setIntValue('Port', sPort);
 oSettings.setStringValue('Username', 'admin');
 oSettings.setStringValue('Password', 'admin');
 
-// Make the output directory if it doesn't exist
-if (!oOutputDirectory.exists()) {
+// Kill Iray server if it's running, then remove the cache file if it exists, then restart it
+function restartIrayServer() {
 
-	App.log('"' + sOutputDirectory + '" does not exist. Creating directory...');
+	// I don't know of a way to tell if Iray Server is running,
+	// so we'll just try to kill it and ignore any errors.
+	App.log('Killing Iray Server...');
+	App.showURL(sKillIrayServerScript);
 
-	oOutputDirectory.mkdir();
+	if (oCacheDbFile.exists()) {
 
-	App.log('Created "' + sOutputDirectory + '".');
+		App.log('cache.db is exists. Removing...');
+
+		while (!oCacheFolder.remove(oCacheDbFile.absoluteFilePath())) {
+
+			App.log('Failed to remove cache.db, retrying...');
+			sleep(1000);
+		}
+		App.log('Successfully removed cache.db');
+	}
+
+	App.log('Starting Iray Server...');
+	App.showURL(sStartIrayServerScript);
 }
-
 // Check if a file exists and isn't 0 bytes
 function exists(sFilePath) {
 
@@ -68,18 +91,15 @@ function exists(sFilePath) {
 
 	return oFileInfo.exists() && oFileInfo.size() > 0;
 }
-
 // Obtain the desired name out of a filepath or filename.
 function getName(sFileName) {
 	return new DzFileInfo(sFileName).completeBaseName();
 }
-
 // The Overlord UI passes an array with a single, undefined object
 // whenever filepath(s) are not specified.
 function thereAre(aArray) {
 	return aArray[0] !== '';
 }
-
 // Set the Matte Parameter of a subject and its children.
 function setMatte(oSubject, bBool) {
 
@@ -220,6 +240,15 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 			// Wait for everything else to finish first, specifically the mesh smoother
 			while (backgroundProgressIsActive()) processEvents();
 
+			// Check if cache.db is over the threshold (10GBs)
+			if (oCacheDbFile.exists() && oCacheDbFile.size() > nCacheDbSizeThreshold * 1024 * 1024 * 1024) {
+
+				App.log('Cache database is over ' + nCacheDbSizeThreshold + 'GBs.');
+
+				restartIrayServer();
+
+			}
+
 			App.log('Sending render to Iray Server...');
 			
 			var sHttpRequestError;
@@ -286,6 +315,19 @@ function filterFilepathsBySuffix(aFilepaths, suffix) {
 		}
 	}
 	return result;
+}
+
+// Clean up any previous Iray Server instance, and start with a clean slate
+restartIrayServer();
+
+// Make the output directory if it doesn't exist
+if (!oOutputDirectory.exists()) {
+
+	App.log('"' + sOutputDirectory + '" does not exist. Creating directory...');
+
+	oOutputDirectory.mkdir();
+
+	App.log('Created "' + sOutputDirectory + '".');
 }
 
 var sSubjectName = getName(sSubjectFilepath);
