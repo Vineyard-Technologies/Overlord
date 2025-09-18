@@ -3904,6 +3904,8 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
 
         # Add render_shadows to json_map
         render_shadows = render_shadows_var.get()
+        # Get cache size threshold
+        cache_size_threshold = value_entries["Cache Size Threshold (GB)"].get()
         # Create results directory path (admin subfolder in results directory, in app data directory)
         app_data_dir = get_local_app_data_path()
         results_directory_path = os.path.join(app_data_dir, "results", "admin").replace("\\", "/")
@@ -3919,7 +3921,8 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             f'"gear_animations": {gear_animations_json}, '
             f'"template_path": "{template_path}", '
             f'"render_shadows": {str(render_shadows).lower()}, '
-            f'"results_directory_path": "{results_directory_path}"'
+            f'"results_directory_path": "{results_directory_path}", '
+            f'"cache_db_size_threshold_gb": "{cache_size_threshold}"'
             f'}}'
         )
 
