@@ -1,6 +1,5 @@
 ![Overlord Logo](images/readmelogo.webp)
 ## An Asset Creation Pipeline Management Tool
-#### Overlord uses [Daz Studio](https://www.daz3d.com/) and [NVIDIA Iray](https://www.nvidia.com/en-us/design-visualization/iray/) to create assets for [Construct](https://www.construct.net/en) games, like [DaggerQuest](https://www.DaggerQuest.com/) and [Plains of Shinar](https://PlainsOfShinar.com/).
 
 Overlord features both a graphical interface for interactive use and a comprehensive command line interface for automation, testing, and headless operation.
 
@@ -14,13 +13,13 @@ Overlord features both a graphical interface for interactive use and a comprehen
 - **Python 3.8+**: Required for running from source or building locally. Download and install from [Python.org](https://www.python.org/downloads/).
 
 ### Option 1: Install from Release (Recommended)
-1. Browse to the [latest release](https://github.com/Laserwolve-Games/Overlord/releases/latest)
+1. Browse to the [latest release](https://github.com/Vineyard-Technologies/Overlord/releases/latest)
 2. Download and run the `OverlordInstaller` executable
 
 ### Option 2: Run from Source
 1. Clone this repository:
    ```bash
-   git clone https://github.com/Laserwolve-Games/Overlord.git
+   git clone https://github.com/Vineyard-Technologies/Overlord.git
    cd Overlord
    ```
 
@@ -265,4 +264,4 @@ This project is licensed under the [AGPL 3.0 License](https://www.gnu.org/licens
 Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## Support
-For issues and support, please visit the [Issues](https://github.com/Laserwolve-Games/Overlord/issues) page.
+For issues and support, please visit the [Issues](https://github.com/Vineyard-Technologies/Overlord/issues) page.

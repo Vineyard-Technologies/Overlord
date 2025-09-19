@@ -2184,14 +2184,14 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 theme_manager.register_widget(overlord_logo_label, "label")
                 
                 def open_overlord_github(event):
-                    webbrowser.open("https://github.com/Laserwolve-Games/Overlord")
+                    webbrowser.open("https://github.com/Vineyard-Technologies/Overlord")
                 
                 overlord_logo_label.bind("<Button-1>", open_overlord_github)
             except Exception as e:
                 logging.warning(f"Could not load Overlord logo: {e}")
             
             # GitHub repository link (text)
-            github_repo_link = tk.Label(main_frame, text="https://github.com/Laserwolve-Games/Overlord", 
+            github_repo_link = tk.Label(main_frame, text="https://github.com/Vineyard-Technologies/Overlord", 
                                        font=("Arial", 10), cursor="hand2")
             github_repo_link.pack(pady=(0, 15))
             theme_manager.register_widget(github_repo_link, "label")
@@ -2323,7 +2323,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             def fetch_patch_notes():
                 try:
                     # Fetch latest release info from GitHub API
-                    api_url = "https://api.github.com/repos/Laserwolve-Games/Overlord/releases/latest"
+                    api_url = "https://api.github.com/repos/Vineyard-Technologies/Overlord/releases/latest"
                     
                     with urllib.request.urlopen(api_url, timeout=10) as response:
                         release_data = json.loads(response.read().decode())
@@ -2353,7 +2353,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                     
                 except Exception as e:
                     logging.warning(f"Could not fetch patch notes: {e}")
-                    error_content = f"Could not load patch notes.\n\n**Error:** {str(e)}\n\nPlease visit: https://github.com/Laserwolve-Games/Overlord/releases/latest"
+                    error_content = f"Could not load patch notes.\n\n**Error:** {str(e)}\n\nPlease visit: https://github.com/Vineyard-Technologies/Overlord/releases/latest"
                     render_markdown_to_text(error_content, patch_notes_text)
             
             # Fetch patch notes in a separate thread to avoid blocking UI
@@ -2364,29 +2364,29 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             patch_notes_text.insert(1.0, "Loading latest release notes...")
             patch_notes_text.config(state=tk.DISABLED)
             
-            # Laserwolve Games logo
+            # Vineyard Technologies logo
             try:
-                lwg_logo = tk.PhotoImage(file=resource_path(os.path.join("images", "laserwolveGamesLogo.png")))
+                lwg_logo = tk.PhotoImage(file=resource_path(os.path.join("images", "VineyardTechnologiesLogo.png")))
                 lwg_logo_label = tk.Label(main_frame, image=lwg_logo, cursor="hand2")
                 lwg_logo_label.image = lwg_logo  # Keep reference
                 lwg_logo_label.pack(pady=(10, 10))
                 theme_manager.register_widget(lwg_logo_label, "label")
                 
                 def open_lwg_website(event):
-                    webbrowser.open("https://laserwolvegames.com")
+                    webbrowser.open("https://VineyardTechnologies.org")
                 
                 lwg_logo_label.bind("<Button-1>", open_lwg_website)
             except Exception as e:
-                logging.warning(f"Could not load Laserwolve Games logo: {e}")
+                logging.warning(f"Could not load Vineyard Technologies logo: {e}")
             
-            # Laserwolve Games website link
-            lwg_link = tk.Label(main_frame, text="https://laserwolvegames.com", 
+            # Vineyard Technologies website link
+            lwg_link = tk.Label(main_frame, text="https://VineyardTechnologies.org", 
                               font=("Arial", 10), cursor="hand2")
             lwg_link.pack(pady=(5, 5))
             theme_manager.register_widget(lwg_link, "label")
             
-            # Laserwolve Games GitHub organization link
-            lwg_github_link = tk.Label(main_frame, text="https://github.com/Laserwolve-Games", 
+            # Vineyard Technologies GitHub organization link
+            lwg_github_link = tk.Label(main_frame, text="https://github.com/VineyardTechnologies", 
                                      font=("Arial", 10), cursor="hand2")
             lwg_github_link.pack(pady=(0, 15))
             theme_manager.register_widget(lwg_github_link, "label")
@@ -2405,13 +2405,13 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             apply_link_style()
             
             def open_github_repo(event):
-                webbrowser.open("https://github.com/Laserwolve-Games/Overlord")
+                webbrowser.open("https://github.com/Vineyard-Technologies/Overlord")
             
             def open_lwg_link(event):
-                webbrowser.open("https://laserwolvegames.com")
+                webbrowser.open("https://VineyardTechnologies.org")
             
             def open_lwg_github(event):
-                webbrowser.open("https://github.com/Laserwolve-Games")
+                webbrowser.open("https://github.com/VineyardTechnologies")
             
             github_repo_link.bind("<Button-1>", open_github_repo)
             lwg_link.bind("<Button-1>", open_lwg_link)
@@ -2444,21 +2444,21 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
     logo_label.place(anchor="nw", x=10, y=10)  # Place in upper left corner, 10px down and right
     theme_manager.register_widget(logo_label, "label")
 
-    # Add Laserwolve Games logo to upper right corner
-    lwg_logo = tk.PhotoImage(file=resource_path(os.path.join("images", "laserwolveGamesLogo.png")))
+    # Add Vineyard Technologies logo to upper right corner
+    lwg_logo = tk.PhotoImage(file=resource_path(os.path.join("images", "VineyardTechnologiesLogo.png")))
     lwg_logo_label = tk.Label(root, image=lwg_logo, cursor="hand2")
     lwg_logo_label.image = lwg_logo  # Keep a reference to avoid garbage collection
     # Place in upper right using place geometry manager
     lwg_logo_label.place(anchor="nw", x=700)
     theme_manager.register_widget(lwg_logo_label, "label")
     def open_lwg_link(event):
-        logging.info('Laserwolve Games logo clicked')
-        webbrowser.open("https://www.laserwolvegames.com/")
+        logging.info('Vineyard Technologies logo clicked')
+        webbrowser.open("https://www.VineyardTechnologies.org/")
     lwg_logo_label.bind("<Button-1>", open_lwg_link)
 
     def open_github_link(event):
         logging.info('Overlord GitHub logo clicked')
-        webbrowser.open("https://github.com/Laserwolve-Games/Overlord")
+        webbrowser.open("https://github.com/Vineyard-Technologies/Overlord")
     logo_label.bind("<Button-1>", open_github_link)
 
     # Create frames for the two tables

@@ -164,7 +164,7 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 	
 	// Read the animation's JSON to see how many frames it has
 	if (sAnimationName != 'static') {
-		// https://github.com/Laserwolve-Games/Overlord/discussions/4
+		// https://github.com/Vineyard-Technologies/Overlord/discussions/4
 		var oAnimationFile = new DzFile(sAnimationFilepath);
 
 		oAnimationFile.open(DzFile.ReadOnly);

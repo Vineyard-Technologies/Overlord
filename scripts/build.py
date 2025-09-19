@@ -172,7 +172,7 @@ def build_executable():
     current_dir = os.getcwd()
     favicon_path = os.path.join(current_dir, "images", "favicon.ico")
     overlord_logo_path = os.path.join(current_dir, "images", "overlordLogo.png")
-    laserwolve_logo_path = os.path.join(current_dir, "images", "laserwolveGamesLogo.png")
+    laserwolve_logo_path = os.path.join(current_dir, "images", "VineyardTechnologiesLogo.png")
     splash_screen_path = os.path.join(current_dir, "images", "splashScreen.png")
     main_script_path = os.path.join(current_dir, "src", "overlord.py")
     
@@ -180,7 +180,7 @@ def build_executable():
     required_files = [
         (favicon_path, "favicon.ico"),
         (overlord_logo_path, "overlordLogo.png"),
-        (laserwolve_logo_path, "laserwolveGamesLogo.png"),
+        (laserwolve_logo_path, "VineyardTechnologiesLogo.png"),
         (splash_screen_path, "splashScreen.png"),
         (main_script_path, "overlord.py")
     ]

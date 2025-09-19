@@ -4,9 +4,9 @@ type: software
 title: "Overlord"
 abstract: "An Asset Creation Pipeline Management Tool using Daz Studio and NVIDIA Iray to create assets for Construct games like DaggerQuest and Plains of Shinar."
 authors:
-  - family-names: "Laserwolve Games"
-    email: "contact@laserwolvegames.com"
-repository-code: "https://github.com/Laserwolve-Games/Overlord"
+  - family-names: "Vineyard Technologies"
+    email: "contact@VineyardTechnologies.org"
+repository-code: "https://github.com/Vineyard-Technologies/Overlord"
 license: AGPL-3.0
 keywords:
   - "asset-creation"
@@ -23,9 +23,9 @@ preferred-citation:
   type: software
   title: "Overlord: Asset Creation Pipeline Management Tool"
   authors:
-    - family-names: "Laserwolve Games"
-      email: "contact@laserwolvegames.com"
-  repository-code: "https://github.com/Laserwolve-Games/Overlord"
+    - family-names: "Vineyard Technologies"
+      email: "contact@VineyardTechnologies.org"
+  repository-code: "https://github.com/Vineyard-Technologies/Overlord"
   version: "1.0.0"
   date-released: "2025-08-20"
   license: AGPL-3.0

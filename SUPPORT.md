@@ -9,15 +9,15 @@ Thank you for your interest in Overlord! This document outlines how to get help 
 If you're experiencing issues with Overlord:
 
 1. **Check Documentation**: Review the comprehensive [README.md](README.md) for installation and usage instructions
-2. **Browse Known Issues**: Check our [Issues](https://github.com/Laserwolve-Games/Overlord/issues) page for known problems and solutions
-3. **Community Discussion**: Join discussions in our [Discussions](https://github.com/Laserwolve-Games/Overlord/discussions) section
+2. **Browse Known Issues**: Check our [Issues](https://github.com/Vineyard-Technologies/Overlord/issues) page for known problems and solutions
+3. **Community Discussion**: Join discussions in our [Discussions](https://github.com/Vineyard-Technologies/Overlord/discussions) section
 
 ### Technical Support
 
 For technical issues, bugs, or setup problems:
 
 1. **Search Existing Issues**: Check if your issue has already been reported
-2. **Create a Bug Report**: If you find a new bug, please [open an issue](https://github.com/Laserwolve-Games/Overlord/issues/new) with:
+2. **Create a Bug Report**: If you find a new bug, please [open an issue](https://github.com/Vineyard-Technologies/Overlord/issues/new) with:
    - Clear description of the problem
    - Steps to reproduce the issue
    - System specifications (OS, Python version, Daz Studio version)
@@ -31,7 +31,7 @@ For questions about contributing to Overlord:
 
 1. **Read Contributing Guidelines**: Check our [CONTRIBUTING.md](CONTRIBUTING.md) file
 2. **Code of Conduct**: Review our [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
-3. **Start a Discussion**: Ask questions in [Discussions](https://github.com/Laserwolve-Games/Overlord/discussions)
+3. **Start a Discussion**: Ask questions in [Discussions](https://github.com/Vineyard-Technologies/Overlord/discussions)
 
 ## Contact Information
 
@@ -200,7 +200,7 @@ You can help improve support for everyone:
 
 ### Documentation
 
-- **Main Repository**: [Overlord](https://github.com/Laserwolve-Games/Overlord)
+- **Main Repository**: [Overlord](https://github.com/Vineyard-Technologies/Overlord)
 - **Installation Guide**: Detailed setup instructions in README.md
 - **API Documentation**: Code documentation and examples
 
@@ -213,7 +213,7 @@ You can help improve support for everyone:
 
 ### Related Projects
 
-- **DaggerQuest**: [Main game repository](https://github.com/Laserwolve-Games/DaggerQuest)
+- **DaggerQuest**: [Main game repository](https://github.com/Vineyard-Technologies/DaggerQuest)
 - **Assets Repository**: Where generated assets are stored
 
 ## Emergency Contacts
