@@ -36,8 +36,7 @@ var nCacheDbSizeThreshold = oScriptArgs['cache_db_size_threshold_gb'];
 // Cleanest way I can find to get the active user profile name
 var sUserName = App.getAppDataPath().split('/')[2];
 var sCacheFolderPath = 'C:/Users/' + sUserName + '/AppData/Local/Overlord/cache';
-var oCacheFolder = new DzDir(sCacheFolderPath);
-var oCacheDbFile = new DzFileInfo(sCacheFolderPath + '/cache.db');
+var oCacheDbFile;
 var sScriptFileName = getScriptFileName();
 var oScriptFileInfo = new DzFileInfo(sScriptFileName);
 var oScriptDirectory = oScriptFileInfo.dir(); // DzDir object
@@ -70,9 +69,13 @@ function restartIrayServer() {
 	App.log('Killing Iray Server...');
 	App.showURL(sKillIrayServerScript);
 
+	oCacheDbFile = new DzFileInfo(sCacheFolderPath + '/cache.db');
+
 	if (oCacheDbFile.exists()) {
 
 		App.log('cache.db is exists. Removing...');
+
+		var oCacheFolder = new DzDir(sCacheFolderPath);
 
 		while (!oCacheFolder.remove(oCacheDbFile.absoluteFilePath())) {
 
@@ -240,6 +243,8 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 			}
 			// Wait for everything else to finish first, specifically the mesh smoother
 			while (backgroundProgressIsActive()) processEvents();
+
+			oCacheDbFile = new DzFileInfo(sCacheFolderPath + '/cache.db');
 
 			// Check if cache.db is over the threshold (10GBs)
 			if (oCacheDbFile.exists() && oCacheDbFile.size() > nCacheDbSizeThreshold * 1024 * 1024 * 1024) {
