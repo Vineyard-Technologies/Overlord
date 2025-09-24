@@ -233,6 +233,16 @@ def get_free_disk_space_gb() -> float:
         # Return a reasonable default if we can't determine free space
         return 100.0  # Assume 100 GB available as fallback
 
+def get_memory_usage_mb() -> float:
+    """Get current memory usage of the Overlord process in MB."""
+    try:
+        import psutil
+        process = psutil.Process()
+        memory_info = process.memory_info()
+        return memory_info.rss / (1024 * 1024)  # Convert bytes to MB
+    except Exception:
+        return 0.0
+
 def get_directory_stats(directory: str) -> tuple:
     """Get directory statistics: total_size, png_count, folder_count."""
     if not os.path.exists(directory):
@@ -471,6 +481,14 @@ def convert_exr_to_pil(exr_path: str) -> Image.Image:
         width = dw.max.x - dw.min.x + 1
         height = dw.max.y - dw.min.y + 1
         
+        # Check for extremely large EXR files that could cause memory issues
+        max_pixels = 50 * 1024 * 1024  # 50 megapixels max
+        total_pixels = width * height
+        if total_pixels > max_pixels:
+            logging.warning(f"EXR file {exr_path} is very large ({width}x{height} = {total_pixels:,} pixels). This may cause memory issues.")
+            exr_file.close()
+            return None
+        
         # Get the channel names
         channels = header['channels'].keys()
         
@@ -495,11 +513,19 @@ def convert_exr_to_pil(exr_path: str) -> Image.Image:
         pixel_data = []
         for channel in channel_names:
             if channel in channels:
-                channel_data = exr_file.channel(channel, Imath.PixelType(Imath.PixelType.FLOAT))
-                # Convert to numpy array
-                channel_array = np.frombuffer(channel_data, dtype=np.float32)
-                channel_array = channel_array.reshape((height, width))
-                pixel_data.append(channel_array)
+                try:
+                    channel_data = exr_file.channel(channel, Imath.PixelType(Imath.PixelType.FLOAT))
+                    # Convert to numpy array
+                    channel_array = np.frombuffer(channel_data, dtype=np.float32)
+                    channel_array = channel_array.reshape((height, width))
+                    pixel_data.append(channel_array)
+                except MemoryError:
+                    logging.error(f"Memory error processing EXR channel {channel} for {exr_path}")
+                    exr_file.close()
+                    # Force garbage collection to free any partial data
+                    import gc
+                    gc.collect()
+                    return None
         
         # Close the EXR file
         exr_file.close()
@@ -3424,6 +3450,19 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             
             # If verification passes, reopen for display
             with Image.open(image_path) as img:
+                # Get original dimensions before any processing
+                orig_width, orig_height = img.size
+                
+                # Check if image is too large and resize if needed (max 2048x2048 for display)
+                max_display_size = 2048
+                if orig_width > max_display_size or orig_height > max_display_size:
+                    # Calculate resize ratio to maintain aspect ratio
+                    ratio = min(max_display_size / orig_width, max_display_size / orig_height)
+                    new_width = int(orig_width * ratio)
+                    new_height = int(orig_height * ratio)
+                    img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                    logging.info(f"Resized large image from {orig_width}x{orig_height} to {new_width}x{new_height} for display")
+                
                 img = img.convert("RGBA")  # Ensure image is in RGBA mode
                 # Handle transparency by adding a theme-appropriate background
                 if theme_manager.current_theme == "dark":
@@ -3437,7 +3476,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 
                 # Create a copy to avoid keeping the file handle open
                 img_copy = img.copy()
-                width, height = img.size
+                width, height = orig_width, orig_height  # Use original dimensions for details
             
             with Image.open(image_path) as orig_img:
                 width, height = orig_img.size
@@ -3455,15 +3494,24 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             img_label.image = tk_img
             no_img_label.lower()
             
+            # Explicitly clear the img_copy reference to free memory immediately
+            del img_copy
+            
             # Only log if the image path has changed
             if getattr(display_specific_image, 'last_logged_img_path', None) != image_path:
                 logging.info(f'Displaying image: {normalize_path_for_logging(image_path)}')
                 display_specific_image.last_logged_img_path = image_path
             
+        except MemoryError as e:
+            logging.error(f'Memory error displaying image {normalize_path_for_logging(image_path)}: {e}. Image may be too large.')
+            # Clear any partial allocations
+            import gc
+            gc.collect()
         except Exception as e:
             logging.error(f'Error displaying specific image {normalize_path_for_logging(image_path)}: {e}')
         
         # Force garbage collection to clean up any remaining references
+        import gc
         gc.collect()
 
     def watchdog_image_update(new_image_path):
