@@ -60,6 +60,7 @@ APPDATA_SUBFOLDER = "Overlord"
 # UI dimensions
 SPLASH_WIDTH = 400
 SPLASH_HEIGHT = 400
+INPUT_BOX_WIDTH = 93
 
 # Theme colors
 THEME_COLORS = {
@@ -2749,7 +2750,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
         theme_manager.register_widget(param_label, "label")
 
         if param == "Subject":
-            value_entry = tk.Entry(file_table_frame, width=90, font=("Consolas", 10))
+            value_entry = tk.Entry(file_table_frame, width=INPUT_BOX_WIDTH, font=("Consolas", 10))
             value_entry.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
             theme_manager.register_widget(value_entry, "entry")
 
@@ -2773,7 +2774,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             value_entry.bind("<KeyRelease>", lambda e: auto_save_settings())
             value_entry.bind("<FocusOut>", lambda e: auto_save_settings())
         elif param == "Animations":
-            text_widget = tk.Text(file_table_frame, width=90, height=5, font=("Consolas", 10))
+            text_widget = tk.Text(file_table_frame, width=INPUT_BOX_WIDTH, height=5, font=("Consolas", 10))
             text_widget.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
             theme_manager.register_widget(text_widget, "text")
 
@@ -2797,7 +2798,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             text_widget.bind("<KeyRelease>", lambda e: auto_save_settings())
             text_widget.bind("<FocusOut>", lambda e: auto_save_settings())
         elif param == "Prop Animations":
-            text_widget = tk.Text(file_table_frame, width=90, height=5, font=("Consolas", 10))
+            text_widget = tk.Text(file_table_frame, width=INPUT_BOX_WIDTH, height=5, font=("Consolas", 10))
             text_widget.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
             theme_manager.register_widget(text_widget, "text")
 
@@ -2821,7 +2822,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             text_widget.bind("<KeyRelease>", lambda e: auto_save_settings())
             text_widget.bind("<FocusOut>", lambda e: auto_save_settings())
         elif param == "Gear":
-            text_widget = tk.Text(file_table_frame, width=90, height=5, font=("Consolas", 10))
+            text_widget = tk.Text(file_table_frame, width=INPUT_BOX_WIDTH, height=5, font=("Consolas", 10))
             text_widget.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
             theme_manager.register_widget(text_widget, "text")
 
@@ -2845,7 +2846,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             text_widget.bind("<KeyRelease>", lambda e: auto_save_settings())
             text_widget.bind("<FocusOut>", lambda e: auto_save_settings())
         elif param == "Gear Animations":
-            text_widget = tk.Text(file_table_frame, width=90, height=5, font=("Consolas", 10))
+            text_widget = tk.Text(file_table_frame, width=INPUT_BOX_WIDTH, height=5, font=("Consolas", 10))
             text_widget.grid(row=i+1, column=1, padx=10, pady=5, sticky="e")
             theme_manager.register_widget(text_widget, "text")
 
@@ -2869,7 +2870,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             text_widget.bind("<KeyRelease>", lambda e: auto_save_settings())
             text_widget.bind("<FocusOut>", lambda e: auto_save_settings())
         elif param == "Output Directory":
-            value_entry = tk.Entry(file_table_frame, width=90, font=("Consolas", 10))
+            value_entry = tk.Entry(file_table_frame, width=INPUT_BOX_WIDTH, font=("Consolas", 10))
             default_img_dir = os.path.join(
                 os.path.expanduser("~"),
                 "Downloads", "output"
@@ -2902,7 +2903,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
         param_label.grid(row=1, column=current_column, padx=(10, 5), pady=5, sticky="w")
         theme_manager.register_widget(param_label, "label")
 
-        value_entry = tk.Entry(param_table_frame, width=5, font=("Consolas", 10))
+        value_entry = tk.Entry(param_table_frame, width=3, font=("Consolas", 10))
         if param == "Number of Instances":
             value_entry.insert(0, "1")
         elif param == "Frame Rate":
@@ -2925,11 +2926,12 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
     )
     render_shadows_checkbox.grid(row=1, column=current_column+1, padx=(0, 10), pady=5, sticky="w")
     theme_manager.register_widget(render_shadows_checkbox, "checkbutton")
+    current_column += 2  # Move to next position
 
-    # --- Shut down on finish checkbox - on new row for better visibility ---
+    # --- Shut down on finish checkbox ---
     shutdown_on_finish_var = tk.BooleanVar(value=True)
     shutdown_on_finish_label = tk.Label(param_table_frame, text="Shut down on finish", font=("Arial", 10), anchor="w")
-    shutdown_on_finish_label.grid(row=2, column=0, padx=(10, 5), pady=5, sticky="w")
+    shutdown_on_finish_label.grid(row=1, column=current_column, padx=(10, 5), pady=5, sticky="w")
     theme_manager.register_widget(shutdown_on_finish_label, "label")
     shutdown_on_finish_checkbox = tk.Checkbutton(
         param_table_frame,
@@ -2937,7 +2939,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
         width=2,
         anchor="w"
     )
-    shutdown_on_finish_checkbox.grid(row=2, column=1, padx=(0, 10), pady=5, sticky="w")
+    shutdown_on_finish_checkbox.grid(row=1, column=current_column+1, padx=(0, 10), pady=5, sticky="w")
     theme_manager.register_widget(shutdown_on_finish_checkbox, "checkbutton")
 
     # Register settings save callback for cleanup
