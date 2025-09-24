@@ -134,10 +134,56 @@ file_monitor_thread = None
 file_monitor_stop_event = None
 initial_total_images = 0  # Track the initial total images count for progress calculation
 render_start_time = None  # Track when the render started for time estimation filtering
+shutdown_timer_thread = None  # Track shutdown timer thread
 
 def get_default_output_directory() -> str:
     """Get the default output directory for user files."""
     return os.path.join(os.path.expanduser("~"), DEFAULT_OUTPUT_SUBDIR)
+
+def schedule_shutdown(root_window=None):
+    """Schedule system shutdown after 60 seconds with notification."""
+    global shutdown_timer_thread
+    
+    def shutdown_countdown():
+        try:
+            logging.info("Render completed. Scheduling system shutdown in 60 seconds...")
+            
+            # Show notification dialog (non-blocking)
+            def show_notification():
+                try:
+                    from tkinter import messagebox
+                    messagebox.showinfo(
+                        "Render Complete", 
+                        "All renders have finished!\n\nSystem will shut down in 60 seconds.\n\nYou can cancel by closing this application.",
+                        icon="info"
+                    )
+                except Exception as e:
+                    logging.error(f"Error showing notification: {e}")
+            
+            # Show notification on main thread if root window is available
+            if root_window:
+                root_window.after(0, show_notification)
+            
+            # Wait 60 seconds
+            time.sleep(60)
+            
+            # Execute shutdown command for Windows
+            subprocess.run(['shutdown', '/s', '/f', '/t', '0'], check=False)
+            logging.info("Shutdown command executed")
+            
+        except Exception as e:
+            logging.error(f"Error during shutdown sequence: {e}")
+    
+    # Start shutdown timer in background thread
+    shutdown_timer_thread = threading.Thread(target=shutdown_countdown, daemon=True)
+    shutdown_timer_thread.start()
+
+def reset_shutdown_timer():
+    """Reset/cancel any pending shutdown timer."""
+    global shutdown_timer_thread
+    if shutdown_timer_thread is not None:
+        logging.info("Resetting shutdown timer")
+        shutdown_timer_thread = None
 
 def detect_windows_theme() -> str:
     """Detect if Windows is using dark or light theme."""
@@ -1159,6 +1205,7 @@ class SettingsManager:
             "number_of_instances": "1",
             "frame_rate": "30",
             "render_shadows": True,
+            "shutdown_on_finish": True,
             "cache_db_size_threshold_gb": "10",
             "last_directories": {
                 "subject": "",
@@ -1222,7 +1269,7 @@ class SettingsManager:
         
         return issues
     
-    def get_current_settings(self, value_entries: dict, render_shadows_var) -> dict:
+    def get_current_settings(self, value_entries: dict, render_shadows_var, shutdown_on_finish_var) -> dict:
         """Extract current settings from UI widgets."""
         try:
             animations_text = value_entries["Animations"].get("1.0", tk.END).strip()
@@ -1247,6 +1294,7 @@ class SettingsManager:
                 "number_of_instances": value_entries["Number of Instances"].get(),
                 "frame_rate": value_entries["Frame Rate"].get(),
                 "render_shadows": render_shadows_var.get(),
+                "shutdown_on_finish": shutdown_on_finish_var.get(),
                 "cache_db_size_threshold_gb": value_entries["Cache Size Threshold (GB)"].get()
             }
         except tk.TclError:
@@ -1254,7 +1302,7 @@ class SettingsManager:
             logging.warning("Widgets destroyed during settings extraction, using defaults")
             return self.default_settings.copy()
     
-    def apply_settings(self, settings: dict, value_entries: dict, render_shadows_var) -> bool:
+    def apply_settings(self, settings: dict, value_entries: dict, render_shadows_var, shutdown_on_finish_var) -> bool:
         """Apply loaded settings to UI widgets."""
         try:
             # Subject
@@ -1299,6 +1347,7 @@ class SettingsManager:
             
             # Checkboxes
             render_shadows_var.set(settings["render_shadows"])
+            shutdown_on_finish_var.set(settings.get("shutdown_on_finish", True))
             
             logging.info('Settings applied to UI')
             return True
@@ -1630,6 +1679,8 @@ def run_headless_mode(cmd_args):
             settings["frame_rate"] = str(cmd_args.frame_rate)
         if cmd_args.render_shadows is not None:
             settings["render_shadows"] = cmd_args.render_shadows
+        if cmd_args.shutdown_on_finish is not None:
+            settings["shutdown_on_finish"] = cmd_args.shutdown_on_finish
     
     # Validate required fields
     if not settings.get("subject"):
@@ -2875,15 +2926,29 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
     render_shadows_checkbox.grid(row=1, column=current_column+1, padx=(0, 10), pady=5, sticky="w")
     theme_manager.register_widget(render_shadows_checkbox, "checkbutton")
 
+    # --- Shut down on finish checkbox - on new row for better visibility ---
+    shutdown_on_finish_var = tk.BooleanVar(value=True)
+    shutdown_on_finish_label = tk.Label(param_table_frame, text="Shut down on finish", font=("Arial", 10), anchor="w")
+    shutdown_on_finish_label.grid(row=2, column=0, padx=(10, 5), pady=5, sticky="w")
+    theme_manager.register_widget(shutdown_on_finish_label, "label")
+    shutdown_on_finish_checkbox = tk.Checkbutton(
+        param_table_frame,
+        variable=shutdown_on_finish_var,
+        width=2,
+        anchor="w"
+    )
+    shutdown_on_finish_checkbox.grid(row=2, column=1, padx=(0, 10), pady=5, sticky="w")
+    theme_manager.register_widget(shutdown_on_finish_checkbox, "checkbutton")
+
     # Register settings save callback for cleanup
     def save_current_settings():
-        current_settings = settings_manager.get_current_settings(value_entries, render_shadows_var)
+        current_settings = settings_manager.get_current_settings(value_entries, render_shadows_var, shutdown_on_finish_var)
         settings_manager.save_settings(current_settings)
     cleanup_manager.register_settings_callback(save_current_settings)
 
     saved_settings = settings_manager.load_settings()
     # Apply the loaded settings to the UI (now that all widgets are created)
-    settings_manager.apply_settings(saved_settings, value_entries, render_shadows_var)
+    settings_manager.apply_settings(saved_settings, value_entries, render_shadows_var, shutdown_on_finish_var)
 
     # Apply command line arguments if provided (overrides saved settings)
     def apply_command_line_args():
@@ -2923,6 +2988,9 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 
             if cmd_args.render_shadows is not None:
                 render_shadows_var.set(cmd_args.render_shadows)
+                
+            if cmd_args.shutdown_on_finish is not None:
+                shutdown_on_finish_var.set(cmd_args.shutdown_on_finish)
                 
             logging.info("Command line arguments applied to UI fields")
     
@@ -3312,9 +3380,15 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                         estimated_time_remaining_var.set("Est. time remaining: Calculating...")
                         estimated_completion_at_var.set("Est. completion at: Calculating...")
                 else:
-                    # No images remaining
+                    # No images remaining - render is complete
                     estimated_time_remaining_var.set("Est. time remaining: Complete")
                     estimated_completion_at_var.set("Est. completion at: Complete")
+                    
+                    # Check if shutdown on finish is enabled and we're currently rendering
+                    global is_rendering, shutdown_timer_thread
+                    if is_rendering and shutdown_on_finish_var.get() and shutdown_timer_thread is None:
+                        # Schedule shutdown since render is complete
+                        schedule_shutdown(root)
             else:
                 # No initial total set
                 estimated_time_remaining_var.set("Est. time remaining:")
@@ -3768,6 +3842,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 
                 # Set rendering state and start file monitoring
                 is_rendering = True
+                reset_shutdown_timer()  # Reset any pending shutdown timer
                 output_directory = value_entries["Output Directory"].get().strip()
                 start_file_monitoring(output_directory)
                 logging.info('File monitoring started for WebP conversion')
@@ -4037,6 +4112,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             global is_rendering, render_start_time, initial_total_images
             is_rendering = False
             render_start_time = None  # Reset render start time
+            reset_shutdown_timer()  # Cancel any pending shutdown
             logging.info("Render start time reset")
             stop_file_monitoring()
             
@@ -4163,6 +4239,10 @@ if __name__ == "__main__":
                         help='Enable shadow rendering')
     parser.add_argument('--no-render-shadows', dest='render_shadows', action='store_false',
                         help='Disable shadow rendering')
+    parser.add_argument('--shutdown-on-finish', action='store_true', default=None,
+                        help='Shutdown computer when render completes')
+    parser.add_argument('--no-shutdown-on-finish', dest='shutdown_on_finish', action='store_false',
+                        help='Do not shutdown computer when render completes')
     
     args = parser.parse_args()
     
