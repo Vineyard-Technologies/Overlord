@@ -210,7 +210,7 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 
 			var sFinalName = sSubjectName + (bIsShadow ? '_shadow-' : '-')
 				+ sAnimationName + '_' + nOutputAngle + '-' + ('000' + nFrame).slice(-3);
-			var sFinalNameWithSuffix = sFinalName + (bIsGear ? '-GearCanvas-Beauty.exr' : '-Beauty.png');
+			var sFinalNameWithSuffix = sFinalName + (bIsGear && !bIsShadow ? '-GearCanvas-Beauty.exr' : '-Beauty.png');
 			var sFinalNameInFolder = sFinalName + '/' + sFinalNameWithSuffix;
 
 			if (exists(sOutputDirectory + '/' + sFinalName + '.webp')) {

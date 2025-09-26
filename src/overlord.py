@@ -519,8 +519,15 @@ def convert_to_webp(input_path: str, delete_original: bool = True) -> str:
 def convert_exr_to_pil(exr_path: str) -> Image.Image:
     """Convert EXR file to PIL Image using OpenEXR."""
     try:
+        # Normalize the path to use consistent separators for OpenEXR on Windows
+        normalized_path = os.path.normpath(exr_path)
+        
+        # Log path normalization if there was a change (for debugging)
+        if normalized_path != exr_path:
+            logging.debug(f"Normalized EXR path: {normalize_path_for_logging(exr_path)} -> {normalize_path_for_logging(normalized_path)}")
+        
         # Open the EXR file
-        exr_file = OpenEXR.InputFile(exr_path)
+        exr_file = OpenEXR.InputFile(normalized_path)
         
         # Get the header to understand the image properties
         header = exr_file.header()
@@ -1808,6 +1815,27 @@ def start_headless_render(settings):
         user_scripts_dir = os.path.join(get_app_data_path(), 'scripts')
         os.makedirs(user_scripts_dir, exist_ok=True)
         render_script_path = os.path.join(user_scripts_dir, "masterRenderer.dsa").replace("\\", "/")
+        
+        # Copy all three scripts to user directory
+        scripts_to_copy = [
+            ("masterRenderer.dsa", "masterRenderer.dsa"),
+            ("killIrayServer.vbs", "killIrayServer.vbs"),
+            ("startIrayServer.vbs", "startIrayServer.vbs")
+        ]
+        
+        import shutil
+        for install_filename, user_filename in scripts_to_copy:
+            install_script_path = os.path.join(install_dir, "scripts", install_filename)
+            user_script_path = os.path.join(user_scripts_dir, user_filename)
+            try:
+                if (not os.path.exists(user_script_path)) or (
+                    os.path.exists(install_script_path) and 
+                    os.path.getmtime(install_script_path) > os.path.getmtime(user_script_path)):
+                    shutil.copy2(install_script_path, user_script_path)
+                    logging.info(f'Copied {install_filename} to user scripts dir: {normalize_path_for_logging(user_script_path)}')
+            except Exception as e:
+                logging.error(f'Could not copy {install_filename} to user scripts dir: {e}')
+        
         template_path = os.path.join(get_app_data_path(), 'templates', 'masterTemplate.duf').replace("\\", "/")
     else:
         install_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -3984,15 +4012,27 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             user_scripts_dir = os.path.join(get_app_data_path(), 'scripts')
             os.makedirs(user_scripts_dir, exist_ok=True)
             render_script_path = os.path.join(user_scripts_dir, "masterRenderer.dsa").replace("\\", "/")
-            install_script_path = os.path.join(install_dir, "scripts", "masterRenderer.dsa")
-            try:
-                if (not os.path.exists(render_script_path)) or (
-                    os.path.getmtime(install_script_path) > os.path.getmtime(render_script_path)):
-                    import shutil
-                    shutil.copy2(install_script_path, render_script_path)
-                    logging.info(f'Copied masterRenderer.dsa to user scripts dir: {normalize_path_for_logging(render_script_path)}')
-            except Exception as e:
-                logging.error(f'Could not copy masterRenderer.dsa to user scripts dir: {e}')
+            
+            # Copy all three scripts to user directory
+            scripts_to_copy = [
+                ("masterRenderer.dsa", "masterRenderer.dsa"),
+                ("killIrayServer.vbs", "killIrayServer.vbs"),
+                ("startIrayServer.vbs", "startIrayServer.vbs")
+            ]
+            
+            import shutil
+            for install_filename, user_filename in scripts_to_copy:
+                install_script_path = os.path.join(install_dir, "scripts", install_filename)
+                user_script_path = os.path.join(user_scripts_dir, user_filename)
+                try:
+                    if (not os.path.exists(user_script_path)) or (
+                        os.path.exists(install_script_path) and 
+                        os.path.getmtime(install_script_path) > os.path.getmtime(user_script_path)):
+                        shutil.copy2(install_script_path, user_script_path)
+                        logging.info(f'Copied {install_filename} to user scripts dir: {normalize_path_for_logging(user_script_path)}')
+                except Exception as e:
+                    logging.error(f'Could not copy {install_filename} to user scripts dir: {e}')
+            
             # Path to masterTemplate.duf in appData
             template_path = os.path.join(get_app_data_path(), 'templates', 'masterTemplate.duf').replace("\\", "/")
         else:
