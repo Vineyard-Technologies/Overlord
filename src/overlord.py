@@ -100,8 +100,8 @@ VALIDATION_LIMITS = {
 
 # UI text constants
 UI_TEXT = {
-    "app_title": "Overlord", "options_header": "Options",
-    "output_details": "Output Details", "start_render": "Start Render",
+    "app_title": "Overlord", "options_header": "Options", "last_image_details": "Last Rendered Image Details",
+    "output_details": "Output Details", "copy_path": "Copy Path", "start_render": "Start Render",
     "stop_render": "Stop Render", "browse": "Browse", "clear": "Clear",
 }
 
@@ -3242,6 +3242,78 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
     theme_manager.register_widget(output_total_images, "label")
     # output_total_images.pack(anchor="nw", pady=(0, 5))
 
+    # --- Last Rendered Image Details Column ---
+    details_frame = tk.Frame(root, width=350)
+    details_frame.place(relx=0.26, rely=0.75, anchor="nw", width=350, height=200)
+    details_frame.pack_propagate(False)
+    theme_manager.register_widget(details_frame, "frame")
+
+    details_title = tk.Label(details_frame, text="Last Rendered Image Details", font=("Arial", 14, "bold"))
+    details_title.pack(anchor="nw", pady=(0, 10))
+    theme_manager.register_widget(details_title, "label")
+
+    # Show only the path (no "Path: " prefix) - make it clickable like a hyperlink
+    # Fixed height container to prevent shifting of elements below
+    path_container = tk.Frame(details_frame, height=60)  # Fixed height for ~4 lines
+    path_container.pack(anchor="nw", pady=(0, 5), fill="x")
+    path_container.pack_propagate(False)  # Prevent resizing based on content
+    theme_manager.register_widget(path_container, "frame")
+    
+    details_path = tk.Label(path_container, text="", font=("Consolas", 9), wraplength=330, justify="left", 
+                          cursor="hand2", anchor="nw")
+    details_path.pack(anchor="nw", fill="both", expand=True)
+    theme_manager.register_widget(details_path, "label")
+    
+    # Apply hyperlink styling based on theme
+    def apply_hyperlink_style():
+        if theme_manager.current_theme == "light":
+            details_path.config(fg="blue")
+        else:
+            details_path.config(fg="#5DADE2")  # Light blue for dark theme
+    
+    apply_hyperlink_style()
+    
+    # Register the hyperlink style function to be called when theme changes
+    theme_manager.add_theme_change_callback(apply_hyperlink_style)
+    
+    # Store the current path for the click handler
+    details_path.current_path = ""
+    
+    def on_path_click(event):
+        """Handle click on path label."""
+        if details_path.current_path:
+            open_file_location(details_path.current_path)
+    
+    details_path.bind("<Button-1>", on_path_click)
+    
+    # Function to update the path display
+    def update_details_path(path):
+        """Update the details path with processing and store the original path."""
+        processed_path = process_display_path(path)
+        # Only update if the processed path is not None (None means don't update)
+        if processed_path is not None:
+            details_path.config(text=processed_path)
+            details_path.current_path = processed_path  # Store for click handler
+
+    # Add a button to copy the path to clipboard
+    def copy_path_to_clipboard():
+        path = details_path.current_path
+        if path:
+            root.clipboard_clear()
+            root.clipboard_append(path)
+            root.update()  # Keeps clipboard after window closes
+
+    copy_btn = tk.Button(details_frame, text="Copy Path", command=copy_path_to_clipboard, font=("Arial", 9))
+    copy_btn.pack(anchor="nw", pady=(0, 8))
+    theme_manager.register_widget(copy_btn, "button")
+
+    details_size = tk.Label(details_frame, text="Size: ", font=("Arial", 10))
+    details_size.pack(anchor="nw", pady=(0, 5))
+    theme_manager.register_widget(details_size, "label")
+    details_dim = tk.Label(details_frame, text="Dimensions: ", font=("Arial", 10))
+    details_dim.pack(anchor="nw", pady=(0, 5))
+    theme_manager.register_widget(details_dim, "label")
+
     def calculate_average_render_time(output_dir, max_files=10):
         """Calculate average time between file creations based on the most recent files."""
         try:
@@ -3319,6 +3391,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             update_output_status.last_output_dir = ""
             update_output_status.last_file_count = -1
             update_output_status.last_total_size = -1
+            update_output_status.last_displayed_image = ""
             update_output_status.cleanup_counter = 0
         
         # Periodic cleanup of function attributes for long-running operation
@@ -3327,6 +3400,8 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             # Reset counters to prevent any potential accumulation
             update_output_status.last_file_count = -1
             update_output_status.last_total_size = -1
+            if update_output_status.last_displayed_image:
+                update_output_status.last_displayed_image = ""  # Clear to free string memory
             update_output_status.cleanup_counter = 0
             gc.collect()
             logging.debug("Performed periodic cleanup of update_output_status attributes")
@@ -3342,6 +3417,11 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             output_folder_size.config(text="Folder Size: N/A")
             output_file_count.config(text="Total Files: 0")
             progress_var.set(0)
+            
+            # Clear image details display
+            update_details_path("")  # Clear the path
+            details_dim.config(text="Dimensions: ")
+            details_size.config(text="Size: ")
             
             if path_changed:
                 logging.info("Output directory doesn't exist")
@@ -3441,6 +3521,47 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 # No initial total set
                 estimated_time_remaining_var.set("Est. time remaining:")
                 estimated_completion_at_var.set("Est. completion at:")
+            
+            # Find and update details for the newest image (PNG files) without displaying it
+            image_paths = find_newest_image(output_dir)
+            
+            current_image_path = ""
+            
+            for newest_img_path in image_paths:
+                if not os.path.exists(newest_img_path):
+                    continue
+                try:
+                    current_image_path = newest_img_path
+                    
+                    # Get image info without loading the full image for display
+                    with Image.open(newest_img_path) as img:
+                        width, height = img.size
+                    
+                    file_size = os.path.getsize(newest_img_path)
+                    display_path = newest_img_path.replace('\\', '/')
+                    update_details_path(display_path)
+                    details_dim.config(text=f"Dimensions: {width} x {height}")
+                    details_size.config(text=f"Size: {file_size/1024:.1f} KB")
+                    
+                    break
+                except Exception:
+                    continue
+            
+            # Check if displayed image changed
+            image_changed = update_output_status.last_displayed_image != current_image_path
+            if image_changed and current_image_path:
+                logging.info(f'Latest image details updated: {normalize_path_for_logging(current_image_path)}')
+                update_output_status.last_displayed_image = current_image_path
+            
+            # If no image was found, clear the details display
+            if not current_image_path:
+                update_details_path("")
+                details_dim.config(text="Dimensions: ")
+                details_size.config(text="Size: ")
+                
+                if image_changed:
+                    logging.info("No valid images found - cleared details display")
+                    update_output_status.last_displayed_image = ""
             
             # Force garbage collection
             gc.collect()
