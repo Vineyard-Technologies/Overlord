@@ -210,6 +210,8 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 
 			var sFinalName = sSubjectName + (bIsShadow ? '_shadow-' : '-')
 				+ sAnimationName + '_' + nOutputAngle + '-' + ('000' + nFrame).slice(-3);
+			// Only non-shadow gear uses the .exr file extension.
+			// Iray Server .exr files are actually PNGs with an .exr extension, at least for the gear shadows.
 			var sFinalNameWithSuffix = sFinalName + (bIsGear && !bIsShadow ? '-GearCanvas-Beauty.exr' : '-Beauty.png');
 			var sFinalNameInFolder = sFinalName + '/' + sFinalNameWithSuffix;
 

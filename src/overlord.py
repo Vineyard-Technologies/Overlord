@@ -449,6 +449,39 @@ def calculate_total_images(subject_filepath: str, animation_filepaths: list, gea
     logging.info(f"Total images to render: {total_images}")
     return total_images
 
+def detect_image_format(file_path: str) -> str:
+    """Detect the actual image format by reading the file header."""
+    try:
+        with open(file_path, 'rb') as f:
+            header = f.read(20)  # Read first 20 bytes
+            
+            # Check for PNG signature
+            if header.startswith(b'\x89PNG\r\n\x1a\n'):
+                return 'png'
+            
+            # Check for EXR signature
+            elif header.startswith(b'\x76\x2f\x31\x01'):
+                return 'exr'
+            
+            # Check for JPEG signature
+            elif header.startswith(b'\xff\xd8\xff'):
+                return 'jpeg'
+                
+            # Check for TIFF signature (little endian)
+            elif header.startswith(b'II*\x00'):
+                return 'tiff'
+                
+            # Check for TIFF signature (big endian)
+            elif header.startswith(b'MM\x00*'):
+                return 'tiff'
+                
+            # Default to unknown
+            return 'unknown'
+            
+    except Exception as e:
+        logging.warning(f"Could not detect format for {normalize_path_for_logging(file_path)}: {e}")
+        return 'unknown'
+
 def convert_to_webp(input_path: str, delete_original: bool = True) -> str:
     """Convert PNG or EXR image to lossless WebP format."""
     try:
@@ -470,15 +503,23 @@ def convert_to_webp(input_path: str, delete_original: bool = True) -> str:
                         logging.warning(f"Could not remove original file {normalize_path_for_logging(input_path)}: {e}")
                 return output_path
         
-        # Check if this is an EXR file
-        if input_path.lower().endswith('.exr'):
-            # Handle EXR files with OpenEXR
+        # Detect the actual file format
+        actual_format = detect_image_format(input_path)
+        
+        # Handle based on actual format, not just extension
+        if actual_format == 'exr':
+            # Handle real EXR files with OpenEXR
             img = convert_exr_to_pil(input_path)
             if img is None:
                 logging.error(f"Failed to convert EXR file {normalize_path_for_logging(input_path)}")
                 return input_path
-        else:
-            # Handle other formats with PIL
+        elif actual_format in ['png', 'jpeg', 'tiff']:
+            # Handle standard image formats with PIL
+            # Log format mismatch if extension doesn't match actual format
+            expected_format = 'exr' if input_path.lower().endswith('.exr') else 'other'
+            if expected_format == 'exr' and actual_format != 'exr':
+                logging.warning(f"File {normalize_path_for_logging(input_path)} has .exr extension but is actually a {actual_format.upper()} file")
+            
             with Image.open(input_path) as img:
                 # Convert to RGB if necessary
                 if img.mode not in ('RGB', 'RGBA'):
@@ -491,6 +532,25 @@ def convert_to_webp(input_path: str, delete_original: bool = True) -> str:
                 
                 # Create a copy to avoid keeping the file handle open
                 img = img.copy()
+        else:
+            # Handle unknown formats or fallback to PIL
+            logging.warning(f"Unknown image format detected for {normalize_path_for_logging(input_path)}, attempting PIL fallback")
+            try:
+                with Image.open(input_path) as img:
+                    # Convert to RGB if necessary
+                    if img.mode not in ('RGB', 'RGBA'):
+                        if img.mode == 'L':  # Grayscale
+                            img = img.convert('RGB')
+                        elif img.mode == 'P':  # Palette
+                            img = img.convert('RGB')
+                        else:
+                            img = img.convert('RGB')
+                    
+                    # Create a copy to avoid keeping the file handle open
+                    img = img.copy()
+            except Exception as e:
+                logging.error(f"Failed to open unknown format file {normalize_path_for_logging(input_path)}: {e}")
+                return input_path
         
         # Save as lossless WebP
         img.save(output_path, 'WEBP', lossless=True, quality=100)
