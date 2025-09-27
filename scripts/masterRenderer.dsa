@@ -66,7 +66,7 @@ function restartIrayServer() {
 
 	// I don't know of a way to tell if Iray Server is running,
 	// so we'll just try to kill it and ignore any errors.
-	App.log('Killing Iray Server...');
+	App.log('Killing Iray Server with ' + sKillIrayServerScript);
 	App.showURL(sKillIrayServerScript);
 
 	oCacheDbFile = new DzFileInfo(sCacheFolderPath + '/cache.db');
@@ -85,7 +85,7 @@ function restartIrayServer() {
 		App.log('Successfully removed cache.db');
 	}
 
-	App.log('Starting Iray Server...');
+	App.log('Starting Iray Server with ' + sStartIrayServerScript);
 	App.showURL(sStartIrayServerScript);
 }
 // Check if a file exists and isn't 0 bytes
