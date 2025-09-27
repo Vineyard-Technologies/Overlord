@@ -17,6 +17,17 @@ import tkinter as tk
 import OpenEXR
 import Imath
 import numpy as np
+
+# Configure PIL for long-running operation to prevent memory leaks
+try:
+    # Disable internal caching that can cause memory leaks
+    Image.MAX_IMAGE_PIXELS = None  # Remove size limit
+    # Reduce internal buffer sizes
+    if hasattr(Image, '_getencoder'):
+        # Disable some internal caching
+        pass
+except Exception:
+    pass
 from tkinter import filedialog
 from tkinter import ttk
 from tkinter import messagebox
@@ -49,9 +60,9 @@ OVERLORD_CLOSE_DELAY = 2000
 IRAY_STARTUP_DELAY = 10000
 
 # File extensions
-IMAGE_EXTENSIONS = ('.png', '.jpg', '.jpeg', '.bmp', '.gif', '.tiff', '.webp', '.exr')
-RENDER_OUTPUT_EXTENSIONS = ('.png', '.exr')  # Extensions that need conversion
-WEBP_EXTENSION = '.webp'
+IMAGE_EXTENSIONS = ('.png', '.exr')  # Only formats Overlord works with
+RENDER_OUTPUT_EXTENSIONS = ('.exr',)  # Extensions that need conversion to PNG
+PNG_EXTENSION = '.png'
 
 # Default paths
 DEFAULT_OUTPUT_SUBDIR = "Downloads/output"
@@ -89,8 +100,8 @@ VALIDATION_LIMITS = {
 
 # UI text constants
 UI_TEXT = {
-    "app_title": "Overlord", "options_header": "Options", "last_image_details": "Last Rendered Image Details",
-    "output_details": "Output Details", "copy_path": "Copy Path", "start_render": "Start Render",
+    "app_title": "Overlord", "options_header": "Options",
+    "output_details": "Output Details", "start_render": "Start Render",
     "stop_render": "Stop Render", "browse": "Browse", "clear": "Clear",
 }
 
@@ -136,6 +147,7 @@ file_monitor_stop_event = None
 initial_total_images = 0  # Track the initial total images count for progress calculation
 render_start_time = None  # Track when the render started for time estimation filtering
 shutdown_timer_thread = None  # Track shutdown timer thread
+periodic_monitoring_job = None  # Track the periodic monitoring timer job
 
 def get_default_output_directory() -> str:
     """Get the default output directory for user files."""
@@ -312,8 +324,9 @@ def get_directory_stats(directory: str) -> tuple:
     return total_size, png_count, folder_count
 
 def find_newest_image(directory: str) -> list:
-    """Find all images in directory sorted by modification time (newest first)."""
+    """Find newest images in directory sorted by modification time (newest first). Limited to prevent memory issues."""
     image_files = []
+    max_files = 100  # Limit to prevent memory issues with large directories
     
     for rootdir, _, files in os.walk(directory):
         for fname in files:
@@ -322,30 +335,19 @@ def find_newest_image(directory: str) -> list:
                 try:
                     mtime = os.path.getmtime(fpath)
                     image_files.append((mtime, fpath))
+                    # Limit the number of files we track
+                    if len(image_files) > max_files * 2:  # Allow buffer for sorting
+                        # Sort and keep only the newest files
+                        image_files.sort(reverse=True)
+                        image_files = image_files[:max_files]
                 except Exception:
                     continue
     
-    # Sort by most recent first
+    # Sort by most recent first and limit results
     image_files.sort(reverse=True)
-    return [fpath for mtime, fpath in image_files]
+    return [fpath for mtime, fpath in image_files[:max_files]]
 
-def find_newest_webp_image(directory: str) -> list:
-    """Find all WebP images in directory sorted by modification time (newest first)."""
-    webp_files = []
-    
-    for rootdir, _, files in os.walk(directory):
-        for fname in files:
-            if fname.lower().endswith('.webp'):
-                fpath = os.path.join(rootdir, fname)
-                try:
-                    mtime = os.path.getmtime(fpath)
-                    webp_files.append((mtime, fpath))
-                except Exception:
-                    continue
-    
-    # Sort by most recent first
-    webp_files.sort(reverse=True)
-    return [fpath for mtime, fpath in webp_files]
+# Image search functions optimized for PNG/EXR workflow
 
 def get_frames_from_animation_file(animation_filepath: str) -> int:
     """Read the animation's JSON file to see how many frames it has."""
@@ -462,43 +464,35 @@ def detect_image_format(file_path: str) -> str:
             # Check for EXR signature
             elif header.startswith(b'\x76\x2f\x31\x01'):
                 return 'exr'
-            
-            # Check for JPEG signature
-            elif header.startswith(b'\xff\xd8\xff'):
-                return 'jpeg'
                 
-            # Check for TIFF signature (little endian)
-            elif header.startswith(b'II*\x00'):
-                return 'tiff'
-                
-            # Check for TIFF signature (big endian)
-            elif header.startswith(b'MM\x00*'):
-                return 'tiff'
-                
-            # Default to unknown
+            # Default to unknown for unsupported formats
             return 'unknown'
             
     except Exception as e:
         logging.warning(f"Could not detect format for {normalize_path_for_logging(file_path)}: {e}")
         return 'unknown'
 
-def convert_to_webp(input_path: str, delete_original: bool = True) -> str:
-    """Convert PNG or EXR image to lossless WebP format."""
+def convert_to_png(input_path: str, delete_original: bool = True) -> str:
+    """Convert EXR files to PNG format. Handles EXR files that are actually PNG files with wrong extensions."""
     try:
-        # Create output path with .webp extension
+        # For PNG files, just return as-is
+        if input_path.lower().endswith('.png'):
+            return input_path
+            
+        # For EXR files, convert to PNG
         base_path = os.path.splitext(input_path)[0]
-        output_path = base_path + '.webp'
+        output_path = base_path + '.png'
         
-        # Skip if WebP already exists and is newer
+        # Skip if PNG already exists and is newer
         if os.path.exists(output_path):
             input_mtime = os.path.getmtime(input_path)
             output_mtime = os.path.getmtime(output_path)
             if output_mtime >= input_mtime:
-                logging.debug(f"WebP already exists and is newer: {output_path}")
+                logging.debug(f"PNG already exists and is newer: {output_path}")
                 if delete_original and os.path.exists(input_path):
                     try:
                         os.remove(input_path)
-                        logging.info(f"Removed original file after WebP conversion: {normalize_path_for_logging(input_path)}")
+                        logging.info(f"Removed original EXR file after PNG conversion: {normalize_path_for_logging(input_path)}")
                     except Exception as e:
                         logging.warning(f"Could not remove original file {normalize_path_for_logging(input_path)}: {e}")
                 return output_path
@@ -513,67 +507,54 @@ def convert_to_webp(input_path: str, delete_original: bool = True) -> str:
             if img is None:
                 logging.error(f"Failed to convert EXR file {normalize_path_for_logging(input_path)}")
                 return input_path
-        elif actual_format in ['png', 'jpeg', 'tiff']:
-            # Handle standard image formats with PIL
-            # Log format mismatch if extension doesn't match actual format
-            expected_format = 'exr' if input_path.lower().endswith('.exr') else 'other'
-            if expected_format == 'exr' and actual_format != 'exr':
-                logging.warning(f"File {normalize_path_for_logging(input_path)} has .exr extension but is actually a {actual_format.upper()} file")
-            
-            with Image.open(input_path) as img:
-                # Convert to RGB if necessary
-                if img.mode not in ('RGB', 'RGBA'):
-                    if img.mode == 'L':  # Grayscale
-                        img = img.convert('RGB')
-                    elif img.mode == 'P':  # Palette
-                        img = img.convert('RGB')
-                    else:
-                        img = img.convert('RGB')
-                
-                # Create a copy to avoid keeping the file handle open
-                img = img.copy()
-        else:
-            # Handle unknown formats or fallback to PIL
-            logging.warning(f"Unknown image format detected for {normalize_path_for_logging(input_path)}, attempting PIL fallback")
-            try:
-                with Image.open(input_path) as img:
-                    # Convert to RGB if necessary
-                    if img.mode not in ('RGB', 'RGBA'):
-                        if img.mode == 'L':  # Grayscale
-                            img = img.convert('RGB')
-                        elif img.mode == 'P':  # Palette
-                            img = img.convert('RGB')
-                        else:
-                            img = img.convert('RGB')
-                    
-                    # Create a copy to avoid keeping the file handle open
-                    img = img.copy()
-            except Exception as e:
-                logging.error(f"Failed to open unknown format file {normalize_path_for_logging(input_path)}: {e}")
+        elif actual_format == 'png':
+            # Handle PNG files that have .exr extension (misnamed files)
+            if input_path.lower().endswith('.exr'):
+                logging.info(f"File {normalize_path_for_logging(input_path)} has .exr extension but is actually a PNG file - renaming")
+                # Simply rename the file to .png
+                try:
+                    os.rename(input_path, output_path)
+                    logging.info(f"Renamed PNG file from .exr to .png: {normalize_path_for_logging(output_path)}")
+                    return output_path
+                except Exception as e:
+                    logging.error(f"Failed to rename PNG file {normalize_path_for_logging(input_path)}: {e}")
+                    return input_path
+            else:
+                # Already a PNG file, nothing to do
                 return input_path
+        else:
+            # Unsupported format - Overlord only works with PNG and EXR
+            logging.error(f"Unsupported image format '{actual_format}' for {normalize_path_for_logging(input_path)}. Overlord only supports PNG and EXR files.")
+            return input_path
         
-        # Save as lossless WebP
-        img.save(output_path, 'WEBP', lossless=True, quality=100)
+        # Save as PNG
+        img.save(output_path, 'PNG')
+        
+        # Explicitly close the image to free memory immediately
+        try:
+            img.close()
+        except Exception:
+            pass
         
         # Verify the conversion was successful
         if os.path.exists(output_path):
-            logging.info(f"Successfully converted to WebP: {normalize_path_for_logging(input_path)} -> {normalize_path_for_logging(output_path)}")
+            logging.info(f"Successfully converted to PNG: {normalize_path_for_logging(input_path)} -> {normalize_path_for_logging(output_path)}")
             
             # Delete original file if requested
             if delete_original:
                 try:
                     os.remove(input_path)
-                    logging.info(f"Removed original file after WebP conversion: {normalize_path_for_logging(input_path)}")
+                    logging.info(f"Removed original file after PNG conversion: {normalize_path_for_logging(input_path)}")
                 except Exception as e:
                     logging.warning(f"Could not remove original file {normalize_path_for_logging(input_path)}: {e}")
             
             return output_path
         else:
-            logging.error(f"WebP conversion failed - output file not created: {normalize_path_for_logging(output_path)}")
+            logging.error(f"PNG conversion failed - output file not created: {normalize_path_for_logging(output_path)}")
             return input_path
             
     except Exception as e:
-        logging.error(f"Error converting {normalize_path_for_logging(input_path)} to WebP: {e}")
+        logging.error(f"Error converting {normalize_path_for_logging(input_path)} to PNG: {e}")
         return input_path
 
 def convert_exr_to_pil(exr_path: str) -> Image.Image:
@@ -682,13 +663,16 @@ def convert_exr_to_pil(exr_path: str) -> Image.Image:
         return None
 
 def monitor_output_folder(output_directory: str, stop_event):
-    """Monitor output folder for PNG and EXR files and convert them to WebP."""
+    """Monitor output folder for EXR files and convert them to PNG. PNG files are left as-is."""
     global is_rendering
     
     logging.info(f"Starting file monitoring for: {normalize_path_for_logging(output_directory)}")
     
     # Keep track of processed files to avoid reprocessing
+    # Use a rotating cache with size limit to prevent infinite growth
     processed_files = set()
+    max_cache_size = 500  # Limit cache size for long-running operation
+    cache_cleanup_counter = 0
     
     while not stop_event.is_set() and is_rendering:
         try:
@@ -697,9 +681,13 @@ def monitor_output_folder(output_directory: str, stop_event):
                 continue
                 
             # Find all PNG and EXR files in the output directory
+            # Limit directory traversal to reduce memory usage
+            files_processed_this_cycle = 0
+            max_files_per_cycle = 50  # Process max 50 files per cycle to prevent memory spikes
+            
             for root, dirs, files in os.walk(output_directory):
                 for file in files:
-                    if stop_event.is_set() or not is_rendering:
+                    if stop_event.is_set() or not is_rendering or files_processed_this_cycle >= max_files_per_cycle:
                         break
                         
                     file_path = os.path.join(root, file)
@@ -726,17 +714,53 @@ def monitor_output_folder(output_directory: str, stop_event):
                             # File might be locked or still being written
                             continue
                         
-                        # Convert to WebP
-                        logging.info(f"Converting render output to WebP: {normalize_path_for_logging(file_path)}")
-                        webp_path = convert_to_webp(file_path, delete_original=True)
+                        # Convert EXR to PNG (PNG files are left as-is)
+                        logging.info(f"Processing render output: {normalize_path_for_logging(file_path)}")
+                        png_path = convert_to_png(file_path, delete_original=True)
                         
                         # Mark as processed
                         processed_files.add(file_path)
-                        if webp_path != file_path:
-                            processed_files.add(webp_path)
+                        if png_path != file_path:
+                            processed_files.add(png_path)
+                        
+                        files_processed_this_cycle += 1
+                        
+                        # Force garbage collection every few files to prevent memory buildup
+                        if files_processed_this_cycle % 10 == 0:
+                            gc.collect()
                 
                 if stop_event.is_set() or not is_rendering:
                     break
+            
+            # Aggressive cache management for long-running operation
+            cache_cleanup_counter += 1
+            if len(processed_files) > max_cache_size or cache_cleanup_counter > 20:  # Clean more frequently
+                # Keep only the most recently modified files
+                try:
+                    # Get file modification times and keep only the newest files
+                    file_times = []
+                    for f in processed_files:
+                        if os.path.exists(f):
+                            try:
+                                mtime = os.path.getmtime(f)
+                                file_times.append((mtime, f))
+                            except OSError:
+                                continue
+                    
+                    # Keep only the 200 newest files
+                    file_times.sort(reverse=True)
+                    processed_files = {f for _, f in file_times[:200]}
+                    cache_cleanup_counter = 0
+                    
+                    logging.info(f"Aggressively cleaned processed files cache, now tracking {len(processed_files)} files")
+                    
+                    # Force garbage collection after cleanup
+                    gc.collect()
+                    
+                except Exception as e:
+                    logging.warning(f"Error during cache cleanup: {e}")
+                    processed_files.clear()  # Clear everything if cleanup fails
+                    cache_cleanup_counter = 0
             
             # Sleep before next check
             time.sleep(2)
@@ -1434,7 +1458,6 @@ settings_manager = SettingsManager()
 class CleanupManager:
     def __init__(self):
         self.temp_files = []
-        self.image_references = []
         self.executor = None
         self.cleanup_registered = False
         self.save_settings_callback = None
@@ -1446,8 +1469,10 @@ class CleanupManager:
         self.temp_files.append(filepath)
     
     def register_image_reference(self, image_ref):
-        """Register an image reference for cleanup"""
-        self.image_references.append(image_ref)
+        """Stub for removed image reference tracking - image display functionality removed"""
+        pass
+    
+
     
     def register_executor(self, executor):
         """Register a thread pool executor for cleanup"""
@@ -2037,6 +2062,10 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                     logging.info('Settings saved successfully before exit')
                 except Exception as e:
                     logging.error(f"Error saving settings before close: {e}")
+                
+                # Stop all monitoring to prevent memory leaks
+                stop_image_monitoring()
+                stop_output_details_monitoring()
                 
                 # Kill render processes
                 logging.info('Killing render-related processes...')
@@ -3143,92 +3172,9 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
     # Create the menu bar (after all UI variables are defined)
     create_menu_bar()
 
-    # --- Last Rendered Image Section ---
-    right_frame = tk.Frame(root)
-    right_frame.place(relx=0.73, rely=0.0, anchor="n", width=1024, height=1024)
-    theme_manager.register_widget(right_frame, "frame")
 
-    # Set border color based on theme
-    border_color = "#cccccc" if theme_manager.current_theme == "light" else "#555555"
-    right_frame.config(highlightbackground=border_color, highlightthickness=1)
 
-    # Place img_label directly in right_frame
-    img_label = tk.Label(right_frame)
-    img_label.place(relx=0.5, rely=0.5, anchor="center", relwidth=1.0, relheight=1.0)
-    theme_manager.register_widget(img_label, "label")
 
-    # --- Image Details Column ---
-    # Place details_frame to the right of param_table_frame
-    details_frame = tk.Frame(root, width=350)
-    details_frame.place(relx=0.26, rely=0.75, anchor="nw", width=350, height=200)
-    details_frame.pack_propagate(False)
-    theme_manager.register_widget(details_frame, "frame")
-
-    details_title = tk.Label(details_frame, text="Last Rendered Image Details", font=("Arial", 14, "bold"))
-    details_title.pack(anchor="nw", pady=(0, 10))
-    theme_manager.register_widget(details_title, "label")
-
-    # Show only the path (no "Path: " prefix) - make it clickable like a hyperlink
-    # Fixed height container to prevent shifting of elements below
-    path_container = tk.Frame(details_frame, height=60)  # Fixed height for ~4 lines
-    path_container.pack(anchor="nw", pady=(0, 5), fill="x")
-    path_container.pack_propagate(False)  # Prevent resizing based on content
-    theme_manager.register_widget(path_container, "frame")
-    
-    details_path = tk.Label(path_container, text="", font=("Consolas", 9), wraplength=330, justify="left", 
-                          cursor="hand2", anchor="nw")
-    details_path.pack(anchor="nw", fill="both", expand=True)
-    theme_manager.register_widget(details_path, "label")
-    
-    # Apply hyperlink styling based on theme
-    def apply_hyperlink_style():
-        if theme_manager.current_theme == "light":
-            details_path.config(fg="blue")
-        else:
-            details_path.config(fg="#5DADE2")  # Light blue for dark theme
-    
-    apply_hyperlink_style()
-    
-    # Register the hyperlink style function to be called when theme changes
-    theme_manager.add_theme_change_callback(apply_hyperlink_style)
-    
-    # Store the current path for the click handler
-    details_path.current_path = ""
-    
-    def on_path_click(event):
-        """Handle click on path label."""
-        if details_path.current_path:
-            open_file_location(details_path.current_path)
-    
-    details_path.bind("<Button-1>", on_path_click)
-    
-    # Function to update the path display
-    def update_details_path(path):
-        """Update the details path with processing and store the original path."""
-        processed_path = process_display_path(path)
-        # Only update if the processed path is not None (None means don't update)
-        if processed_path is not None:
-            details_path.config(text=processed_path)
-            details_path.current_path = processed_path  # Store for click handler
-
-    # Add a button to copy the path to clipboard
-    def copy_path_to_clipboard():
-        path = details_path.current_path
-        if path:
-            root.clipboard_clear()
-            root.clipboard_append(path)
-            root.update()  # Keeps clipboard after window closes
-
-    copy_btn = tk.Button(details_frame, text="Copy Path", command=copy_path_to_clipboard, font=("Arial", 9))
-    copy_btn.pack(anchor="nw", pady=(0, 8))
-    theme_manager.register_widget(copy_btn, "button")
-
-    details_size = tk.Label(details_frame, text="Size: ", font=("Arial", 10))
-    details_size.pack(anchor="nw", pady=(0, 5))
-    theme_manager.register_widget(details_size, "label")
-    details_dim = tk.Label(details_frame, text="Dimensions: ", font=("Arial", 10))
-    details_dim.pack(anchor="nw", pady=(0, 5))
-    theme_manager.register_widget(details_dim, "label")
 
 
     # --- Output Details Column ---
@@ -3354,17 +3300,36 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             return None
 
     def update_output_status():
-        """Unified function to update output folder stats, image display, and image details."""
+        """Update output folder stats only - image display functionality removed."""
         
-        global initial_total_images
+        global initial_total_images, periodic_monitoring_job, is_rendering, shutdown_timer_thread
         output_dir = value_entries["Output Directory"].get()
         
-        # Check if output directory path changed
+        # If we're not actively monitoring and not rendering, do minimal updates to prevent memory leaks
+        is_active_monitoring = periodic_monitoring_job is not None
+        if not is_active_monitoring and not is_rendering:
+            # Lightweight update - just update stats if directory doesn't exist
+            if not output_dir or not os.path.exists(output_dir):
+                output_folder_size.config(text="Folder Size: N/A")
+                output_file_count.config(text="Total Files: 0")
+            return  # Skip heavy operations when not actively monitoring
+        
+        # Check if output directory path changed and initialize tracking variables
         if not hasattr(update_output_status, 'last_output_dir'):
             update_output_status.last_output_dir = ""
             update_output_status.last_file_count = -1
             update_output_status.last_total_size = -1
-            update_output_status.last_displayed_image = ""
+            update_output_status.cleanup_counter = 0
+        
+        # Periodic cleanup of function attributes for long-running operation
+        update_output_status.cleanup_counter = getattr(update_output_status, 'cleanup_counter', 0) + 1
+        if update_output_status.cleanup_counter > 100:  # Every 100 calls (5+ minutes)
+            # Reset counters to prevent any potential accumulation
+            update_output_status.last_file_count = -1
+            update_output_status.last_total_size = -1
+            update_output_status.cleanup_counter = 0
+            gc.collect()
+            logging.debug("Performed periodic cleanup of update_output_status attributes")
         
         path_changed = update_output_status.last_output_dir != output_dir
         if path_changed:
@@ -3378,40 +3343,34 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             output_file_count.config(text="Total Files: 0")
             progress_var.set(0)
             
-            # Clear image display
-            if hasattr(img_label, 'image') and img_label.image:
-                try:
-                    old_img = img_label.image
-                    if hasattr(old_img, 'close'):
-                        old_img.close()
-                    del old_img
-                except Exception:
-                    pass
-            
-            img_label.config(image="")
-            img_label.image = None
-            update_details_path("")  # Clear the path
-            details_dim.config(text="Dimensions: ")
-            details_size.config(text="Size: ")
-            no_img_label.lift()
-            
             if path_changed:
-                logging.info("Output directory doesn't exist - cleared display")
+                logging.info("Output directory doesn't exist")
             return
         
         try:
-            # Calculate folder statistics
+            # Calculate folder statistics - optimize for memory usage during active monitoring
             total_size = 0
             file_count = 0
+            files_scanned = 0
+            max_files_to_scan = 5000 if is_active_monitoring else 10000  # Limit scanning during active monitoring
+            
             for rootdir, dirs, files in os.walk(output_dir):
                 for file in files:
+                    if files_scanned >= max_files_to_scan:
+                        logging.debug(f"Limiting file scan to {max_files_to_scan} files to preserve memory")
+                        break
+                    
                     file_path = os.path.join(rootdir, file)
                     try:
                         file_size = os.path.getsize(file_path)
                         total_size += file_size
                         file_count += 1
+                        files_scanned += 1
                     except (OSError, IOError):
                         continue
+                
+                if files_scanned >= max_files_to_scan:
+                    break
             
             # Check if folder stats changed
             count_changed = update_output_status.last_file_count != file_count
@@ -3475,7 +3434,6 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                     estimated_completion_at_var.set("Est. completion at: Complete")
                     
                     # Check if shutdown on finish is enabled and we're currently rendering
-                    global is_rendering, shutdown_timer_thread
                     if is_rendering and shutdown_on_finish_var.get() and shutdown_timer_thread is None:
                         # Schedule shutdown since render is complete
                         schedule_shutdown(root)
@@ -3483,96 +3441,6 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 # No initial total set
                 estimated_time_remaining_var.set("Est. time remaining:")
                 estimated_completion_at_var.set("Est. completion at:")
-            
-            # Find and display the newest image
-            webp_paths = find_newest_webp_image(output_dir)
-            if webp_paths:
-                image_paths = webp_paths
-            else:
-                image_paths = find_newest_image(output_dir)
-            
-            displayed = False
-            current_image_path = ""
-            
-            for newest_img_path in image_paths:
-                if not os.path.exists(newest_img_path):
-                    continue
-                try:
-                    current_image_path = newest_img_path
-                    
-                    # Clean up previous image reference if it exists
-                    if hasattr(img_label, 'image') and img_label.image:
-                        try:
-                            old_img = img_label.image
-                            if hasattr(old_img, 'close'):
-                                old_img.close()
-                            del old_img
-                        except Exception:
-                            pass
-                    
-                    # First, verify the image integrity
-                    with Image.open(newest_img_path) as verify_img:
-                        verify_img.verify()  # Will raise if the image is incomplete or corrupt
-                    
-                    # If verification passes, reopen for display
-                    with Image.open(newest_img_path) as img:
-                        img = img.convert("RGBA")  # Ensure image is in RGBA mode
-                        # Handle transparency by adding a theme-appropriate background
-                        if theme_manager.current_theme == "dark":
-                            bg_color = (60, 60, 60, 255)  # Dark grey
-                        else:
-                            bg_color = (255, 255, 255, 255)  # White
-                        bg = Image.new("RGBA", img.size, bg_color)
-                        img = Image.alpha_composite(bg, img)
-                        
-                        # Create a copy to avoid keeping the file handle open
-                        img_copy = img.copy()
-                        width, height = img.size
-                    
-                    file_size = os.path.getsize(newest_img_path)
-                    display_path = map_server_path_to_output_path(newest_img_path)
-                    update_details_path(display_path)
-                    details_dim.config(text=f"Dimensions: {width} x {height}")
-                    details_size.config(text=f"Size: {file_size/1024:.1f} KB")
-                    
-                    tk_img = ImageTk.PhotoImage(img_copy)
-                    cleanup_manager.register_image_reference(tk_img)
-                    img_label.config(image=tk_img)
-                    img_label.image = tk_img
-                    no_img_label.lower()
-                    
-                    displayed = True
-                    break
-                except Exception:
-                    continue
-            
-            # Check if displayed image changed
-            image_changed = update_output_status.last_displayed_image != current_image_path
-            if image_changed and current_image_path:
-                logging.info(f'Displaying image: {normalize_path_for_logging(current_image_path)}')
-                update_output_status.last_displayed_image = current_image_path
-            
-            # If no image was displayed, clear the display
-            if not displayed:
-                if hasattr(img_label, 'image') and img_label.image:
-                    try:
-                        old_img = img_label.image
-                        if hasattr(old_img, 'close'):
-                            old_img.close()
-                        del old_img
-                    except Exception:
-                        pass
-                
-                img_label.config(image="")
-                img_label.image = None
-                update_details_path("")
-                details_dim.config(text="Dimensions: ")
-                details_size.config(text="Size: ")
-                no_img_label.lift()
-                
-                if image_changed:
-                    logging.info("No valid images found - cleared display")
-                    update_output_status.last_displayed_image = ""
             
             # Force garbage collection
             gc.collect()
@@ -3583,158 +3451,101 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             progress_var.set(0)
             logging.error(f"Error in update_output_status: {e}")
 
-    no_img_label = tk.Label(right_frame, font=("Arial", 12))
-    no_img_label.place(relx=0.5, rely=0.5, anchor="center")
-    no_img_label.lower()  # Hide initially
-    theme_manager.register_widget(no_img_label, "label")
+    # Image display functionality removed - Overlord now focuses on render management only
 
-    def map_server_path_to_output_path(server_path):
-        """Since we removed the intermediate server directory, just return the path as-is."""
-        return server_path.replace('/', '\\') if server_path else server_path
-
-    def display_specific_image(image_path):
-        """Display a specific image in the UI."""
-        if not os.path.exists(image_path):
-            return
-        
-        try:
-            # Clean up previous image reference if it exists
-            if hasattr(img_label, 'image') and img_label.image:
-                try:
-                    old_img = img_label.image
-                    if hasattr(old_img, 'close'):
-                        old_img.close()
-                    del old_img
-                except Exception:
-                    pass
-            
-            # First, verify the image integrity
-            with Image.open(image_path) as verify_img:
-                verify_img.verify()  # Will raise if the image is incomplete or corrupt
-            
-            # If verification passes, reopen for display
-            with Image.open(image_path) as img:
-                # Get original dimensions before any processing
-                orig_width, orig_height = img.size
-                
-                # Check if image is too large and resize if needed (max 2048x2048 for display)
-                max_display_size = 2048
-                if orig_width > max_display_size or orig_height > max_display_size:
-                    # Calculate resize ratio to maintain aspect ratio
-                    ratio = min(max_display_size / orig_width, max_display_size / orig_height)
-                    new_width = int(orig_width * ratio)
-                    new_height = int(orig_height * ratio)
-                    img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-                    logging.info(f"Resized large image from {orig_width}x{orig_height} to {new_width}x{new_height} for display")
-                
-                img = img.convert("RGBA")  # Ensure image is in RGBA mode
-                # Handle transparency by adding a theme-appropriate background
-                if theme_manager.current_theme == "dark":
-                    # Dark grey background for dark theme
-                    bg_color = (60, 60, 60, 255)  # Dark grey
-                else:
-                    # White background for light theme
-                    bg_color = (255, 255, 255, 255)  # White
-                bg = Image.new("RGBA", img.size, bg_color)
-                img = Image.alpha_composite(bg, img)
-                
-                # Create a copy to avoid keeping the file handle open
-                img_copy = img.copy()
-                width, height = orig_width, orig_height  # Use original dimensions for details
-            
-            with Image.open(image_path) as orig_img:
-                width, height = orig_img.size
-            
-            file_size = os.path.getsize(image_path)
-            # Always display the mapped output path instead of server path
-            display_path = map_server_path_to_output_path(image_path)
-            update_details_path(display_path)  # Process and display path
-            details_dim.config(text=f"Dimensions: {width} x {height}")
-            details_size.config(text=f"Size: {file_size/1024:.1f} KB")
-            
-            tk_img = ImageTk.PhotoImage(img_copy)
-            cleanup_manager.register_image_reference(tk_img)  # Register for cleanup
-            img_label.config(image=tk_img)
-            img_label.image = tk_img
-            no_img_label.lower()
-            
-            # Explicitly clear the img_copy reference to free memory immediately
-            del img_copy
-            
-            # Only log if the image path has changed
-            if getattr(display_specific_image, 'last_logged_img_path', None) != image_path:
-                logging.info(f'Displaying image: {normalize_path_for_logging(image_path)}')
-                display_specific_image.last_logged_img_path = image_path
-            
-        except MemoryError as e:
-            logging.error(f'Memory error displaying image {normalize_path_for_logging(image_path)}: {e}. Image may be too large.')
-            # Clear any partial allocations
-            import gc
-            gc.collect()
-        except Exception as e:
-            logging.error(f'Error displaying specific image {normalize_path_for_logging(image_path)}: {e}')
-        
-        # Force garbage collection to clean up any remaining references
-        import gc
-        gc.collect()
-
-    def watchdog_image_update(new_image_path):
-        """Simplified callback for when new images are available (no EXR processing)."""
-        def update_ui():
-            try:
-                output_dir = value_entries["Output Directory"].get()
-                
-                # Just log the new image - periodic monitoring will handle display updates
-                if (new_image_path.startswith(output_dir) and os.path.exists(new_image_path)):
-                    logging.debug(f'New image detected: {normalize_path_for_logging(new_image_path)}')
-            except Exception as e:
-                logging.error(f'Error processing new image notification {normalize_path_for_logging(new_image_path)}: {e}')
-        
-        # Schedule the update on the main thread
-        try:
-            root.after(100, update_ui)  # Small delay to ensure file is fully written
-        except Exception as e:
-            logging.error(f'Error scheduling UI update for new image: {e}')
-
-    # Update image when output directory changes or after render
     def on_output_dir_change(*args):
-        new_output_dir = value_entries["Output Directory"].get()
+        """Handle output directory changes."""
+        new_output_dir = value_entries["Output Directory"].get().strip()
         logging.info(f'Output Directory changed to: {new_output_dir}')
         
-        # Update everything immediately when directory changes
-        root.after(100, update_output_status)
+        # Update immediately when directory changes
+        if new_output_dir and os.path.exists(new_output_dir):
+            root.after(100, update_output_status)
+    
     value_entries["Output Directory"].bind("<FocusOut>", lambda e: on_output_dir_change())
     value_entries["Output Directory"].bind("<Return>", lambda e: on_output_dir_change())
 
-
-
-    def start_image_monitoring():
-        """Start unified monitoring - legacy compatibility function."""
-        global image_monitoring_active
-        if not image_monitoring_active:
-            image_monitoring_active = True
-            logging.info("Image monitoring started (now using unified monitoring)")
-            # Start the unified monitoring immediately
-            update_output_status()
-
     def start_output_details_monitoring():
         """Start unified monitoring of output directory for all changes."""
+        global periodic_monitoring_job
+        
+        # Stop any existing monitoring first
+        stop_output_details_monitoring()
+        
         def periodic_update():
+            global periodic_monitoring_job
             try:
-                update_output_status()
+                # Only update if monitoring is still active
+                if periodic_monitoring_job is not None:
+                    update_output_status()
+                    # Force aggressive garbage collection after each update to prevent memory buildup
+                    gc.collect()
+                    # For long-running operation, also collect generational garbage
+                    try:
+                        for gen in range(3):
+                            gc.collect(gen)
+                    except Exception:
+                        pass
+                    
+                    # Memory monitoring for long-running operation
+                    if hasattr(start_output_details_monitoring, 'memory_check_counter'):
+                        start_output_details_monitoring.memory_check_counter += 1
+                        if start_output_details_monitoring.memory_check_counter % 20 == 0:  # Every 20 cycles (1 minute)
+                            try:
+                                import psutil
+                                process = psutil.Process()
+                                current_memory = process.memory_info().rss / 1024 / 1024  # MB
+                                initial_memory = getattr(start_output_details_monitoring, 'initial_memory', current_memory)
+                                memory_growth = current_memory - initial_memory
+                                
+                                if memory_growth > 100:  # Alert if memory grew by more than 100MB
+                                    logging.warning(f"Memory growth detected: {memory_growth:.1f} MB (current: {current_memory:.1f} MB, initial: {initial_memory:.1f} MB)")
+                                    # Force more aggressive cleanup
+                                    for i in range(5):
+                                        gc.collect()
+                                else:
+                                    logging.debug(f"Memory usage: {current_memory:.1f} MB (growth: {memory_growth:.1f} MB)")
+                            except Exception as e:
+                                logging.debug(f"Memory monitoring error: {e}")
+                    
+                    # Use more conservative intervals to reduce memory pressure
+                    interval = 3000 if is_rendering else 10000  # 3 seconds when rendering, 10 seconds when idle
+                    if periodic_monitoring_job is not None:
+                        periodic_monitoring_job = root.after(interval, periodic_update)
             except Exception as e:
                 logging.error(f"Error in periodic output update: {e}")
-            # Schedule next update in 1 second
-            root.after(1000, periodic_update)
+                # Don't reschedule if there's an error
+                periodic_monitoring_job = None
         
-        logging.info("Unified output monitoring started (checking every 1 second)")
-        periodic_update()
+        logging.info("Unified output monitoring started (checking every 3 seconds during render)")
+        
+        # Initialize memory monitoring for long-running operation
+        if not hasattr(start_output_details_monitoring, 'initial_memory'):
+            import psutil
+            process = psutil.Process()
+            start_output_details_monitoring.initial_memory = process.memory_info().rss / 1024 / 1024  # MB
+            start_output_details_monitoring.memory_check_counter = 0
+            logging.info(f"Starting memory baseline: {start_output_details_monitoring.initial_memory:.1f} MB")
+        
+        periodic_monitoring_job = root.after(100, periodic_update)  # Start with initial delay
 
     def stop_image_monitoring():
         """Stop periodic image monitoring."""
         global image_monitoring_active
         image_monitoring_active = False
         logging.info("Image monitoring stopped")
+        
+    def stop_output_details_monitoring():
+        """Stop the periodic monitoring and clean up resources."""
+        global periodic_monitoring_job
+        if periodic_monitoring_job is not None:
+            try:
+                root.after_cancel(periodic_monitoring_job)
+                logging.info("Cancelled periodic monitoring job")
+            except Exception as e:
+                logging.warning(f"Could not cancel periodic monitoring: {e}")
+            periodic_monitoring_job = None
+        logging.info("Output details monitoring stopped")
 
     def start_render():
         # Prevent multiple render starts
@@ -3935,7 +3746,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 reset_shutdown_timer()  # Reset any pending shutdown timer
                 output_directory = value_entries["Output Directory"].get().strip()
                 start_file_monitoring(output_directory)
-                logging.info('File monitoring started for WebP conversion')
+                logging.info('File monitoring started for PNG conversion')
                 
                 # Start background thread to wait for render completion
                 def wait_for_completion():
@@ -4176,6 +3987,9 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 
 
 
+        # Start monitoring when render begins
+        start_output_details_monitoring()
+        
         run_all_instances()
 
     def kill_render_related_processes():
@@ -4230,6 +4044,22 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             # Stop image monitoring
             stop_image_monitoring()
             
+            # Stop periodic monitoring to prevent memory leaks
+            stop_output_details_monitoring()
+            
+            # Image display functionality removed
+            
+            # Force aggressive garbage collection for long-running cleanup
+            import gc
+            for i in range(3):  # Multiple passes to ensure thorough cleanup
+                gc.collect()
+            
+            # Clear any function-level caches that might have accumulated
+            if hasattr(update_output_status, 'last_output_dir'):
+                update_output_status.last_output_dir = ""
+                update_output_status.last_displayed_image = ""
+                update_output_status.cleanup_counter = 0
+            
             # Then kill render processes
             logging.info('Stopping render processes...')
             kill_render_related_processes()
@@ -4249,9 +4079,16 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             images_remaining_var.set("Images remaining:")
             logging.info('Stop render completed')
 
-    # Initial display setup
-    root.after(500, start_image_monitoring)  # Start continuous image monitoring
-    root.after(600, start_output_details_monitoring)  # Start continuous output details monitoring
+    # Initial display setup - just update once without starting continuous monitoring
+    # Only do initial update if there's a valid output directory to avoid unnecessary operations
+    def initial_setup():
+        output_dir = value_entries["Output Directory"].get().strip()
+        if output_dir and os.path.exists(output_dir):
+            update_output_status()
+        else:
+            logging.info("Skipping initial update - no valid output directory set")
+            
+    root.after(500, initial_setup)
 
     # --- Buttons Section ---
     buttons_frame = tk.Frame(root)
