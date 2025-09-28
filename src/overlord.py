@@ -3314,6 +3314,17 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
     details_dim.pack(anchor="nw", pady=(0, 5))
     theme_manager.register_widget(details_dim, "label")
 
+    # --- Image Display Area ---
+    image_frame = tk.Frame(root, width=1024, height=1024)
+    image_frame.place(relx=0.5, rely=0.01, anchor="nw", width=1024, height=1024)
+    image_frame.pack_propagate(False)
+    theme_manager.register_widget(image_frame, "frame")
+    
+    # Image display label
+    image_display = tk.Label(image_frame, bg="black", fg="white")
+    image_display.pack(fill=tk.BOTH, expand=True)
+    theme_manager.register_widget(image_display, "label")
+
     def calculate_average_render_time(output_dir, max_files=10):
         """Calculate average time between file creations based on the most recent files."""
         try:
@@ -3522,7 +3533,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 estimated_time_remaining_var.set("Est. time remaining:")
                 estimated_completion_at_var.set("Est. completion at:")
             
-            # Find and update details for the newest image (PNG files) without displaying it
+            # Find and update details for the newest image (PNG files) and display it
             image_paths = find_newest_image(output_dir)
             
             current_image_path = ""
@@ -3533,7 +3544,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 try:
                     current_image_path = newest_img_path
                     
-                    # Get image info without loading the full image for display
+                    # Get image info and display the image
                     with Image.open(newest_img_path) as img:
                         width, height = img.size
                     
@@ -3542,6 +3553,14 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                     update_details_path(display_path)
                     details_dim.config(text=f"Dimensions: {width} x {height}")
                     details_size.config(text=f"Size: {file_size/1024:.1f} KB")
+                    
+                    # Display the image at original size
+                    try:
+                        photo = ImageTk.PhotoImage(Image.open(newest_img_path))
+                        image_display.config(image=photo, text="")
+                        image_display.image = photo  # Keep reference
+                    except Exception:
+                        pass
                     
                     break
                 except Exception:
@@ -3553,11 +3572,13 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 logging.info(f'Latest image details updated: {normalize_path_for_logging(current_image_path)}')
                 update_output_status.last_displayed_image = current_image_path
             
-            # If no image was found, clear the details display
+            # If no image was found, clear the details display and image
             if not current_image_path:
                 update_details_path("")
                 details_dim.config(text="Dimensions: ")
                 details_size.config(text="Size: ")
+                image_display.config(image="", text="No image")
+                image_display.image = None
                 
                 if image_changed:
                     logging.info("No valid images found - cleared details display")
