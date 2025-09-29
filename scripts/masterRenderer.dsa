@@ -61,6 +61,11 @@ oSettings.setIntValue('Port', sPort);
 oSettings.setStringValue('Username', 'admin');
 oSettings.setStringValue('Password', 'admin');
 
+function wait(seconds) {
+
+	sleep(seconds * 1000);
+}
+
 // Kill Iray server if it's running, then remove the cache file if it exists, then restart it
 function restartIrayServer() {
 
@@ -80,7 +85,7 @@ function restartIrayServer() {
 		while (!oCacheFolder.remove(oCacheDbFile.absoluteFilePath())) {
 
 			App.log('Failed to remove cache.db, retrying...');
-			sleep(1000);
+			wait(1);
 		}
 		App.log('Successfully removed cache.db');
 	}
@@ -265,6 +270,8 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 			App.log('Sending render to Iray Server...');
 			
 			var sHttpRequestError;
+			var nHttpAttempts = 0;
+			var nMAX_HTTP_ATTEMPTS = 5;
 
 			do {
 
@@ -277,9 +284,24 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 				sHttpRequestError = oHttp.getError();
 
 				if (sHttpRequestError) {
-					App.log('HTTP request error: ' + sHttpRequestError);
+					nHttpAttempts++;
+					App.log('HTTP request error (attempt ' + nHttpAttempts + '/' + nMAX_HTTP_ATTEMPTS + '): ' + sHttpRequestError);
 
-					sleep(1000);
+					if (nHttpAttempts >= nMAX_HTTP_ATTEMPTS) {
+
+						App.log('Maximum HTTP attempts reached. Restarting Iray Server...');
+
+						restartIrayServer();
+
+						nHttpAttempts = 0;
+						
+						// Give Iray Server some time to start
+						wait(30);
+						
+					} else {
+
+						wait(1);
+					}
 				}
 				else {
 					App.log('HTTP request successful.');
@@ -295,7 +317,7 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 
 				App.log('Attempt ' + nAttempts + ': Waiting for ' + sFinalNameInFolder + ' to appear in ' + sResultsDirectory);
 
-				sleep(1000);
+				wait(1);
 				nAttempts++;
 
 				if (nAttempts > nAllowedAttempts) {
