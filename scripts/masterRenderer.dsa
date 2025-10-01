@@ -40,8 +40,7 @@ var oCacheDbFile;
 var sScriptFileName = getScriptFileName();
 var oScriptFileInfo = new DzFileInfo(sScriptFileName);
 var oScriptDirectory = oScriptFileInfo.dir(); // DzDir object
-var sKillIrayServerScript = oScriptDirectory.absoluteFilePath('killIrayServer.vbs');
-var sStartIrayServerScript = oScriptDirectory.absoluteFilePath('startIrayServer.vbs');
+var sRestartIrayServerScript = oScriptDirectory.absoluteFilePath('restartIrayServer.vbs');
 
 var sAddress = '127.0.0.1';
 var sPort = 9090;
@@ -69,29 +68,12 @@ function wait(seconds) {
 // Kill Iray server if it's running, then remove the cache file if it exists, then restart it
 function restartIrayServer() {
 
-	// I don't know of a way to tell if Iray Server is running,
-	// so we'll just try to kill it and ignore any errors.
-	App.log('Killing Iray Server with ' + sKillIrayServerScript);
-	App.showURL(sKillIrayServerScript);
-
-	oCacheDbFile = new DzFileInfo(sCacheFolderPath + '/cache.db');
-
-	if (oCacheDbFile.exists()) {
-
-		App.log('cache.db is exists. Removing...');
-
-		var oCacheFolder = new DzDir(sCacheFolderPath);
-
-		while (!oCacheFolder.remove(oCacheDbFile.absoluteFilePath())) {
-
-			App.log('Failed to remove cache.db, retrying...');
-			wait(1);
-		}
-		App.log('Successfully removed cache.db');
-	}
-
-	App.log('Starting Iray Server with ' + sStartIrayServerScript);
-	App.showURL(sStartIrayServerScript);
+	// Use the combined restart script that handles kill, cache cleanup, and start
+	App.log('Restarting Iray Server with ' + sRestartIrayServerScript);
+	App.showURL(sRestartIrayServerScript);
+	
+	// Wait for the restart process to complete
+	wait(5);
 }
 // Check if a file exists and isn't 0 bytes
 function exists(sFilePath) {

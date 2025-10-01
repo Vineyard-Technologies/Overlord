@@ -149,6 +149,20 @@ render_start_time = None  # Track when the render started for time estimation fi
 shutdown_timer_thread = None  # Track shutdown timer thread
 periodic_monitoring_job = None  # Track the periodic monitoring timer job
 
+# Automatic restart monitoring
+auto_restart_enabled = False
+last_file_activity_time = None
+auto_restart_monitor_job = None
+auto_restart_in_progress = False
+STALL_DETECTION_MINUTES = 5  # Minutes to wait before considering render stalled
+
+# Automatic restart monitoring
+auto_restart_enabled = False
+last_file_activity_time = None
+auto_restart_monitor_job = None
+auto_restart_in_progress = False
+STALL_DETECTION_MINUTES = 5  # Minutes to wait before considering render stalled
+
 def get_default_output_directory() -> str:
     """Get the default output directory for user files."""
     return os.path.join(os.path.expanduser("~"), DEFAULT_OUTPUT_SUBDIR)
@@ -674,6 +688,14 @@ def monitor_output_folder(output_directory: str, stop_event):
     max_cache_size = 500  # Limit cache size for long-running operation
     cache_cleanup_counter = 0
     
+    # Track initial file count for activity detection
+    initial_file_count = 0
+    try:
+        if os.path.exists(output_directory):
+            initial_file_count = len([f for f in os.listdir(output_directory) if os.path.isfile(os.path.join(output_directory, f))])
+    except Exception:
+        pass
+    
     while not stop_event.is_set() and is_rendering:
         try:
             if not os.path.exists(output_directory):
@@ -717,6 +739,9 @@ def monitor_output_folder(output_directory: str, stop_event):
                         # Convert EXR to PNG (PNG files are left as-is)
                         logging.info(f"Processing render output: {normalize_path_for_logging(file_path)}")
                         png_path = convert_to_png(file_path, delete_original=True)
+                        
+                        # Update file activity for auto-restart monitoring
+                        update_last_file_activity()
                         
                         # Mark as processed
                         processed_files.add(file_path)
@@ -787,6 +812,13 @@ def start_file_monitoring(output_directory: str):
     )
     file_monitor_thread.start()
     logging.info("File monitoring started")
+
+def update_last_file_activity():
+    """Update the last file activity timestamp for auto-restart monitoring."""
+    global last_file_activity_time
+    import time
+    last_file_activity_time = time.time()
+    logging.debug("Updated last file activity time")
 
 def stop_file_monitoring():
     """Stop the file monitoring thread."""
@@ -888,6 +920,160 @@ def stop_all_render_processes() -> dict:
                 f'{results["iray_server"]} Iray Server')
     
     return results
+
+def start_auto_restart_monitoring(root, start_render_func, stop_render_func, button, stop_button, value_entries=None, render_shadows_var=None, shutdown_on_finish_var=None):
+    """Start monitoring for stalled renders and automatically restart them."""
+    global auto_restart_enabled, auto_restart_monitor_job, last_file_activity_time
+    
+    if not auto_restart_enabled:
+        return
+    
+    def check_for_stalled_render():
+        """Check if render appears to be stalled and restart if needed."""
+        global auto_restart_in_progress, last_file_activity_time
+        
+        try:
+            if not is_rendering or auto_restart_in_progress:
+                # Schedule next check
+                if auto_restart_enabled:
+                    global auto_restart_monitor_job
+                    auto_restart_monitor_job = root.after(30000, check_for_stalled_render)  # Check every 30 seconds
+                return
+            
+            import time
+            current_time = time.time()
+            
+            if last_file_activity_time is None:
+                # No file activity recorded yet, set it to now
+                last_file_activity_time = current_time
+            else:
+                # Check if enough time has passed without file activity
+                time_since_activity = current_time - last_file_activity_time
+                stall_threshold = STALL_DETECTION_MINUTES * 60  # Convert to seconds
+                
+                if time_since_activity > stall_threshold:
+                    logging.warning(f"⚠️  RENDER STALLED DETECTED - No file activity for {STALL_DETECTION_MINUTES} minutes. Initiating automatic restart...")
+                    
+                    # Start automatic restart process
+                    auto_restart_in_progress = True
+                    
+                    # Disable both buttons during restart
+                    button.config(state="disabled", text="Auto Restarting...")
+                    stop_button.config(state="disabled")
+                    
+                    def perform_restart():
+                        """Perform the actual restart sequence."""
+                        global auto_restart_in_progress, last_file_activity_time
+                        
+                        try:
+                            logging.info("Step 1: Stopping current render processes...")
+                            stop_render_func()
+                            
+                            # Wait a few seconds for cleanup
+                            def restart_after_delay():
+                                try:
+                                    logging.info("Step 2: Starting fresh render after auto-restart...")
+                                    
+                                    # Reset file activity time
+                                    last_file_activity_time = time.time()
+                                    
+                                    # Start render again
+                                    start_render_func()
+                                    
+                                    # Re-enable buttons (start_render_func will handle proper button states and input fields)
+                                    auto_restart_in_progress = False
+                                    
+                                    logging.info("✅ Automatic render restart completed successfully")
+                                    
+                                except Exception as e:
+                                    logging.error(f"Error during automatic restart: {e}")
+                                    auto_restart_in_progress = False
+                                    # Re-enable buttons and inputs on error
+                                    button.config(state="normal", text="Start Render")
+                                    stop_button.config(state="disabled")
+                                    # Re-enable input fields on error
+                                    try:
+                                        set_inputs_enabled(True)
+                                    except Exception:
+                                        pass
+                            
+                            # Schedule restart after 3 seconds
+                            root.after(3000, restart_after_delay)
+                            
+                        except Exception as e:
+                            logging.error(f"Error during automatic restart stop phase: {e}")
+                            auto_restart_in_progress = False
+            
+                            # Re-enable buttons and inputs on error
+                            button.config(state="normal", text="Start Render")
+                            stop_button.config(state="disabled")
+                            # Re-enable input fields on error
+                            try:
+                                set_inputs_enabled(True)
+                            except Exception:
+                                pass
+                    
+                    # Perform restart in next event loop cycle
+                    root.after(100, perform_restart)
+                    
+                    return  # Don't schedule next check yet, restart will handle it
+            
+        except Exception as e:
+            logging.error(f"Error in auto-restart monitoring: {e}")
+        
+        # Schedule next check
+        if auto_restart_enabled:
+            auto_restart_monitor_job = root.after(30000, check_for_stalled_render)  # Check every 30 seconds
+    
+    # Initialize file activity time and start monitoring
+    import time
+    last_file_activity_time = time.time()
+    auto_restart_monitor_job = root.after(60000, check_for_stalled_render)  # First check after 1 minute
+    logging.info(f"🔄 Auto-restart monitoring enabled - will automatically restart if no file activity for {STALL_DETECTION_MINUTES} minutes")
+
+def stop_auto_restart_monitoring(root):
+    """Stop automatic restart monitoring."""
+    global auto_restart_enabled, auto_restart_monitor_job
+    
+    auto_restart_enabled = False
+    
+    if auto_restart_monitor_job:
+        root.after_cancel(auto_restart_monitor_job)
+        auto_restart_monitor_job = None
+        logging.info("Auto-restart monitoring stopped")
+
+def set_inputs_enabled(enabled: bool, value_entries: dict, render_shadows_var, shutdown_on_finish_var):
+    """Enable or disable all input fields and settings during render."""
+    try:
+        state = "normal" if enabled else "disabled"
+        
+        # Disable/enable all text and entry widgets
+        for param, widget in value_entries.items():
+            if hasattr(widget, 'config'):
+                try:
+                    widget.config(state=state)
+                except Exception as e:
+                    # Some widgets might not support state changes
+                    logging.debug(f"Could not set state for {param}: {e}")
+        
+        # Disable/enable checkboxes
+        try:
+            # Find checkbox widgets by searching parent widgets
+            for widget_info in theme_manager.widgets_to_theme:
+                widget, widget_type = widget_info
+                if widget_type == "checkbutton" and hasattr(widget, 'config'):
+                    try:
+                        widget.config(state=state)
+                    except Exception:
+                        pass
+        except Exception as e:
+            logging.debug(f"Error setting checkbox states: {e}")
+        
+        action = "Disabled" if not enabled else "Enabled"
+        logging.info(f"{action} all input fields during render")
+        
+    except Exception as e:
+        logging.error(f"Error setting input field states: {e}")
 
 def cleanup_results_directory(script_dir=None):
     """Clean up the results directory when stopping Iray Server."""
@@ -1299,6 +1485,8 @@ class SettingsManager:
             "render_shadows": True,
             "shutdown_on_finish": True,
             "cache_db_size_threshold_gb": "10",
+            "minimize_to_tray": True,
+            "start_on_startup": True,
             "last_directories": {
                 "subject": "",
                 "animations": "",
@@ -1901,11 +2089,10 @@ def start_headless_render(settings):
         os.makedirs(user_scripts_dir, exist_ok=True)
         render_script_path = os.path.join(user_scripts_dir, "masterRenderer.dsa").replace("\\", "/")
         
-        # Copy all three scripts to user directory
+        # Copy all scripts to user directory
         scripts_to_copy = [
             ("masterRenderer.dsa", "masterRenderer.dsa"),
-            ("killIrayServer.vbs", "killIrayServer.vbs"),
-            ("startIrayServer.vbs", "startIrayServer.vbs")
+            ("restartIrayServer.vbs", "restartIrayServer.vbs")
         ]
         
         import shutil
@@ -2063,6 +2250,14 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 except Exception as e:
                     logging.error(f"Error saving settings before close: {e}")
                 
+                # Clean up system tray
+                try:
+                    if tray_icon:
+                        tray_icon.stop()
+                        logging.info('System tray icon stopped')
+                except Exception as e:
+                    logging.error(f"Error stopping system tray: {e}")
+                
                 # Stop all monitoring to prevent memory leaks
                 stop_image_monitoring()
                 stop_output_details_monitoring()
@@ -2111,6 +2306,104 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
         root.after(100, check_cleanup_completion)
     
     root.protocol("WM_DELETE_WINDOW", on_closing)
+
+    # System tray functionality
+    tray_icon = None
+    tray_enabled = False
+    
+    def setup_system_tray():
+        """Setup system tray icon if the setting is enabled."""
+        nonlocal tray_icon, tray_enabled
+        try:
+            current_settings = settings_manager.load_settings()
+            should_enable_tray = current_settings.get("minimize_to_tray", True)
+            
+            if should_enable_tray and not tray_enabled:
+                try:
+                    # Try to import pystray for system tray support
+                    try:
+                        import pystray
+                        from pystray import MenuItem as item
+                        import PIL.Image
+                    except ImportError:
+                        logging.info("pystray not available - install with 'pip install pystray' for system tray support")
+                        return
+                    
+                    # Load the icon image
+                    icon_path = resource_path(os.path.join("images", "favicon.ico"))
+                    if os.path.exists(icon_path):
+                        # Convert ICO to PIL Image
+                        icon_image = PIL.Image.open(icon_path)
+                    else:
+                        # Create a simple default icon if favicon.ico is not found
+                        icon_image = PIL.Image.new('RGBA', (16, 16), (100, 100, 100, 255))
+                    
+                    def show_window(icon, item):
+                        """Show the main window."""
+                        root.deiconify()
+                        root.lift()
+                        root.attributes('-topmost', True)
+                        root.attributes('-topmost', False)
+                    
+                    def quit_app(icon, item):
+                        """Quit the application."""
+                        icon.stop()
+                        on_closing()
+                    
+                    # Create the tray menu
+                    menu = pystray.Menu(
+                        item('Show Overlord', show_window, default=True),
+                        item('Quit', quit_app)
+                    )
+                    
+                    # Create the tray icon
+                    tray_icon = pystray.Icon("Overlord", icon_image, "Overlord Render Manager", menu)
+                    tray_enabled = True
+                    
+                    # Start the tray icon in a separate thread
+                    def run_tray():
+                        tray_icon.run_detached()
+                    
+                    threading.Thread(target=run_tray, daemon=True).start()
+                    logging.info("System tray icon enabled")
+                    
+                except ImportError:
+                    logging.info("pystray not available - system tray functionality disabled")
+                    tray_enabled = False
+                except Exception as e:
+                    logging.warning(f"Could not setup system tray: {e}")
+                    tray_enabled = False
+            
+        except Exception as e:
+            logging.error(f"Error setting up system tray: {e}")
+    
+    def handle_window_state_change():
+        """Check for window state changes and handle minimize to tray."""
+        try:
+            current_settings = settings_manager.load_settings()
+            minimize_to_tray = current_settings.get("minimize_to_tray", True)
+            
+            # Check if window is iconified (minimized)
+            if root.winfo_viewable() and root.state() == 'iconic' and minimize_to_tray and tray_enabled:
+                # Hide to tray instead of staying minimized
+                root.withdraw()
+                logging.info("Window minimized to system tray")
+        except Exception as e:
+            logging.error(f"Error checking window state: {e}")
+        
+        # Schedule next check
+        if not getattr(root, '_destroyed', False):
+            root.after(500, handle_window_state_change)
+    
+    # Start monitoring window state changes
+    root.after(1000, handle_window_state_change)
+    
+    # Initialize system tray in a separate thread after UI is ready
+    def init_tray_delayed():
+        time.sleep(1)  # Give UI time to fully load
+        setup_system_tray()
+    
+    threading.Thread(target=init_tray_delayed, daemon=True).start()
 
     # Create menu bar
     def create_menu_bar():
@@ -2238,6 +2531,197 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 auto_save_settings()
                 on_output_dir_change()  # Update UI
         
+        def manage_windows_startup(enable: bool) -> bool:
+            """Manage Windows startup registry entry for Overlord."""
+            try:
+                import winreg
+                key_path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
+                app_name = "Overlord"
+                
+                # Get the executable path
+                if getattr(sys, 'frozen', False):
+                    # Running as PyInstaller executable
+                    exe_path = sys.executable
+                else:
+                    # Running from source - use python with script path
+                    exe_path = f'"{sys.executable}" "{os.path.abspath(__file__)}"'
+                
+                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_ALL_ACCESS) as key:
+                    if enable:
+                        winreg.SetValueEx(key, app_name, 0, winreg.REG_SZ, exe_path)
+                        logging.info(f"Added Overlord to Windows startup: {exe_path}")
+                    else:
+                        try:
+                            winreg.DeleteValue(key, app_name)
+                            logging.info("Removed Overlord from Windows startup")
+                        except FileNotFoundError:
+                            # Key doesn't exist, which is fine if we're trying to remove it
+                            pass
+                return True
+            except Exception as e:
+                logging.error(f"Failed to manage Windows startup setting: {e}")
+                return False
+        
+        def check_windows_startup_status() -> bool:
+            """Check if Overlord is currently set to start on Windows startup."""
+            try:
+                import winreg
+                key_path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
+                app_name = "Overlord"
+                
+                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_READ) as key:
+                    try:
+                        winreg.QueryValueEx(key, app_name)
+                        return True
+                    except FileNotFoundError:
+                        return False
+            except Exception:
+                return False
+        
+        def show_settings():
+            """
+            Show Settings dialog window with system tray and startup options.
+            
+            Available Settings:
+            - Minimize to system tray: When enabled, minimizing Overlord hides it to the system tray
+            - Start on Windows startup: When enabled, Overlord automatically starts with Windows
+            """
+            settings_window = tk.Toplevel(root)
+            settings_window.title("Overlord Settings")
+            settings_window.geometry("400x300")
+            settings_window.resizable(False, False)
+            settings_window.iconbitmap(resource_path(os.path.join("images", "favicon.ico")))
+            theme_manager.register_widget(settings_window, "root")
+            
+            # Center the window
+            settings_window.transient(root)
+            settings_window.grab_set()
+            
+            # Main frame
+            main_frame = tk.Frame(settings_window)
+            main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+            theme_manager.register_widget(main_frame, "frame")
+            
+            # Title
+            title_label = tk.Label(main_frame, text="Overlord Settings", font=("Arial", 16, "bold"))
+            title_label.pack(pady=(0, 20))
+            theme_manager.register_widget(title_label, "label")
+            
+            # Load current settings
+            current_settings = settings_manager.load_settings()
+            
+            # Minimize to tray setting
+            minimize_to_tray_var = tk.BooleanVar(value=current_settings.get("minimize_to_tray", True))
+            minimize_frame = tk.Frame(main_frame)
+            minimize_frame.pack(fill="x", pady=(0, 15))
+            theme_manager.register_widget(minimize_frame, "frame")
+            
+            minimize_checkbox = tk.Checkbutton(
+                minimize_frame,
+                text="Minimize Overlord to system tray",
+                variable=minimize_to_tray_var,
+                font=("Arial", 10)
+            )
+            minimize_checkbox.pack(anchor="w")
+            theme_manager.register_widget(minimize_checkbox, "checkbutton")
+            
+            minimize_desc = tk.Label(
+                minimize_frame,
+                text="When enabled, minimizing Overlord will hide it to the system tray\ninstead of the taskbar.",
+                font=("Arial", 9),
+                justify="left"
+            )
+            minimize_desc.pack(anchor="w", padx=(25, 0), pady=(5, 0))
+            theme_manager.register_widget(minimize_desc, "label")
+            
+            # Start on startup setting
+            start_on_startup_var = tk.BooleanVar(value=current_settings.get("start_on_startup", True))
+            startup_frame = tk.Frame(main_frame)
+            startup_frame.pack(fill="x", pady=(0, 15))
+            theme_manager.register_widget(startup_frame, "frame")
+            
+            startup_checkbox = tk.Checkbutton(
+                startup_frame,
+                text="Start Overlord on Windows startup",
+                variable=start_on_startup_var,
+                font=("Arial", 10)
+            )
+            startup_checkbox.pack(anchor="w")
+            theme_manager.register_widget(startup_checkbox, "checkbutton")
+            
+            startup_desc = tk.Label(
+                startup_frame,
+                text="When enabled, Overlord will automatically start when Windows boots up.",
+                font=("Arial", 9),
+                justify="left"
+            )
+            startup_desc.pack(anchor="w", padx=(25, 0), pady=(5, 0))
+            theme_manager.register_widget(startup_desc, "label")
+            
+            # Buttons frame
+            buttons_frame = tk.Frame(main_frame)
+            buttons_frame.pack(fill="x", pady=(20, 0))
+            theme_manager.register_widget(buttons_frame, "frame")
+            
+            def save_settings():
+                """Save the settings and close the dialog."""
+                try:
+                    # Update settings
+                    minimize_enabled = minimize_to_tray_var.get()
+                    startup_enabled_var = start_on_startup_var.get()
+                    
+                    current_settings["minimize_to_tray"] = minimize_enabled
+                    current_settings["start_on_startup"] = startup_enabled_var
+                    
+                    # Save to file
+                    settings_manager.save_settings(current_settings)
+                    
+                    # Log settings changes
+                    logging.info(f"Settings updated: minimize_to_tray={minimize_enabled}, start_on_startup={startup_enabled_var}")
+                    
+                    # Handle Windows startup registry
+                    startup_enabled = start_on_startup_var.get()
+                    if manage_windows_startup(startup_enabled):
+                        if startup_enabled:
+                            logging.info("Overlord will start on Windows startup")
+                        else:
+                            logging.info("Overlord will not start on Windows startup")
+                    else:
+                        messagebox.showerror("Error", "Failed to update Windows startup setting. Please run as administrator if the issue persists.")
+                    
+                    logging.info("Settings saved successfully")
+                    settings_window.destroy()
+                    
+                except Exception as e:
+                    logging.error(f"Failed to save settings: {e}")
+                    messagebox.showerror("Error", f"Failed to save settings: {e}")
+            
+            def cancel_settings():
+                """Cancel and close the dialog without saving."""
+                settings_window.destroy()
+            
+            # Save button
+            save_button = tk.Button(
+                buttons_frame,
+                text="Save",
+                command=save_settings,
+                font=("Arial", 10),
+                width=10
+            )
+            save_button.pack(side="right", padx=(5, 0))
+            theme_manager.register_widget(save_button, "button")
+            
+            # Cancel button
+            cancel_button = tk.Button(
+                buttons_frame,
+                text="Cancel",
+                command=cancel_settings,
+                font=("Arial", 10),
+                width=10
+            )
+            cancel_button.pack(side="right")
+            theme_manager.register_widget(cancel_button, "button")
+        
         def exit_overlord():
             """Exit the application"""
             on_closing()
@@ -2248,6 +2732,8 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
         file_menu.add_command(label="Choose Gear", command=choose_gear)
         file_menu.add_command(label="Choose Gear Animations", command=choose_gear_animations)
         file_menu.add_command(label="Choose Output Directory", command=choose_output_directory)
+        file_menu.add_separator()
+        file_menu.add_command(label="Settings", command=show_settings)
         file_menu.add_separator()
         file_menu.add_command(label="Exit Overlord", command=exit_overlord)
         
@@ -3069,6 +3555,58 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
     # Apply the loaded settings to the UI (now that all widgets are created)
     settings_manager.apply_settings(saved_settings, value_entries, render_shadows_var, shutdown_on_finish_var)
 
+    # Initialize Windows startup setting if needed
+    def initialize_startup_setting():
+        """Initialize Windows startup setting based on saved preferences."""
+        try:
+            # Check if startup setting should be enabled
+            startup_enabled = saved_settings.get("start_on_startup", True)
+            
+            # Get the manage_windows_startup function from the menu closure
+            # We'll call it through the menu creation context
+            if startup_enabled:
+                # Check current status first to avoid unnecessary registry writes
+                current_status = False
+                try:
+                    import winreg
+                    key_path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
+                    app_name = "Overlord"
+                    
+                    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_READ) as key:
+                        try:
+                            winreg.QueryValueEx(key, app_name)
+                            current_status = True
+                        except FileNotFoundError:
+                            current_status = False
+                except Exception:
+                    current_status = False
+                
+                # Only set if not already set
+                if not current_status:
+                    try:
+                        import winreg
+                        key_path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
+                        app_name = "Overlord"
+                        
+                        # Get the executable path
+                        if getattr(sys, 'frozen', False):
+                            # Running as PyInstaller executable
+                            exe_path = sys.executable
+                        else:
+                            # Running from source - use python with script path
+                            exe_path = f'"{sys.executable}" "{os.path.abspath(__file__)}"'
+                        
+                        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_ALL_ACCESS) as key:
+                            winreg.SetValueEx(key, app_name, 0, winreg.REG_SZ, exe_path)
+                            logging.info(f"Initialized Overlord startup: {exe_path}")
+                    except Exception as e:
+                        logging.warning(f"Could not initialize Windows startup setting: {e}")
+        except Exception as e:
+            logging.warning(f"Error initializing startup setting: {e}")
+    
+    # Initialize startup setting in a separate thread to avoid blocking UI
+    threading.Thread(target=initialize_startup_setting, daemon=True).start()
+
     # Apply command line arguments if provided (overrides saved settings)
     def apply_command_line_args():
         """Apply command line arguments to UI fields"""
@@ -3690,6 +4228,8 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
         logging.info("Output details monitoring stopped")
 
     def start_render():
+        global auto_restart_enabled, auto_restart_in_progress
+        
         # Prevent multiple render starts
         if button.cget("state") == "disabled":
             logging.info("Start Render already in progress, ignoring additional click")
@@ -3847,6 +4387,8 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
         # Disable Start Render button and enable Stop Render button
         button.config(state="disabled")
         stop_button.config(state="normal")
+        # Disable all input fields and settings during render
+        set_inputs_enabled(False)
         root.update_idletasks()  # Force UI update
         
         # Start the render process in a background thread to keep UI responsive
@@ -4026,11 +4568,10 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             os.makedirs(user_scripts_dir, exist_ok=True)
             render_script_path = os.path.join(user_scripts_dir, "masterRenderer.dsa").replace("\\", "/")
             
-            # Copy all three scripts to user directory
+            # Copy all scripts to user directory
             scripts_to_copy = [
                 ("masterRenderer.dsa", "masterRenderer.dsa"),
-                ("killIrayServer.vbs", "killIrayServer.vbs"),
-                ("startIrayServer.vbs", "startIrayServer.vbs")
+                ("restartIrayServer.vbs", "restartIrayServer.vbs")
             ]
             
             import shutil
@@ -4132,6 +4673,10 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
         # Start monitoring when render begins
         start_output_details_monitoring()
         
+        # Enable auto-restart monitoring
+        auto_restart_enabled = True
+        start_auto_restart_monitoring(root, start_render, stop_render, button, stop_button, value_entries, render_shadows_var, shutdown_on_finish_var)
+        
         run_all_instances()
 
     def kill_render_related_processes():
@@ -4159,6 +4704,8 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
         progress_var.set(0)
 
     def stop_render():
+        global auto_restart_enabled, auto_restart_in_progress
+        
         logging.info('Stop Render button clicked')
         
         # Immediately disable the stop button to prevent multiple clicks
@@ -4189,6 +4736,9 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             # Stop periodic monitoring to prevent memory leaks
             stop_output_details_monitoring()
             
+            # Stop auto-restart monitoring
+            stop_auto_restart_monitoring(root)
+            
             # Image display functionality removed
             
             # Force aggressive garbage collection for long-running cleanup
@@ -4213,12 +4763,20 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
         except Exception as e:
             logging.error(f'Error during stop render: {e}')
         finally:
-            # Always re-enable Start Render button, even if there were errors
-            button.config(state="normal")
+            # Always re-enable Start Render button (only if not in auto-restart)
+            if not auto_restart_in_progress:
+                button.config(state="normal", text="Start Render")
+                # Re-enable all input fields
+                set_inputs_enabled(True)
+            
             # Reset Images remaining text and initial total
             initial_total_images = 0
             render_start_time = None  # Reset render start time
             images_remaining_var.set("Images remaining:")
+            
+            # Reset auto-restart state
+            auto_restart_in_progress = False
+            
             logging.info('Stop render completed')
 
     # Initial display setup - just update once without starting continuous monitoring
