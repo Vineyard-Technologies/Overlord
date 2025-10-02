@@ -921,6 +921,40 @@ def stop_all_render_processes() -> dict:
     
     return results
 
+def set_inputs_enabled(enabled: bool = True):
+    """Enable or disable all input fields and settings during render."""
+    try:
+        global value_entries
+        state = "normal" if enabled else "disabled"
+        
+        # Disable/enable all text and entry widgets
+        for param, widget in value_entries.items():
+            if hasattr(widget, 'config'):
+                try:
+                    widget.config(state=state)
+                except Exception as e:
+                    # Some widgets might not support state changes
+                    logging.debug(f"Could not set state for {param}: {e}")
+        
+        # Disable/enable checkboxes
+        try:
+            # Find checkbox widgets by searching parent widgets
+            for widget_info in theme_manager.widgets_to_theme:
+                widget, widget_type = widget_info
+                if widget_type == "checkbutton" and hasattr(widget, 'config'):
+                    try:
+                        widget.config(state=state)
+                    except Exception:
+                        pass
+        except Exception as e:
+            logging.debug(f"Error setting checkbox states: {e}")
+        
+        action = "Disabled" if not enabled else "Enabled"
+        logging.info(f"{action} all input fields during render")
+        
+    except Exception as e:
+        logging.error(f"Error setting input field states: {e}")
+
 def start_auto_restart_monitoring(root, start_render_func, stop_render_func, button, stop_button, value_entries=None, render_shadows_var=None, shutdown_on_finish_var=None):
     """Start monitoring for stalled renders and automatically restart them."""
     global auto_restart_enabled, auto_restart_monitor_job, last_file_activity_time
@@ -1042,38 +1076,6 @@ def stop_auto_restart_monitoring(root):
         auto_restart_monitor_job = None
         logging.info("Auto-restart monitoring stopped")
 
-def set_inputs_enabled(enabled: bool, value_entries: dict, render_shadows_var, shutdown_on_finish_var):
-    """Enable or disable all input fields and settings during render."""
-    try:
-        state = "normal" if enabled else "disabled"
-        
-        # Disable/enable all text and entry widgets
-        for param, widget in value_entries.items():
-            if hasattr(widget, 'config'):
-                try:
-                    widget.config(state=state)
-                except Exception as e:
-                    # Some widgets might not support state changes
-                    logging.debug(f"Could not set state for {param}: {e}")
-        
-        # Disable/enable checkboxes
-        try:
-            # Find checkbox widgets by searching parent widgets
-            for widget_info in theme_manager.widgets_to_theme:
-                widget, widget_type = widget_info
-                if widget_type == "checkbutton" and hasattr(widget, 'config'):
-                    try:
-                        widget.config(state=state)
-                    except Exception:
-                        pass
-        except Exception as e:
-            logging.debug(f"Error setting checkbox states: {e}")
-        
-        action = "Disabled" if not enabled else "Enabled"
-        logging.info(f"{action} all input fields during render")
-        
-    except Exception as e:
-        logging.error(f"Error setting input field states: {e}")
 
 def cleanup_results_directory(script_dir=None):
     """Clean up the results directory when stopping Iray Server."""
@@ -2310,13 +2312,15 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
     # System tray functionality
     tray_icon = None
     tray_enabled = False
+    cached_minimize_to_tray = True  # Cache the minimize-to-tray setting to avoid repeated file loads
     
     def setup_system_tray():
         """Setup system tray icon if the setting is enabled."""
-        nonlocal tray_icon, tray_enabled
+        nonlocal tray_icon, tray_enabled, cached_minimize_to_tray
         try:
             current_settings = settings_manager.load_settings()
             should_enable_tray = current_settings.get("minimize_to_tray", True)
+            cached_minimize_to_tray = should_enable_tray  # Update cached value
             
             if should_enable_tray and not tray_enabled:
                 try:
@@ -2380,11 +2384,11 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
     def handle_window_state_change():
         """Check for window state changes and handle minimize to tray."""
         try:
-            current_settings = settings_manager.load_settings()
-            minimize_to_tray = current_settings.get("minimize_to_tray", True)
+            # Use cached setting instead of loading from file every time
+            nonlocal cached_minimize_to_tray
             
             # Check if window is iconified (minimized)
-            if root.winfo_viewable() and root.state() == 'iconic' and minimize_to_tray and tray_enabled:
+            if root.winfo_viewable() and root.state() == 'iconic' and cached_minimize_to_tray and tray_enabled:
                 # Hide to tray instead of staying minimized
                 root.withdraw()
                 logging.info("Window minimized to system tray")
@@ -2675,6 +2679,10 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                     
                     # Save to file
                     settings_manager.save_settings(current_settings)
+                    
+                    # Update cached minimize to tray setting
+                    nonlocal cached_minimize_to_tray
+                    cached_minimize_to_tray = minimize_enabled
                     
                     # Log settings changes
                     logging.info(f"Settings updated: minimize_to_tray={minimize_enabled}, start_on_startup={startup_enabled_var}")
@@ -3552,6 +3560,8 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
     cleanup_manager.register_settings_callback(save_current_settings)
 
     saved_settings = settings_manager.load_settings()
+    # Initialize cached minimize to tray setting
+    cached_minimize_to_tray = saved_settings.get("minimize_to_tray", True)
     # Apply the loaded settings to the UI (now that all widgets are created)
     settings_manager.apply_settings(saved_settings, value_entries, render_shadows_var, shutdown_on_finish_var)
 
