@@ -682,28 +682,14 @@ def monitor_output_folder(output_directory: str, stop_event):
     
     logging.info(f"Starting file monitoring for: {normalize_path_for_logging(output_directory)}")
     
-    # Keep track of processed files to avoid reprocessing
-    # Use a rotating cache with size limit to prevent infinite growth
-    processed_files = set()
-    max_cache_size = 500  # Limit cache size for long-running operation
-    cache_cleanup_counter = 0
-    
-    # Track initial file count for activity detection
-    initial_file_count = 0
-    try:
-        if os.path.exists(output_directory):
-            initial_file_count = len([f for f in os.listdir(output_directory) if os.path.isfile(os.path.join(output_directory, f))])
-    except Exception:
-        pass
-    
     while not stop_event.is_set() and is_rendering:
         try:
             if not os.path.exists(output_directory):
                 time.sleep(1)
                 continue
                 
-            # Find all PNG and EXR files in the output directory
-            # Limit directory traversal to reduce memory usage
+            # Find all EXR files in the output directory
+            # Limit files per cycle to prevent memory spikes
             files_processed_this_cycle = 0
             max_files_per_cycle = 50  # Process max 50 files per cycle to prevent memory spikes
             
@@ -715,12 +701,8 @@ def monitor_output_folder(output_directory: str, stop_event):
                     file_path = os.path.join(root, file)
                     file_lower = file.lower()
                     
-                    # Only process PNG and EXR files
+                    # Only process EXR files (PNGs are already converted)
                     if file_lower.endswith(RENDER_OUTPUT_EXTENSIONS):
-                        # Skip if already processed
-                        if file_path in processed_files:
-                            continue
-                            
                         # Check if file is complete (not being written to)
                         try:
                             # Wait a moment to ensure file write is complete
@@ -736,17 +718,12 @@ def monitor_output_folder(output_directory: str, stop_event):
                             # File might be locked or still being written
                             continue
                         
-                        # Convert EXR to PNG (PNG files are left as-is)
+                        # Convert EXR to PNG (original EXR is deleted after conversion)
                         logging.info(f"Processing render output: {normalize_path_for_logging(file_path)}")
-                        png_path = convert_to_png(file_path, delete_original=True)
+                        convert_to_png(file_path, delete_original=True)
                         
                         # Update file activity for auto-restart monitoring
                         update_last_file_activity()
-                        
-                        # Mark as processed
-                        processed_files.add(file_path)
-                        if png_path != file_path:
-                            processed_files.add(png_path)
                         
                         files_processed_this_cycle += 1
                         
@@ -756,36 +733,6 @@ def monitor_output_folder(output_directory: str, stop_event):
                 
                 if stop_event.is_set() or not is_rendering:
                     break
-            
-            # Aggressive cache management for long-running operation
-            cache_cleanup_counter += 1
-            if len(processed_files) > max_cache_size or cache_cleanup_counter > 20:  # Clean more frequently
-                # Keep only the most recently modified files
-                try:
-                    # Get file modification times and keep only the newest files
-                    file_times = []
-                    for f in processed_files:
-                        if os.path.exists(f):
-                            try:
-                                mtime = os.path.getmtime(f)
-                                file_times.append((mtime, f))
-                            except OSError:
-                                continue
-                    
-                    # Keep only the 200 newest files
-                    file_times.sort(reverse=True)
-                    processed_files = {f for _, f in file_times[:200]}
-                    cache_cleanup_counter = 0
-                    
-                    logging.info(f"Aggressively cleaned processed files cache, now tracking {len(processed_files)} files")
-                    
-                    # Force garbage collection after cleanup
-                    gc.collect()
-                    
-                except Exception as e:
-                    logging.warning(f"Error during cache cleanup: {e}")
-                    processed_files.clear()  # Clear everything if cleanup fails
-                    cache_cleanup_counter = 0
             
             # Sleep before next check
             time.sleep(2)
@@ -925,6 +872,11 @@ def set_inputs_enabled(enabled: bool = True):
     """Enable or disable all input fields and settings during render."""
     try:
         global value_entries
+        
+        # Check if value_entries exists yet (it's created later in the code)
+        if 'value_entries' not in globals():
+            return  # Skip if UI hasn't been initialized yet
+            
         state = "normal" if enabled else "disabled"
         
         # Disable/enable all text and entry widgets
@@ -938,14 +890,16 @@ def set_inputs_enabled(enabled: bool = True):
         
         # Disable/enable checkboxes
         try:
-            # Find checkbox widgets by searching parent widgets
-            for widget_info in theme_manager.widgets_to_theme:
-                widget, widget_type = widget_info
-                if widget_type == "checkbutton" and hasattr(widget, 'config'):
-                    try:
-                        widget.config(state=state)
-                    except Exception:
-                        pass
+            # Check if theme_manager exists and has the widgets_to_theme attribute
+            if 'theme_manager' in globals() and hasattr(theme_manager, 'widgets_to_theme'):
+                # Find checkbox widgets by searching parent widgets
+                for widget_info in theme_manager.widgets_to_theme:
+                    widget, widget_type = widget_info
+                    if widget_type == "checkbutton" and hasattr(widget, 'config'):
+                        try:
+                            widget.config(state=state)
+                        except Exception:
+                            pass
         except Exception as e:
             logging.debug(f"Error setting checkbox states: {e}")
         
@@ -1652,6 +1606,7 @@ class CleanupManager:
         self.cleanup_registered = False
         self.save_settings_callback = None
         self.settings_saved_on_close = False
+        self.image_references = []  # Initialize empty list for image references
         # Remove file monitoring functionality
     
     def register_temp_file(self, filepath):
@@ -1659,8 +1614,9 @@ class CleanupManager:
         self.temp_files.append(filepath)
     
     def register_image_reference(self, image_ref):
-        """Stub for removed image reference tracking - image display functionality removed"""
-        pass
+        """Register an image reference for cleanup - maintains compatibility"""
+        if hasattr(self, 'image_references'):
+            self.image_references.append(image_ref)
     
 
     
@@ -1700,15 +1656,16 @@ class CleanupManager:
                     # Widgets may have been destroyed already, this is normal during shutdown
                     logging.debug(f"Could not save settings during cleanup (widgets may be destroyed): {e}")
             
-            # Clear image references first
-            for img_ref in self.image_references:
-                try:
-                    if hasattr(img_ref, 'close'):
-                        img_ref.close()
-                    del img_ref
-                except Exception:
-                    pass
-            self.image_references.clear()
+            # Clear image references first (if any exist)
+            if hasattr(self, 'image_references') and self.image_references:
+                for img_ref in self.image_references:
+                    try:
+                        if hasattr(img_ref, 'close'):
+                            img_ref.close()
+                        del img_ref
+                    except Exception:
+                        pass
+                self.image_references.clear()
             
             # Force garbage collection
             gc.collect()
@@ -4684,6 +4641,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
         start_output_details_monitoring()
         
         # Enable auto-restart monitoring
+        global auto_restart_enabled
         auto_restart_enabled = True
         start_auto_restart_monitoring(root, start_render, stop_render, button, stop_button, value_entries, render_shadows_var, shutdown_on_finish_var)
         
