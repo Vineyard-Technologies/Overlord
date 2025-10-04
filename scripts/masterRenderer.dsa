@@ -1,63 +1,22 @@
-var oScriptArgs = JSON.parse(App.scriptArgs[0]);
-
-// Helper function to get script parameter with default value
-function getScriptParam(paramName, defaultValue) {
-
-	var sScriptArg = oScriptArgs[paramName];
-
-    if (sScriptArg !== undefined) {
-
-		if (sScriptArg.contains(',')) {
-
-			return sScriptArg.toString().split(',');
-		}
-
-        return sScriptArg;
-
-    } else {
-
-        return defaultValue;
-    }
-}
-var sUserName = App.getAppDataPath().split('/')[2];
-var nTotalNumberOfInstances = getScriptParam('total_instances', 1);
-var sMasterTemplatePath = getScriptParam('template_path', 'C:/Users/' + sUserName + '/Documents/GitHub/Overlord/templates/masterTemplate.duf');
-var sOutputDirectory = getScriptParam('image_output_dir', 'C:/Users/' + sUserName + '/Downloads/output');
-var sResultsDirectory = getScriptParam('results_directory_path', 'C:/Users/' + sUserName + '/AppData/Local/Overlord/results/admin');
-var sSubjectFilepath = getScriptParam('subject_file', 'C:/Users/' + sUserName + '/Documents/GitHub/DataLake/Overlord/sets/woman/woman.duf');
-
-var aAnimationFilepaths = getScriptParam('animations', [
-	'C:/Users/Andrew/Documents/GitHub/DataLake/Overlord/sets/woman/block.duf',
-	'C:/Users/Andrew/Documents/GitHub/DataLake/Overlord/sets/woman/die.duf',
-	'C:/Users/Andrew/Documents/GitHub/DataLake/Overlord/sets/woman/downwardSlash.duf',
-	'C:/Users/Andrew/Documents/GitHub/DataLake/Overlord/sets/woman/hit.duf',
-	'C:/Users/Andrew/Documents/GitHub/DataLake/Overlord/sets/woman/idle.duf',
-	'C:/Users/Andrew/Documents/GitHub/DataLake/Overlord/sets/woman/pommelStrike.duf',
-	'C:/Users/Andrew/Documents/GitHub/DataLake/Overlord/sets/woman/powerUp.duf',
-	'C:/Users/Andrew/Documents/GitHub/DataLake/Overlord/sets/woman/run.duf',
-	'C:/Users/Andrew/Documents/GitHub/DataLake/Overlord/sets/woman/sweep.duf',
-	'C:/Users/Andrew/Documents/GitHub/DataLake/Overlord/sets/woman/walk.duf'
-]);
-var aPropAnimationFilepaths = getScriptParam('prop_animations', [
-
-]);
-var aGearFilepaths = getScriptParam('gear', [
-	'C:/Users/' + sUserName + '/Documents/GitHub/DataLake/Overlord/gear/leatherJacket.duf'
-]);
-var aGearAnimationFilepaths = getScriptParam('gear_animations', [
-
-]);
-
-var nFrameRate = getScriptParam('frame_rate', 30);
-var bRenderShadows = getScriptParam('render_shadows', true);
-var nCacheDbSizeThreshold = getScriptParam('cache_db_size_threshold_gb', 10);
 var oContentMgr = App.getContentMgr();
+var oScriptArgs = JSON.parse(App.scriptArgs[0]);
+var nTotalNumberOfInstances = oScriptArgs['num_instances'];
+var sMasterTemplatePath = oScriptArgs['template_path'];
 var oScriptFileInfo = new DzFileInfo(getScriptFileName());
 var sScriptPath = oScriptFileInfo.path();
 var nInstanceNumber = App.instanceName();
+var sOutputDirectory = oScriptArgs['image_output_dir'];
 var oOutputDirectory = new DzDir(sOutputDirectory);
+var sResultsDirectory = oScriptArgs['results_directory_path'];
 var oResultsDirectory = new DzDir(sResultsDirectory);
+var sSubjectFilepath = oScriptArgs['subject_file'];
+var aAnimationFilepaths = oScriptArgs['animations'].toString().split(',');
+var aPropAnimationFilepaths = oScriptArgs['prop_animations'].toString().split(',');
+var aGearFilepaths = oScriptArgs['gear'].toString().split(',');
+var aGearAnimationFilepaths = oScriptArgs['gear_animations'].toString().split(',');
 var nDEGREES_IN_CIRCLE = 360;
+var nFrameRate = oScriptArgs['frame_rate'];
+var bRenderShadows = oScriptArgs['render_shadows'];
 var nDAZ_TICKS = 4800;
 var nTicksPerFrame = nDAZ_TICKS / nFrameRate;
 var bOverwriteExistingImages = false;
@@ -73,6 +32,9 @@ var oShadowPlane;
 var oSettings = new DzSettings();
 var oHttpHelper = new DzHttpHelper();
 var oHttp = new DzHttpHelper();
+var nCacheDbSizeThreshold = oScriptArgs['cache_db_size_threshold_gb'];
+// Cleanest way I can find to get the active user profile name
+var sUserName = App.getAppDataPath().split('/')[2];
 var sCacheFolderPath = 'C:/Users/' + sUserName + '/AppData/Local/Overlord/cache';
 var oCacheDbFile;
 var sScriptFileName = getScriptFileName();
