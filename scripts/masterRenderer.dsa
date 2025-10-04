@@ -1,4 +1,5 @@
 var oContentMgr = App.getContentMgr();
+var oImageMgr = App.getImageMgr();
 var oScriptArgs = JSON.parse(App.scriptArgs[0]);
 var nTotalNumberOfInstances = oScriptArgs['num_instances'];
 var sMasterTemplatePath = oScriptArgs['template_path'];
@@ -41,6 +42,7 @@ var sScriptFileName = getScriptFileName();
 var oScriptFileInfo = new DzFileInfo(sScriptFileName);
 var oScriptDirectory = oScriptFileInfo.dir(); // DzDir object
 var sRestartIrayServerScript = oScriptDirectory.absoluteFilePath('restartIrayServer.vbs');
+var nPNG_EXPORTER_ID = 1;
 
 var sAddress = '127.0.0.1';
 var sPort = 9090;
@@ -197,9 +199,8 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 
 			var sFinalName = sSubjectName + (bIsShadow ? '_shadow-' : '-')
 				+ sAnimationName + '_' + nOutputAngle + '-' + ('000' + nFrame).slice(-3);
-			// Only non-shadow gear uses the .exr file extension.
-			// Iray Server .exr files are actually PNGs with an .exr extension, at least for the gear shadows.
-			var sFinalNameWithSuffix = sFinalName + (bIsGear && !bIsShadow ? '-GearCanvas-Beauty.exr' : '-Beauty.png');
+			// Only PNGs will exist in the output folder (EXRs get converted before moving)
+			var sFinalNameWithSuffix = sFinalName + (bIsGear && !bIsShadow ? '-GearCanvas-Beauty.png' : '-Beauty.png');
 			var sFinalNameInFolder = sFinalName + '/' + sFinalNameWithSuffix;
 
 			if (exists(sOutputDirectory + '/' + sFinalName + '.png')) {
@@ -307,6 +308,20 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 					nFrame--; // retry this frame
 					break;
 				}
+			}
+
+			if (sFinalNameInFolder.search('.exr') != -1) {
+
+				var oImage = oImageMgr.loadImage(sResultsDirectory + '/' + sFinalNameInFolder);
+
+				var sNewNameInFolder = sFinalNameInFolder.replace('.exr', '.png');
+
+				oImageMgr.saveImage(oImage, sResultsDirectory + '/' + sNewNameInFolder, nPNG_EXPORTER_ID);
+
+				oResultsDirectory.remove(sResultsDirectory + '/' + sFinalNameInFolder);
+
+				sFinalNameInFolder = sNewNameInFolder;
+
 			}
 
 			// We can also rename the file with this function
