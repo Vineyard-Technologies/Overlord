@@ -13,24 +13,8 @@ Set objShell = CreateObject("WScript.Shell")
 Set objFSO = CreateObject("Scripting.FileSystemObject")
 Set objWMIService = GetObject("winmgmts:\\.\root\cimv2")
 
-' Working directory - use LocalAppData\Overlord
-workingDir = objShell.ExpandEnvironmentStrings("%LOCALAPPDATA%") & "\Overlord"
-cacheDir = workingDir & "\cache"
-cacheDbPath = cacheDir & "\cache.db"
-
-' Create working directory if it doesn't exist
-If Not objFSO.FolderExists(workingDir) Then
-    On Error Resume Next
-    objFSO.CreateFolder(workingDir)
-    On Error GoTo 0
-End If
-
-' Create cache directory if it doesn't exist
-If Not objFSO.FolderExists(cacheDir) Then
-    On Error Resume Next
-    objFSO.CreateFolder(cacheDir)
-    On Error GoTo 0
-End If
+' Working directory - use LocalAppData\Overlord\IrayServer
+workingDir = objShell.ExpandEnvironmentStrings("%LOCALAPPDATA%") & "\Overlord\IrayServer"
 
 ' Step 1: Kill Iray Server processes
 For i = 0 To 1
@@ -45,29 +29,11 @@ Next
 ' Wait a moment for processes to fully terminate
 WScript.Sleep 2000
 
-' Step 2: Delete cache.db if it exists
-If objFSO.FileExists(cacheDbPath) Then
-    ' Retry loop for cache deletion (in case file is still locked)
-    Dim retryCount, maxRetries
-    retryCount = 0
-    maxRetries = 10
-    
-    Do While objFSO.FileExists(cacheDbPath) And retryCount < maxRetries
-        On Error Resume Next
-        objFSO.DeleteFile cacheDbPath, True
-        If Err.Number <> 0 Then
-            WScript.Sleep 1000
-            retryCount = retryCount + 1
-            Err.Clear
-        Else
-            Exit Do
-        End If
-        On Error GoTo 0
-    Loop
-    
-    If objFSO.FileExists(cacheDbPath) And retryCount >= maxRetries Then
-        ' Continue silently - cache cleanup failed but not critical
-    End If
+' Step 2: Delete IrayServer directory
+If objFSO.FolderExists(workingDir) Then
+    On Error Resume Next
+    objFSO.DeleteFolder workingDir, True
+    On Error GoTo 0
 End If
 
 ' Step 3: Start Iray Server
@@ -83,6 +49,14 @@ End If
 
 ' Build command
 cmd = """" & irayServerExe & """ --install-path """ & irayInstallPath & """ --start-queue"
+
+' Create working directory for Iray Server
+If Not objFSO.FolderExists(workingDir) Then
+    On Error Resume Next
+    objFSO.CreateFolder(objShell.ExpandEnvironmentStrings("%LOCALAPPDATA%") & "\Overlord")
+    objFSO.CreateFolder(workingDir)
+    On Error GoTo 0
+End If
 
 ' Start Iray Server
 On Error Resume Next
