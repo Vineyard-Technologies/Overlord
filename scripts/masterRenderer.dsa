@@ -197,15 +197,13 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 			// Check if the current Daz instance should render this frame.
 			if ((nFrame - (nInstanceNumber - 1)) % nTotalNumberOfInstances != 0) continue;
 
-			var sFinalName = sSubjectName + (bIsShadow ? '_shadow-' : '-')
-				+ sAnimationName + '_' + nOutputAngle + '-' + ('000' + nFrame).slice(-3);
-			// Only PNGs will exist in the output folder (EXRs get converted before moving)
-			var sFinalNameWithSuffix = sFinalName + (bIsGear && !bIsShadow ? '-GearCanvas-Beauty.png' : '-Beauty.png');
-			var sFinalNameInFolder = sFinalName + '/' + sFinalNameWithSuffix;
+			var sFinalName = sSubjectName + (bIsShadow ? '_shadow-' : '-') + sAnimationName + '_' + nOutputAngle + '-' + ('000' + nFrame).slice(-3);
+			var sNameInResultsFolder = sResultsDirectory + '/' + sFinalName + '/' + sFinalName + (bIsGear && !bIsShadow ? '-GearCanvas-Beauty.png' : '-Beauty.png');
+			var sNameInOutputFolder = sOutputDirectory + '/' + sFinalName + '.png';
 
-			if (exists(sOutputDirectory + '/' + sFinalName + '.png')) {
+			if (exists(sNameInOutputFolder)) {
 
-				App.log(sFinalNameWithSuffix + ' already exists. Skipping this frame.');
+				App.log(sNameInOutputFolder + ' already exists. Skipping this frame.');
 
 				continue;
 			}
@@ -296,9 +294,9 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 
 			var nAttempts = 0;
 			var nAllowedAttempts = 20;
-			while (!exists(sResultsDirectory + '/' + sFinalNameInFolder)) {
+			while (!exists(sNameInResultsFolder)) {
 
-				App.log('Attempt ' + nAttempts + ': Waiting for ' + sFinalNameInFolder + ' to appear in ' + sResultsDirectory);
+				App.log('Attempt ' + nAttempts + ': Waiting for ' + sNameInResultsFolder + ' to appear.');
 
 				wait(1);
 				nAttempts++;
@@ -310,23 +308,22 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 				}
 			}
 
-			if (sFinalNameInFolder.search('.exr') != -1) {
+			if (sNameInResultsFolder.search('.exr') != -1) {
 
-				var oImage = oImageMgr.loadImage(sResultsDirectory + '/' + sFinalNameInFolder);
-
-				var sNewNameInFolder = sFinalNameInFolder.replace('.exr', '.png');
+				var oImage = oImageMgr.loadImage(sNameInResultsFolder);
+				var sNewNameInFolder = sNameInResultsFolder.replace('.exr', '.png');
 
 				oImageMgr.saveImage(oImage, sResultsDirectory + '/' + sNewNameInFolder, nPNG_EXPORTER_ID);
 
-				oResultsDirectory.remove(sResultsDirectory + '/' + sFinalNameInFolder);
+				oResultsDirectory.remove(sNameInResultsFolder);
 
-				sFinalNameInFolder = sNewNameInFolder;
+				sNameInResultsFolder = sNewNameInFolder;
 
 			}
 
 			// We can also rename the file with this function
-			App.log('Moving ' + sFinalNameInFolder + ' to ' + sOutputDirectory + '/' + sFinalName + '.png');
-			oResultsDirectory.move(sResultsDirectory + '/' + sFinalNameInFolder, sOutputDirectory + '/' + sFinalName + (bIsGear ? '.exr' : '.png'));
+			App.log('Moving ' + sNameInResultsFolder + ' to ' + sOutputDirectory + '/' + sFinalName + '.png');
+			oResultsDirectory.move(sNameInResultsFolder, sOutputDirectory + '/' + sFinalName + '.png');
 
 			App.log('Deleting canvas .zip file: ' + sResultsDirectory + '/' + sFinalName + '.zip');
 			oResultsDirectory.remove(sFinalName + '.zip');

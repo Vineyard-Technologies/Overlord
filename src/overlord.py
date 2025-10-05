@@ -14,20 +14,6 @@ import urllib.request
 import tempfile
 from PIL import Image, ImageTk
 import tkinter as tk
-import OpenEXR
-import Imath
-import numpy as np
-
-# Configure PIL for long-running operation to prevent memory leaks
-try:
-    # Disable internal caching that can cause memory leaks
-    Image.MAX_IMAGE_PIXELS = None  # Remove size limit
-    # Reduce internal buffer sizes
-    if hasattr(Image, '_getencoder'):
-        # Disable some internal caching
-        pass
-except Exception:
-    pass
 from tkinter import filedialog
 from tkinter import ttk
 from tkinter import messagebox
@@ -60,8 +46,7 @@ OVERLORD_CLOSE_DELAY = 2000
 IRAY_STARTUP_DELAY = 10000
 
 # File extensions
-IMAGE_EXTENSIONS = ('.png', '.exr')  # Only formats Overlord works with
-RENDER_OUTPUT_EXTENSIONS = ('.exr',)  # Extensions that need conversion to PNG
+IMAGE_EXTENSIONS = ('.png',)  # Only formats Overlord works with
 PNG_EXTENSION = '.png'
 
 # Default paths
@@ -142,8 +127,6 @@ def get_application_data_directory() -> str:
 
 # Global rendering state
 is_rendering = False
-file_monitor_thread = None
-file_monitor_stop_event = None
 initial_total_images = 0  # Track the initial total images count for progress calculation
 render_start_time = None  # Track when the render started for time estimation filtering
 shutdown_timer_thread = None  # Track shutdown timer thread
@@ -361,7 +344,7 @@ def find_newest_image(directory: str) -> list:
     image_files.sort(reverse=True)
     return [fpath for mtime, fpath in image_files[:max_files]]
 
-# Image search functions optimized for PNG/EXR workflow
+# Image search functions optimized for PNG workflow
 
 def get_frames_from_animation_file(animation_filepath: str) -> int:
     """Read the animation's JSON file to see how many frames it has."""
@@ -465,300 +448,15 @@ def calculate_total_images(subject_filepath: str, animation_filepaths: list, gea
     logging.info(f"Total images to render: {total_images}")
     return total_images
 
-def detect_image_format(file_path: str) -> str:
-    """Detect the actual image format by reading the file header."""
-    try:
-        with open(file_path, 'rb') as f:
-            header = f.read(20)  # Read first 20 bytes
-            
-            # Check for PNG signature
-            if header.startswith(b'\x89PNG\r\n\x1a\n'):
-                return 'png'
-            
-            # Check for EXR signature
-            elif header.startswith(b'\x76\x2f\x31\x01'):
-                return 'exr'
-                
-            # Default to unknown for unsupported formats
-            return 'unknown'
-            
-    except Exception as e:
-        logging.warning(f"Could not detect format for {normalize_path_for_logging(file_path)}: {e}")
-        return 'unknown'
 
-def convert_to_png(input_path: str, delete_original: bool = True) -> str:
-    """Convert EXR files to PNG format. Handles EXR files that are actually PNG files with wrong extensions."""
-    try:
-        # For PNG files, just return as-is
-        if input_path.lower().endswith('.png'):
-            return input_path
-            
-        # For EXR files, convert to PNG
-        base_path = os.path.splitext(input_path)[0]
-        output_path = base_path + '.png'
-        
-        # Skip if PNG already exists and is newer
-        if os.path.exists(output_path):
-            input_mtime = os.path.getmtime(input_path)
-            output_mtime = os.path.getmtime(output_path)
-            if output_mtime >= input_mtime:
-                logging.debug(f"PNG already exists and is newer: {output_path}")
-                if delete_original and os.path.exists(input_path):
-                    try:
-                        os.remove(input_path)
-                        logging.info(f"Removed original EXR file after PNG conversion: {normalize_path_for_logging(input_path)}")
-                    except Exception as e:
-                        logging.warning(f"Could not remove original file {normalize_path_for_logging(input_path)}: {e}")
-                return output_path
-        
-        # Detect the actual file format
-        actual_format = detect_image_format(input_path)
-        
-        # Handle based on actual format, not just extension
-        if actual_format == 'exr':
-            # Handle real EXR files with OpenEXR
-            img = convert_exr_to_pil(input_path)
-            if img is None:
-                logging.error(f"Failed to convert EXR file {normalize_path_for_logging(input_path)}")
-                return input_path
-        elif actual_format == 'png':
-            # Handle PNG files that have .exr extension (misnamed files)
-            if input_path.lower().endswith('.exr'):
-                logging.info(f"File {normalize_path_for_logging(input_path)} has .exr extension but is actually a PNG file - renaming")
-                # Simply rename the file to .png
-                try:
-                    os.rename(input_path, output_path)
-                    logging.info(f"Renamed PNG file from .exr to .png: {normalize_path_for_logging(output_path)}")
-                    return output_path
-                except Exception as e:
-                    logging.error(f"Failed to rename PNG file {normalize_path_for_logging(input_path)}: {e}")
-                    return input_path
-            else:
-                # Already a PNG file, nothing to do
-                return input_path
-        else:
-            # Unsupported format - Overlord only works with PNG and EXR
-            logging.error(f"Unsupported image format '{actual_format}' for {normalize_path_for_logging(input_path)}. Overlord only supports PNG and EXR files.")
-            return input_path
-        
-        # Save as PNG
-        img.save(output_path, 'PNG')
-        
-        # Explicitly close the image to free memory immediately
-        try:
-            img.close()
-        except Exception:
-            pass
-        
-        # Verify the conversion was successful
-        if os.path.exists(output_path):
-            logging.info(f"Successfully converted to PNG: {normalize_path_for_logging(input_path)} -> {normalize_path_for_logging(output_path)}")
-            
-            # Delete original file if requested
-            if delete_original:
-                try:
-                    os.remove(input_path)
-                    logging.info(f"Removed original file after PNG conversion: {normalize_path_for_logging(input_path)}")
-                except Exception as e:
-                    logging.warning(f"Could not remove original file {normalize_path_for_logging(input_path)}: {e}")
-            
-            return output_path
-        else:
-            logging.error(f"PNG conversion failed - output file not created: {normalize_path_for_logging(output_path)}")
-            return input_path
-            
-    except Exception as e:
-        logging.error(f"Error converting {normalize_path_for_logging(input_path)} to PNG: {e}")
-        return input_path
 
-def convert_exr_to_pil(exr_path: str) -> Image.Image:
-    """Convert EXR file to PIL Image using OpenEXR."""
-    try:
-        # Normalize the path to use consistent separators for OpenEXR on Windows
-        normalized_path = os.path.normpath(exr_path)
-        
-        # Log path normalization if there was a change (for debugging)
-        if normalized_path != exr_path:
-            logging.debug(f"Normalized EXR path: {normalize_path_for_logging(exr_path)} -> {normalize_path_for_logging(normalized_path)}")
-        
-        # Open the EXR file
-        exr_file = OpenEXR.InputFile(normalized_path)
-        
-        # Get the header to understand the image properties
-        header = exr_file.header()
-        dw = header['dataWindow']
-        width = dw.max.x - dw.min.x + 1
-        height = dw.max.y - dw.min.y + 1
-        
-        # Check for extremely large EXR files that could cause memory issues
-        max_pixels = 50 * 1024 * 1024  # 50 megapixels max
-        total_pixels = width * height
-        if total_pixels > max_pixels:
-            logging.warning(f"EXR file {exr_path} is very large ({width}x{height} = {total_pixels:,} pixels). This may cause memory issues.")
-            exr_file.close()
-            return None
-        
-        # Get the channel names
-        channels = header['channels'].keys()
-        
-        # Determine which channels to use (prefer RGB, fallback to available channels)
-        if 'R' in channels and 'G' in channels and 'B' in channels:
-            channel_names = ['R', 'G', 'B']
-            has_alpha = 'A' in channels
-            if has_alpha:
-                channel_names.append('A')
-        elif 'Y' in channels:
-            # Luminance channel
-            channel_names = ['Y']
-            has_alpha = 'A' in channels
-            if has_alpha:
-                channel_names.append('A')
-        else:
-            # Use the first available channel
-            channel_names = [list(channels)[0]]
-            has_alpha = False
-        
-        # Read the pixel data for each channel
-        pixel_data = []
-        for channel in channel_names:
-            if channel in channels:
-                try:
-                    channel_data = exr_file.channel(channel, Imath.PixelType(Imath.PixelType.FLOAT))
-                    # Convert to numpy array
-                    channel_array = np.frombuffer(channel_data, dtype=np.float32)
-                    channel_array = channel_array.reshape((height, width))
-                    pixel_data.append(channel_array)
-                except MemoryError:
-                    logging.error(f"Memory error processing EXR channel {channel} for {exr_path}")
-                    exr_file.close()
-                    # Force garbage collection to free any partial data
-                    import gc
-                    gc.collect()
-                    return None
-        
-        # Close the EXR file
-        exr_file.close()
-        
-        # Combine channels and convert to 8-bit
-        if len(pixel_data) == 1:
-            # Grayscale
-            combined = pixel_data[0]
-            # Convert to 8-bit (clamp values and scale)
-            combined = np.clip(combined, 0, 1)
-            combined = (combined * 255).astype(np.uint8)
-            # Create PIL image
-            pil_image = Image.fromarray(combined, mode='L')
-            # Convert to RGB for consistency
-            pil_image = pil_image.convert('RGB')
-        elif len(pixel_data) == 3:
-            # RGB
-            combined = np.stack(pixel_data, axis=2)
-            # Convert to 8-bit (clamp values and scale)
-            combined = np.clip(combined, 0, 1)
-            combined = (combined * 255).astype(np.uint8)
-            # Create PIL image
-            pil_image = Image.fromarray(combined, mode='RGB')
-        elif len(pixel_data) == 4:
-            # RGBA
-            combined = np.stack(pixel_data, axis=2)
-            # Convert to 8-bit (clamp values and scale)
-            combined = np.clip(combined, 0, 1)
-            combined = (combined * 255).astype(np.uint8)
-            # Create PIL image
-            pil_image = Image.fromarray(combined, mode='RGBA')
-        else:
-            logging.error(f"Unsupported channel configuration in EXR file: {channel_names}")
-            return None
-        
-        return pil_image
-        
-    except Exception as e:
-        logging.error(f"Error converting EXR file {normalize_path_for_logging(exr_path)}: {e}")
-        return None
 
-def monitor_output_folder(output_directory: str, stop_event):
-    """Monitor output folder for EXR files and convert them to PNG. PNG files are left as-is."""
-    global is_rendering
-    
-    logging.info(f"Starting file monitoring for: {normalize_path_for_logging(output_directory)}")
-    
-    while not stop_event.is_set() and is_rendering:
-        try:
-            if not os.path.exists(output_directory):
-                time.sleep(1)
-                continue
-                
-            # Find all EXR files in the output directory
-            # Limit files per cycle to prevent memory spikes
-            files_processed_this_cycle = 0
-            max_files_per_cycle = 50  # Process max 50 files per cycle to prevent memory spikes
-            
-            for root, dirs, files in os.walk(output_directory):
-                for file in files:
-                    if stop_event.is_set() or not is_rendering or files_processed_this_cycle >= max_files_per_cycle:
-                        break
-                        
-                    file_path = os.path.join(root, file)
-                    file_lower = file.lower()
-                    
-                    # Only process EXR files (PNGs are already converted)
-                    if file_lower.endswith(RENDER_OUTPUT_EXTENSIONS):
-                        # Check if file is complete (not being written to)
-                        try:
-                            # Wait a moment to ensure file write is complete
-                            initial_size = os.path.getsize(file_path)
-                            time.sleep(0.5)
-                            final_size = os.path.getsize(file_path)
-                            
-                            if initial_size != final_size:
-                                # File is still being written, skip for now
-                                continue
-                                
-                        except (OSError, IOError):
-                            # File might be locked or still being written
-                            continue
-                        
-                        # Convert EXR to PNG (original EXR is deleted after conversion)
-                        logging.info(f"Processing render output: {normalize_path_for_logging(file_path)}")
-                        convert_to_png(file_path, delete_original=True)
-                        
-                        # Update file activity for auto-restart monitoring
-                        update_last_file_activity()
-                        
-                        files_processed_this_cycle += 1
-                        
-                        # Force garbage collection every few files to prevent memory buildup
-                        if files_processed_this_cycle % 10 == 0:
-                            gc.collect()
-                
-                if stop_event.is_set() or not is_rendering:
-                    break
-            
-            # Sleep before next check
-            time.sleep(2)
-            
-        except Exception as e:
-            logging.error(f"Error in file monitoring: {e}")
-            time.sleep(5)  # Wait longer on error
-    
-    logging.info("File monitoring stopped")
 
-def start_file_monitoring(output_directory: str):
-    """Start monitoring the output folder for file conversion."""
-    global file_monitor_thread, file_monitor_stop_event
-    
-    # Stop any existing monitoring
-    stop_file_monitoring()
-    
-    # Create new monitoring thread
-    file_monitor_stop_event = threading.Event()
-    file_monitor_thread = threading.Thread(
-        target=monitor_output_folder,
-        args=(output_directory, file_monitor_stop_event),
-        daemon=True
-    )
-    file_monitor_thread.start()
-    logging.info("File monitoring started")
+
+
+
+
+
 
 def update_last_file_activity():
     """Update the last file activity timestamp for auto-restart monitoring."""
@@ -767,23 +465,7 @@ def update_last_file_activity():
     last_file_activity_time = time.time()
     logging.debug("Updated last file activity time")
 
-def stop_file_monitoring():
-    """Stop the file monitoring thread."""
-    global file_monitor_thread, file_monitor_stop_event
-    
-    if file_monitor_stop_event:
-        file_monitor_stop_event.set()
-    
-    if file_monitor_thread and file_monitor_thread.is_alive():
-        try:
-            file_monitor_thread.join(timeout=5)
-            if file_monitor_thread.is_alive():
-                logging.warning("File monitoring thread did not stop gracefully")
-        except Exception as e:
-            logging.error(f"Error stopping file monitoring thread: {e}")
-    
-    file_monitor_thread = None
-    file_monitor_stop_event = None
+
 
 
 # ============================================================================
@@ -1606,19 +1288,15 @@ class CleanupManager:
         self.cleanup_registered = False
         self.save_settings_callback = None
         self.settings_saved_on_close = False
-        self.image_references = []  # Initialize empty list for image references
-        # Remove file monitoring functionality
+        self.image_references = []
     
     def register_temp_file(self, filepath):
         """Register a temporary file for cleanup"""
         self.temp_files.append(filepath)
     
     def register_image_reference(self, image_ref):
-        """Register an image reference for cleanup - maintains compatibility"""
-        if hasattr(self, 'image_references'):
-            self.image_references.append(image_ref)
-    
-
+        """Register an image reference for cleanup"""
+        self.image_references.append(image_ref)
     
     def register_executor(self, executor):
         """Register a thread pool executor for cleanup"""
@@ -1632,18 +1310,12 @@ class CleanupManager:
         """Mark that settings have been saved to prevent duplicate saves"""
         self.settings_saved_on_close = True
     
-    def stop_file_monitoring(self):
-        """Stop file monitoring when cleanup is called."""
-        # Stop the global file monitoring
-        stop_file_monitoring()
-    
     def cleanup_all(self):
         """Clean up all registered resources"""
         try:
-            # Stop file monitoring first and reset rendering state
+            # Reset rendering state
             global is_rendering
             is_rendering = False
-            self.stop_file_monitoring()
             
             # Stop Iray Server processes using the global function
             stop_iray_server()
@@ -1656,16 +1328,15 @@ class CleanupManager:
                     # Widgets may have been destroyed already, this is normal during shutdown
                     logging.debug(f"Could not save settings during cleanup (widgets may be destroyed): {e}")
             
-            # Clear image references first (if any exist)
-            if hasattr(self, 'image_references') and self.image_references:
-                for img_ref in self.image_references:
-                    try:
-                        if hasattr(img_ref, 'close'):
-                            img_ref.close()
-                        del img_ref
-                    except Exception:
-                        pass
-                self.image_references.clear()
+            # Clear image references
+            for img_ref in self.image_references:
+                try:
+                    if hasattr(img_ref, 'close'):
+                        img_ref.close()
+                    del img_ref
+                except Exception:
+                    pass
+            self.image_references.clear()
             
             # Force garbage collection
             gc.collect()
@@ -2089,8 +1760,7 @@ def start_headless_render(settings):
         "cache_db_size_threshold_gb": str(settings.get("cache_db_size_threshold_gb", "10"))
     }
     
-    # Start file monitoring
-    start_file_monitoring(results_dir)
+    # File monitoring is now handled by masterRenderer.dsa
     
     # Launch DAZ Studio instances
     if not os.path.exists(daz_executable_path):
@@ -4374,7 +4044,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 logging.info('Closing any existing Iray Server and DAZ Studio instances...')
                 
                 # Stop file monitoring first to prevent conflicts
-                cleanup_manager.stop_file_monitoring()
+                # File monitoring cleanup no longer needed
                 
                 # Kill all existing render-related processes
                 kill_render_related_processes()
@@ -4392,12 +4062,11 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 # Iray Server will be started by DAZ Script - no need to start it here
                 logging.info('Iray Server startup will be handled by DAZ Script')
                 
-                # Set rendering state and start file monitoring
+                # Set rendering state
                 is_rendering = True
                 reset_shutdown_timer()  # Reset any pending shutdown timer
                 output_directory = value_entries["Output Directory"].get().strip()
-                start_file_monitoring(output_directory)
-                logging.info('File monitoring started for PNG conversion')
+                logging.info('File conversion and monitoring now handled by masterRenderer.dsa')
                 
                 # Start background thread to wait for render completion
                 def wait_for_completion():
@@ -4429,14 +4098,14 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                                     
                                     logging.info('Render completion cycle finished successfully - Iray Server restarted, DAZ Studio instances continue running')
                                     
-                                    # Stop file monitoring and reset rendering state
+                                    # Reset rendering state - file monitoring handled by masterRenderer.dsa
                                     is_rendering = False
-                                    stop_file_monitoring()
+                                    # File monitoring cleanup no longer needed
                                 except Exception as cleanup_e:
                                     logging.error(f'Error during render completion cleanup/restart: {cleanup_e}')
                                     # Reset rendering state on error
                                     is_rendering = False
-                                    stop_file_monitoring()
+                                    # File monitoring cleanup no longer needed
                                     # Still re-enable buttons even if cleanup fails - schedule on main thread
                                     root.after(0, lambda: (button.config(state="normal"), stop_button.config(state="disabled")))
                             
@@ -4457,7 +4126,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 # Reset rendering state on error
                 is_rendering = False
                 render_start_time = None  # Reset render start time
-                stop_file_monitoring()
+                # File monitoring cleanup no longer needed
                 # Reset initial total images count
                 initial_total_images = 0
                 # Re-enable Start Render button and disable Stop Render button on error
@@ -4478,7 +4147,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 # Reset rendering state on error
                 is_rendering = False
                 render_start_time = None  # Reset render start time
-                stop_file_monitoring()
+                # File monitoring cleanup no longer needed
                 # Reset initial total images count
                 initial_total_images = 0
                 # Re-enable Start Render button and disable Stop Render button on error
@@ -4632,7 +4301,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 root.after(DAZ_STUDIO_STARTUP_DELAY, lambda: run_all_instances(i + 1))
             else:
                 logging.info('All render instances launched')
-                # Since we removed EXR file monitoring, just log completion
+                # File conversion and monitoring now handled by masterRenderer.dsa
                 logging.info('Render instances launched successfully, images will be saved directly to output directory')
                 
 
@@ -4650,8 +4319,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
     def kill_render_related_processes():
         """Kill all Daz Studio and Iray Server processes. Also resets UI progress labels."""
         logging.info('Killing all render-related processes (DAZStudio, Iray Server)')
-        # Stop file monitoring first
-        cleanup_manager.stop_file_monitoring()
+        # File monitoring cleanup no longer needed
         killed_daz = 0
         try:
             # Kill all DAZStudio processes
@@ -4687,16 +4355,15 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             render_start_time = None  # Reset render start time
             reset_shutdown_timer()  # Cancel any pending shutdown
             logging.info("Render start time reset")
-            stop_file_monitoring()
+            # File monitoring cleanup no longer needed
             
             # Signal any running IrayServerActions operations to stop
             if hasattr(cleanup_manager, 'iray_actions') and cleanup_manager.iray_actions:
                 cleanup_manager.iray_actions.request_stop()
                 logging.info('Signaled IrayServerActions to stop')
             
-            # Stop file monitoring first to prevent race conditions
-            logging.info('Stopping file monitoring and conversion...')
-            cleanup_manager.stop_file_monitoring()
+            # File conversion and monitoring now handled by masterRenderer.dsa
+            logging.info('Stopping render processes...')
             
             # Stop image monitoring
             stop_image_monitoring()
