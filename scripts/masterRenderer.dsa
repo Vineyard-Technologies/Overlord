@@ -88,8 +88,8 @@ function exists(sFilePath) {
 function getName(sFileName) {
 	return new DzFileInfo(sFileName).completeBaseName();
 }
-// The Overlord UI passes an array with a single, undefined object
-// whenever filepath(s) are not specified.
+// Whenever filepath(s) are not specified, an array with a single,
+// undefined object is passed. This function checks for that.
 function thereAre(aArray) {
 	return aArray[0] !== '';
 }
@@ -324,29 +324,9 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 		if (!bIsShadow) renderCore(sSubjectName, sAnimationName, bIsGear, true);
 	}
 }
-function filterFilepathsBySuffix(aFilepaths, suffix) {
-	var result = [];
-	for (var i = 0; i < aFilepaths.length; i++) {
-		if (aFilepaths[i].indexOf(suffix) === aFilepaths[i].length - suffix.length) {
-			result.push(aFilepaths[i]);
-		}
-	}
-	return result;
-}
 
 // Clean up any previous Iray Server instance, and start with a clean slate
 restartIrayServer();
-
-// Make the output directory if it doesn't exist
-// TODO: Double check this is still necessary
-if (!oOutputDirectory.exists()) {
-
-	App.log('"' + sOutputDirectory + '" does not exist. Creating directory...');
-
-	oOutputDirectory.mkdir();
-
-	App.log('Created "' + sOutputDirectory + '".');
-}
 
 var sSubjectName = getName(sSubjectFilepath);
 
