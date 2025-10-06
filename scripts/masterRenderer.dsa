@@ -42,7 +42,7 @@ var sScriptFileName = getScriptFileName();
 var oScriptFileInfo = new DzFileInfo(sScriptFileName);
 var oScriptDirectory = oScriptFileInfo.dir(); // DzDir object
 var sRestartIrayServerScript = oScriptDirectory.absoluteFilePath('restartIrayServer.vbs');
-var nPNG_EXPORTER_ID = 1;
+var nAUTODETECT_EXPORTER_PARAMETER = -1;
 
 var sAddress = '127.0.0.1';
 var sPort = 9090;
@@ -75,7 +75,7 @@ function restartIrayServer() {
 	App.showURL(sRestartIrayServerScript);
 	
 	// Wait for the restart process to complete
-	wait(5);
+	wait(30);
 }
 // Check if a file exists and isn't 0 bytes
 function exists(sFilePath) {
@@ -198,7 +198,7 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 			if ((nFrame - (nInstanceNumber - 1)) % nTotalNumberOfInstances != 0) continue;
 
 			var sFinalName = sSubjectName + (bIsShadow ? '_shadow-' : '-') + sAnimationName + '_' + nOutputAngle + '-' + ('000' + nFrame).slice(-3);
-			var sNameInResultsFolder = sResultsDirectory + '/' + sFinalName + '/' + sFinalName + (bIsGear && !bIsShadow ? '-GearCanvas-Beauty.png' : '-Beauty.png');
+			var sNameInResultsFolder = sResultsDirectory + '/' + sFinalName + '/' + sFinalName + (bIsGear && !bIsShadow ? '-GearCanvas-Beauty.exr' : '-Beauty.png');
 			var sNameInOutputFolder = sOutputDirectory + '/' + sFinalName + '.png';
 
 			if (exists(sNameInOutputFolder)) {
@@ -275,10 +275,7 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 						restartIrayServer();
 
 						nHttpAttempts = 0;
-						
-						// Give Iray Server some time to start
-						wait(30);
-						
+												
 					} else {
 
 						wait(1);
@@ -308,26 +305,17 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 				}
 			}
 
-			if (sNameInResultsFolder.search('.exr') != -1) {
+			var oImage = oImageMgr.loadImage(sNameInResultsFolder);
 
-				var oImage = oImageMgr.loadImage(sNameInResultsFolder);
-				var sNewNameInFolder = sNameInResultsFolder.replace('.exr', '.png');
+			// This converts, renames, and copies the image to the output folder
+			oImageMgr.saveImage(sNameInOutputFolder, oImage, nAUTODETECT_EXPORTER_PARAMETER);
 
-				oImageMgr.saveImage(oImage, sResultsDirectory + '/' + sNewNameInFolder, nPNG_EXPORTER_ID);
-
-				oResultsDirectory.remove(sNameInResultsFolder);
-
-				sNameInResultsFolder = sNewNameInFolder;
-
-			}
-
-			// We can also rename the file with this function
-			App.log('Moving ' + sNameInResultsFolder + ' to ' + sOutputDirectory + '/' + sFinalName + '.png');
-			oResultsDirectory.move(sNameInResultsFolder, sOutputDirectory + '/' + sFinalName + '.png');
+			oResultsDirectory.remove(sNameInResultsFolder);
 
 			App.log('Deleting canvas .zip file: ' + sResultsDirectory + '/' + sFinalName + '.zip');
 			oResultsDirectory.remove(sFinalName + '.zip');
-			
+
+			// TODO: Can we delete the folder if it's not empty?
 			App.log('Deleting folder: ' + sResultsDirectory + '/' + sFinalName);
 			oResultsDirectory.rmdir(sFinalName);
 		}
@@ -350,6 +338,7 @@ function filterFilepathsBySuffix(aFilepaths, suffix) {
 restartIrayServer();
 
 // Make the output directory if it doesn't exist
+// TODO: Double check this is still necessary
 if (!oOutputDirectory.exists()) {
 
 	App.log('"' + sOutputDirectory + '" does not exist. Creating directory...');
