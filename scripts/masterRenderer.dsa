@@ -36,7 +36,7 @@ var oHttp = new DzHttpHelper();
 var nCacheDbSizeThreshold = oScriptArgs['cache_db_size_threshold_gb'];
 // Cleanest way I can find to get the active user profile name
 var sUserName = App.getAppDataPath().split('/')[2];
-var sCacheFolderPath = 'C:/Users/' + sUserName + '/AppData/Local/Overlord/cache';
+var sCacheFolderPath = 'C:/Users/' + sUserName + '/AppData/Local/Overlord/IrayServer/cache';
 var oCacheDbFile;
 var sScriptFileName = getScriptFileName();
 var oScriptFileInfo = new DzFileInfo(sScriptFileName);
