@@ -43,7 +43,6 @@ RECENT_RENDER_TIMES_LIMIT = 25
 # Process startup delays (milliseconds)
 DAZ_STUDIO_STARTUP_DELAY = 5000
 OVERLORD_CLOSE_DELAY = 2000
-IRAY_STARTUP_DELAY = 10000
 
 # File extensions
 IMAGE_EXTENSIONS = ('.png',)  # Only formats Overlord works with
@@ -132,19 +131,7 @@ render_start_time = None  # Track when the render started for time estimation fi
 shutdown_timer_thread = None  # Track shutdown timer thread
 periodic_monitoring_job = None  # Track the periodic monitoring timer job
 
-# Automatic restart monitoring
-auto_restart_enabled = False
-last_file_activity_time = None
-auto_restart_monitor_job = None
-auto_restart_in_progress = False
-STALL_DETECTION_MINUTES = 5  # Minutes to wait before considering render stalled
 
-# Automatic restart monitoring
-auto_restart_enabled = False
-last_file_activity_time = None
-auto_restart_monitor_job = None
-auto_restart_in_progress = False
-STALL_DETECTION_MINUTES = 5  # Minutes to wait before considering render stalled
 
 def get_default_output_directory() -> str:
     """Get the default output directory for user files."""
@@ -458,16 +445,6 @@ def calculate_total_images(subject_filepath: str, animation_filepaths: list, gea
 
 
 
-def update_last_file_activity():
-    """Update the last file activity timestamp for auto-restart monitoring."""
-    global last_file_activity_time
-    import time
-    last_file_activity_time = time.time()
-    logging.debug("Updated last file activity time")
-
-
-
-
 # ============================================================================
 # PROCESS MANAGEMENT
 # ============================================================================
@@ -591,126 +568,7 @@ def set_inputs_enabled(enabled: bool = True):
     except Exception as e:
         logging.error(f"Error setting input field states: {e}")
 
-def start_auto_restart_monitoring(root, start_render_func, stop_render_func, button, stop_button, value_entries=None, render_shadows_var=None, shutdown_on_finish_var=None):
-    """Start monitoring for stalled renders and automatically restart them."""
-    global auto_restart_enabled, auto_restart_monitor_job, last_file_activity_time
-    
-    if not auto_restart_enabled:
-        return
-    
-    def check_for_stalled_render():
-        """Check if render appears to be stalled and restart if needed."""
-        global auto_restart_in_progress, last_file_activity_time
-        
-        try:
-            if not is_rendering or auto_restart_in_progress:
-                # Schedule next check
-                if auto_restart_enabled:
-                    global auto_restart_monitor_job
-                    auto_restart_monitor_job = root.after(30000, check_for_stalled_render)  # Check every 30 seconds
-                return
-            
-            import time
-            current_time = time.time()
-            
-            if last_file_activity_time is None:
-                # No file activity recorded yet, set it to now
-                last_file_activity_time = current_time
-            else:
-                # Check if enough time has passed without file activity
-                time_since_activity = current_time - last_file_activity_time
-                stall_threshold = STALL_DETECTION_MINUTES * 60  # Convert to seconds
-                
-                if time_since_activity > stall_threshold:
-                    logging.warning(f"⚠️  RENDER STALLED DETECTED - No file activity for {STALL_DETECTION_MINUTES} minutes. Initiating automatic restart...")
-                    
-                    # Start automatic restart process
-                    auto_restart_in_progress = True
-                    
-                    # Disable both buttons during restart
-                    button.config(state="disabled", text="Auto Restarting...")
-                    stop_button.config(state="disabled")
-                    
-                    def perform_restart():
-                        """Perform the actual restart sequence."""
-                        global auto_restart_in_progress, last_file_activity_time
-                        
-                        try:
-                            logging.info("Step 1: Stopping current render processes...")
-                            stop_render_func()
-                            
-                            # Wait a few seconds for cleanup
-                            def restart_after_delay():
-                                try:
-                                    logging.info("Step 2: Starting fresh render after auto-restart...")
-                                    
-                                    # Reset file activity time
-                                    last_file_activity_time = time.time()
-                                    
-                                    # Start render again
-                                    start_render_func()
-                                    
-                                    # Re-enable buttons (start_render_func will handle proper button states and input fields)
-                                    auto_restart_in_progress = False
-                                    
-                                    logging.info("✅ Automatic render restart completed successfully")
-                                    
-                                except Exception as e:
-                                    logging.error(f"Error during automatic restart: {e}")
-                                    auto_restart_in_progress = False
-                                    # Re-enable buttons and inputs on error
-                                    button.config(state="normal", text="Start Render")
-                                    stop_button.config(state="disabled")
-                                    # Re-enable input fields on error
-                                    try:
-                                        set_inputs_enabled(True)
-                                    except Exception:
-                                        pass
-                            
-                            # Schedule restart after 3 seconds
-                            root.after(3000, restart_after_delay)
-                            
-                        except Exception as e:
-                            logging.error(f"Error during automatic restart stop phase: {e}")
-                            auto_restart_in_progress = False
-            
-                            # Re-enable buttons and inputs on error
-                            button.config(state="normal", text="Start Render")
-                            stop_button.config(state="disabled")
-                            # Re-enable input fields on error
-                            try:
-                                set_inputs_enabled(True)
-                            except Exception:
-                                pass
-                    
-                    # Perform restart in next event loop cycle
-                    root.after(100, perform_restart)
-                    
-                    return  # Don't schedule next check yet, restart will handle it
-            
-        except Exception as e:
-            logging.error(f"Error in auto-restart monitoring: {e}")
-        
-        # Schedule next check
-        if auto_restart_enabled:
-            auto_restart_monitor_job = root.after(30000, check_for_stalled_render)  # Check every 30 seconds
-    
-    # Initialize file activity time and start monitoring
-    import time
-    last_file_activity_time = time.time()
-    auto_restart_monitor_job = root.after(60000, check_for_stalled_render)  # First check after 1 minute
-    logging.info(f"🔄 Auto-restart monitoring enabled - will automatically restart if no file activity for {STALL_DETECTION_MINUTES} minutes")
 
-def stop_auto_restart_monitoring(root):
-    """Stop automatic restart monitoring."""
-    global auto_restart_enabled, auto_restart_monitor_job
-    
-    auto_restart_enabled = False
-    
-    if auto_restart_monitor_job:
-        root.after_cancel(auto_restart_monitor_job)
-        auto_restart_monitor_job = None
-        logging.info("Auto-restart monitoring stopped")
 
 
 def cleanup_results_directory(script_dir=None):
@@ -1811,6 +1669,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
     global image_monitoring_active
     image_monitoring_active = False
     
+    # We can't use PowerShell or Batch for this because the total length of the command is over 256 characters.
     def create_daz_command_array(daz_executable_path, json_map, log_size, render_script_path):
         """Create the DAZ Studio command array with all required parameters."""
         return [
@@ -3864,9 +3723,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             periodic_monitoring_job = None
         logging.info("Output details monitoring stopped")
 
-    def start_render():
-        global auto_restart_enabled, auto_restart_in_progress
-        
+    def start_render():        
         # Prevent multiple render starts
         if button.cget("state") == "disabled":
             logging.info("Start Render already in progress, ignoring additional click")
@@ -4309,10 +4166,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
         # Start monitoring when render begins
         start_output_details_monitoring()
         
-        # Enable auto-restart monitoring
-        global auto_restart_enabled
-        auto_restart_enabled = True
-        start_auto_restart_monitoring(root, start_render, stop_render, button, stop_button, value_entries, render_shadows_var, shutdown_on_finish_var)
+
         
         run_all_instances()
 
@@ -4339,9 +4193,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
         # Reset progress bar only
         progress_var.set(0)
 
-    def stop_render():
-        global auto_restart_enabled, auto_restart_in_progress
-        
+    def stop_render():        
         logging.info('Stop Render button clicked')
         
         # Immediately disable the stop button to prevent multiple clicks
@@ -4371,8 +4223,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             # Stop periodic monitoring to prevent memory leaks
             stop_output_details_monitoring()
             
-            # Stop auto-restart monitoring
-            stop_auto_restart_monitoring(root)
+
             
             # Image display functionality removed
             
@@ -4398,19 +4249,15 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
         except Exception as e:
             logging.error(f'Error during stop render: {e}')
         finally:
-            # Always re-enable Start Render button (only if not in auto-restart)
-            if not auto_restart_in_progress:
-                button.config(state="normal", text="Start Render")
-                # Re-enable all input fields
-                set_inputs_enabled(True)
+            # Always re-enable Start Render button
+            button.config(state="normal", text="Start Render")
+            # Re-enable all input fields
+            set_inputs_enabled(True)
             
             # Reset Images remaining text and initial total
             initial_total_images = 0
             render_start_time = None  # Reset render start time
             images_remaining_var.set("Images remaining:")
-            
-            # Reset auto-restart state
-            auto_restart_in_progress = False
             
             logging.info('Stop render completed')
 
