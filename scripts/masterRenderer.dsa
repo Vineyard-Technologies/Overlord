@@ -77,67 +77,53 @@ function restartIrayServer() {
 	// Wait for the restart process to complete
 	wait(30);
 }
-// Check if a file exists, isn't 0 bytes, and has valid PNG structure
-function exists(sFilePath) {
-	var oFileInfo = new DzFileInfo(sFilePath);
-	
-	// Basic existence and size check
-	if (!oFileInfo.exists() || oFileInfo.size() == 0) {
-		return false;
-	}
-	
-	// For PNG files, validate structure to catch truncated files
-	if (sFilePath.toLowerCase().indexOf('.png') !== -1) {
-		return isValidPng(sFilePath);
-	}
-	
-	return true;
-}
+// Check if an image exists and isn't truncated
+function isValidImage(sFilePath) {
 
-// Validate PNG file structure to detect truncation
-function isValidPng(sFilePath) {
-	var oFile = new DzFile(sFilePath);
-	
-	if (!oFile.open(DzFile.ReadOnly)) {
-		return false;
-	}
-	
 	try {
-		// Check PNG signature (first 8 bytes)
-		var aPngSignature = [137, 80, 78, 71, 13, 10, 26, 10];
-		var aFileHeader = oFile.read(8);
-		
-		for (var i = 0; i < 8; i++) {
-			if (aFileHeader[i] !== aPngSignature[i]) {
-				oFile.close();
-				return false;
-			}
-		}
-		
-		// Look for IEND chunk at the end (indicates complete file)
-		var nFileSize = new DzFileInfo(sFilePath).size();
-		
-		// IEND chunk is always the last 12 bytes: 4 bytes length (0000) + 4 bytes "IEND" + 4 bytes CRC
-		if (nFileSize < 12) {
+
+		var oFile = new DzFile(sFilePath);
+		var oFileInfo = new DzFileInfo(sFilePath);
+		var nFileSize = oFileInfo.size();
+
+		oFile.open(DzFile.ReadOnly);
+
+		// PNG files end with an IEND chunk
+		if (sFilePath.slice(-4).toLowerCase() == '.png') {
+
+			// Seek to 8 bytes from end to check for IEND
+			oFile.seek(nFileSize - 8);
+			var aEndChunk = oFile.read(4);
+			var sEndChunk = String.fromCharCode(aEndChunk[0], aEndChunk[1], aEndChunk[2], aEndChunk[3]);
+
 			oFile.close();
-			return false;
+
+			// Valid PNG must end with IEND chunk
+			return sEndChunk === "IEND";
 		}
-		
-		// Seek to 8 bytes from end to check for IEND
-		oFile.seek(nFileSize - 8);
-		var aEndChunk = oFile.read(4);
-		var sEndChunk = String.fromCharCode(aEndChunk[0], aEndChunk[1], aEndChunk[2], aEndChunk[3]);
-		
-		oFile.close();
-		
-		// Valid PNG must end with IEND chunk
-		return sEndChunk === "IEND";
+
+		// EXR files end with a null byte
+		if(sFilePath.slice(-4).toLowerCase() == '.exr') {
+
+			oFile.seek(nFileSize - 1);
+
+    		var aLastByte = oFile.read(1);
+
+			return aLastByte[0] === 0x00;
+		}
 		
 	} catch (e) {
-		oFile.close();
+
+		App.log('Error reading file ' + sFilePath + ': ' + e.message);
+
 		return false;
+
+	} finally {
+
+		oFile.close();
 	}
 }
+
 // Obtain the desired name out of a filepath or filename.
 function getName(sFileName) {
 	return new DzFileInfo(sFileName).completeBaseName();
@@ -255,11 +241,14 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 			var sNameInResultsFolder = sResultsDirectory + '/' + sFinalName + '/' + sFinalName + (bIsGear && !bIsShadow ? '-GearCanvas-Beauty.exr' : '-Beauty.png');
 			var sNameInOutputFolder = sOutputDirectory + '/' + sFinalName + '.png';
 
-			if (exists(sNameInOutputFolder)) {
+			if (isValidImage(sNameInOutputFolder)) {
 
 				App.log(sNameInOutputFolder + ' already exists. Skipping this frame.');
 
 				continue;
+			} else {
+
+				App.log(sNameInOutputFolder + ' does not exist. Rendering this frame.');
 			}
 
 			App.log('Setting frame to ' + nFrame);
@@ -289,7 +278,7 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 			oCacheDbFile = new DzFileInfo(sCacheFolderPath + '/cache.db');
 
 			// Check if cache.db is over the threshold (10GBs)
-			if (oCacheDbFile.exists() && oCacheDbFile.size() > nCacheDbSizeThreshold * 1024 * 1024 * 1024) {
+			if (oCacheDbFile.size() > nCacheDbSizeThreshold * 1024 * 1024 * 1024) {
 
 				App.log('Cache database is over ' + nCacheDbSizeThreshold + 'GBs: ' + oCacheDbFile.size() / (1024 * 1024 * 1024) + 'GBs. Restarting Iray Server...');
 
@@ -345,7 +334,7 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 
 			var nAttempts = 0;
 			var nAllowedAttempts = 20;
-			while (!exists(sNameInResultsFolder)) {
+			while (!isValidImage(sNameInResultsFolder)) {
 
 				App.log('Attempt ' + nAttempts + ': Waiting for ' + sNameInResultsFolder + ' to appear.');
 
