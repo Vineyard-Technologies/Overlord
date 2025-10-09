@@ -295,11 +295,13 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 				App.log('Cache database is under ' + nCacheDbSizeThreshold + 'GBs: ' + oCacheDbFile.size() / (1024 * 1024 * 1024) + 'GBs.');
 			}
 
-			App.log('Sending render to Iray Server...');
+
 			
 			var sHttpRequestError;
 			var nHttpAttempts = 0;
 			var nMAX_HTTP_ATTEMPTS = 5;
+
+			App.log('Checking if the Iray Server is online...');
 
 			do {
 
@@ -329,21 +331,51 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 					}
 				}
 				else {
-					App.log('HTTP request successful.');
+					App.log('HTTP request successful - Iray Server is online.');
 				}
 
 			} while (sHttpRequestError);
 
+			App.log('Sending render to Iray Server...');
 			oRenderer.exportRenderToBridgeQueue(sFinalName, 'png', oCamera, oRenderOptions, 0);
+			App.log('Render sent to Iray Server.');
 
-			while (!isValidImage(sNameInResultsFolder)) {
-
+			do {
 				App.log('Waiting for ' + sNameInResultsFolder + ' to appear...');
 
 				wait(1);
-			}
 
-			var oImage = oImageMgr.loadImage(sNameInResultsFolder);
+			} while (!isValidImage(sNameInResultsFolder));
+
+			App.log(sNameInResultsFolder + ' has appeared.');
+			
+			App.log('Loading image ' + sNameInResultsFolder + '...');
+
+			var oLoadImageError;
+			var oImage;
+
+			// do this tomorrow: loop over the whole thing, loading and saving, until the final final PNG exists
+			// Keep trying to load the image until there's no error	
+			do {
+
+				try {
+
+				} catch (e) {
+
+					App.log('Error loading image: ' + e.message);
+				}
+
+				oImage = new Image();
+
+				oLoadImageError = oImageMgr.loadImage(sNameInResultsFolder, oImage, nAUTODETECT_EXPORTER_PARAMETER);
+
+				var sErrorMessage = getErrorMessage(oLoadImageError);
+
+				App.log('Load image error: ' + sErrorMessage);
+
+				wait(1);
+
+			} while (sErrorMessage != 'No error');
 
 			// This converts, renames, and copies the image to the output folder
 			oImageMgr.saveImage(sNameInOutputFolder, oImage, nAUTODETECT_EXPORTER_PARAMETER);
