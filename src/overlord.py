@@ -8,7 +8,6 @@ import gc
 import webbrowser
 import time
 import threading
-import glob
 import argparse
 import urllib.request
 import tempfile
@@ -113,17 +112,6 @@ def get_local_app_data_path(subfolder: str = APPDATA_SUBFOLDER) -> str:
     localappdata = os.environ.get('LOCALAPPDATA', os.path.join(os.path.expanduser('~'), 'AppData', 'Local'))
     return os.path.join(localappdata, subfolder)
 
-def get_application_data_directory() -> str:
-    """Get the proper directory for application files, considering if running from executable."""
-    try:
-        # If sys._MEIPASS exists, we're running from a PyInstaller executable (production)
-        # In this case, use the local app data directory instead of the temp _MEIPASS directory
-        sys._MEIPASS
-        return get_local_app_data_path()
-    except AttributeError:
-        # Running from source (development mode) - use the source directory
-        return os.path.dirname(os.path.abspath(__file__))
-
 # Global rendering state
 is_rendering = False
 initial_total_images = 0  # Track the initial total images count for progress calculation
@@ -217,95 +205,6 @@ def normalize_path_for_logging(path: str) -> str:
     if path:
         return path.replace('\\', '/')
     return path
-
-def ensure_directory_exists(directory: str) -> bool:
-    """Ensure a directory exists, create if necessary."""
-    try:
-        os.makedirs(directory, exist_ok=True)
-        return True
-    except Exception as e:
-        logging.error(f"Failed to create directory {normalize_path_for_logging(directory)}: {e}")
-        return False
-
-def validate_file_path(file_path: str, must_exist: bool = True) -> bool:
-    """Validate a file path."""
-    if not file_path or not isinstance(file_path, str):
-        return False
-    
-    if must_exist:
-        return os.path.isfile(file_path)
-    
-    # Check if the directory exists (for new files)
-    directory = os.path.dirname(file_path)
-    return os.path.isdir(directory) if directory else True
-
-def validate_directory_path(dir_path: str, must_exist: bool = True) -> bool:
-    """Validate a directory path."""
-    if not dir_path or not isinstance(dir_path, str):
-        return False
-    
-    if must_exist:
-        return os.path.isdir(dir_path)
-    
-    # For new directories, check if parent exists
-    parent = os.path.dirname(dir_path)
-    return os.path.isdir(parent) if parent else True
-
-def get_free_disk_space_gb() -> float:
-    """Get available free disk space in GB where Overlord is running."""
-    try:
-        # Get the directory where Overlord is running
-        if getattr(sys, 'frozen', False):
-            # Running as PyInstaller executable
-            app_dir = os.path.dirname(sys.executable)
-        else:
-            # Running from source
-            app_dir = os.path.dirname(os.path.abspath(__file__))
-        
-        # Get free space for the disk/drive containing the app directory
-        if os.name == 'nt':  # Windows
-            import shutil
-            total, used, free = shutil.disk_usage(app_dir)
-            return free / (1024 * 1024 * 1024)  # Convert bytes to GB
-        else:  # Unix/Linux
-            statvfs = os.statvfs(app_dir)
-            free_bytes = statvfs.f_frsize * statvfs.f_bavail
-            return free_bytes / (1024 * 1024 * 1024)  # Convert bytes to GB
-    except Exception as e:
-        logging.warning(f"Could not determine free disk space: {e}")
-        # Return a reasonable default if we can't determine free space
-        return 100.0  # Assume 100 GB available as fallback
-
-def get_memory_usage_mb() -> float:
-    """Get current memory usage of the Overlord process in MB."""
-    try:
-        import psutil
-        process = psutil.Process()
-        memory_info = process.memory_info()
-        return memory_info.rss / (1024 * 1024)  # Convert bytes to MB
-    except Exception:
-        return 0.0
-
-def get_directory_stats(directory: str) -> tuple:
-    """Get directory statistics: total_size, png_count, folder_count."""
-    if not os.path.exists(directory):
-        return 0, 0, 0
-    
-    total_size = png_count = folder_count = 0
-    
-    for rootdir, dirs, files in os.walk(directory):
-        folder_count += len(dirs)
-        for file in files:
-            file_path = os.path.join(rootdir, file)
-            try:
-                file_size = os.path.getsize(file_path)
-                total_size += file_size
-                if file.lower().endswith('.png'):
-                    png_count += 1
-            except (OSError, IOError):
-                continue
-    
-    return total_size, png_count, folder_count
 
 def find_newest_image(directory: str) -> list:
     """Find newest images in directory sorted by modification time (newest first). Limited to prevent memory issues."""
@@ -479,37 +378,53 @@ def kill_processes_by_name(process_names: list) -> int:
         logging.error(f'Failed to kill processes {process_names}: {e}')
     return killed_count
 
-def is_daz_studio_running() -> bool:
-    """Check if DAZ Studio processes are running."""
-    return check_process_running(DAZ_STUDIO_PROCESSES)
+
 
 def is_iray_server_running() -> bool:
     """Check if Iray Server processes are already running."""
     return check_process_running(IRAY_SERVER_PROCESSES)
 
 def stop_iray_server() -> int:
-    """Stop all iray_server.exe and iray_server_worker.exe processes."""
-    killed_processes = []
+    """Stop all iray_server.exe and iray_server_worker.exe processes using stopIrayServer.vbs."""
     try:
-        for proc in psutil.process_iter(['name']):
-            try:
-                proc_name = proc.info['name']
-                if proc_name and any(name.lower() in proc_name.lower() for name in ['iray_server.exe', 'iray_server_worker.exe']):
-                    proc.kill()
-                    killed_processes.append(proc_name)
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                continue
+        # Get the stopIrayServer.vbs script path
+        if getattr(sys, 'frozen', False):
+            # Running from executable - use user scripts directory
+            user_scripts_dir = os.path.join(get_app_data_path(), 'scripts')
+            script_path = os.path.join(user_scripts_dir, "stopIrayServer.vbs")
+        else:
+            # Running from source - use source scripts directory
+            install_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+            script_path = os.path.join(install_dir, "scripts", "stopIrayServer.vbs")
         
-        if killed_processes:
-            logging.info(f'Stopped Iray Server processes: {", ".join(killed_processes)}')
+        if not os.path.exists(script_path):
+            logging.error(f"stopIrayServer.vbs not found at: {normalize_path_for_logging(script_path)}")
+            return 0
+        
+        # Run the VBS script silently
+        logging.info('Stopping Iray Server using stopIrayServer.vbs')
+        result = subprocess.run(
+            ["cscript", "//NoLogo", script_path],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        
+        if result.returncode == 0:
+            logging.info('Iray Server stopped successfully via VBS script')
+            return 1  # Assume processes were stopped
+        else:
+            logging.warning(f'stopIrayServer.vbs returned non-zero exit code: {result.returncode}')
+            if result.stderr:
+                logging.warning(f'VBS script stderr: {result.stderr}')
+            return 0
             
+    except subprocess.TimeoutExpired:
+        logging.error('stopIrayServer.vbs timed out after 30 seconds')
+        return 0
     except Exception as e:
-        logging.error(f'Failed to stop Iray Server processes: {e}')
-        
-    # Always clean up results directory when stopping Iray Server, regardless of whether processes were found
-    cleanup_results_directory()
-    
-    return len(killed_processes)
+        logging.error(f'Failed to run stopIrayServer.vbs: {e}')
+        return 0
 
 def stop_all_render_processes() -> dict:
     """Stop all render-related processes. Returns counts of stopped processes."""
@@ -571,131 +486,9 @@ def set_inputs_enabled(enabled: bool = True):
 
 
 
-def cleanup_results_directory(script_dir=None):
-    """Clean up the results directory when stopping Iray Server."""
-    if script_dir is None:
-        script_dir = get_local_app_data_path()
-    results_dir = os.path.join(script_dir, "results")
-    
-    if os.path.exists(results_dir):
-        try:
-            import shutil
-            shutil.rmtree(results_dir)
-            logging.info(f'Cleaned up results directory: {normalize_path_for_logging(results_dir)}')
-        except Exception as e:
-            logging.warning(f'Could not clean up results directory {normalize_path_for_logging(results_dir)}: {e}')
-    else:
-        logging.debug(f'Results directory does not exist: {normalize_path_for_logging(results_dir)}')
 
-def cleanup_iray_files_in_directory(cleanup_dir, with_retries=True):
-    """Clean up all Iray-related files and folders in a specific directory."""
-    items_cleaned = []
-    
-    # Files and folders to clean up (excluding results directory)
-    cleanup_items = [
-        ("iray_server.db", "file"),
-        ("cache", "folder"),
-        ("preview", "folder"),
-        ("iray_server.log", "file")
-    ]
-    
-    # Clean up standard items
-    for item_name, item_type in cleanup_items:
-        item_path = os.path.join(cleanup_dir, item_name)
-        if os.path.exists(item_path):
-            try:
-                if with_retries and item_type in ["file", "folder"]:
-                    # Try to delete with retries (processes might still be releasing file handles)
-                    max_retries = 5
-                    retry_delay = 1.0  # seconds
-                    for attempt in range(max_retries):
-                        try:
-                            logging.info(f"Attempting to delete {item_type} at: {normalize_path_for_logging(item_path)} (attempt {attempt + 1}/{max_retries})")
-                            if item_type == "file":
-                                os.remove(item_path)
-                            elif item_type == "folder":
-                                shutil.rmtree(item_path)
-                            items_cleaned.append(f"{item_type}: {item_path}")
-                            logging.info(f"Successfully cleaned up {item_type} at: {normalize_path_for_logging(item_path)}")
-                            break
-                        except (OSError, PermissionError) as e:
-                            if attempt < max_retries - 1:
-                                logging.warning(f"Attempt {attempt + 1} failed to delete {normalize_path_for_logging(item_path)}, retrying in {retry_delay}s: {e}")
-                                time.sleep(retry_delay)
-                            else:
-                                logging.error(f"Failed to delete {item_type} after {max_retries} attempts: {e}")
-                else:
-                    # Simple deletion without retries
-                    if item_type == "file":
-                        os.remove(item_path)
-                    elif item_type == "folder":
-                        shutil.rmtree(item_path)
-                    items_cleaned.append(f"{item_type}: {item_path}")
-                    logging.info(f"Cleaned up {item_type} at: {normalize_path_for_logging(item_path)}")
-            except Exception as e:
-                logging.warning(f"Failed to delete {item_type} at {normalize_path_for_logging(item_path)}: {e}")
-    
-    # Clean up worker log files (worker_*.log)
-    try:
-        worker_log_pattern = os.path.join(cleanup_dir, "worker_*.log")
-        worker_log_files = glob.glob(worker_log_pattern)
-        for worker_log_file in worker_log_files:
-            try:
-                if with_retries:
-                    # Try to delete with retries
-                    max_retries = 5
-                    retry_delay = 1.0  # seconds
-                    for attempt in range(max_retries):
-                        try:
-                            logging.info(f"Attempting to delete worker log file at: {normalize_path_for_logging(worker_log_file)} (attempt {attempt + 1}/{max_retries})")
-                            os.remove(worker_log_file)
-                            items_cleaned.append(f"worker log: {worker_log_file}")
-                            logging.info(f"Successfully cleaned up worker log file at: {normalize_path_for_logging(worker_log_file)}")
-                            break
-                        except (OSError, PermissionError) as e:
-                            if attempt < max_retries - 1:
-                                logging.warning(f"Attempt {attempt + 1} failed to delete {normalize_path_for_logging(worker_log_file)}, retrying in {retry_delay}s: {e}")
-                                time.sleep(retry_delay)
-                            else:
-                                logging.error(f"Failed to delete worker log file after {max_retries} attempts: {e}")
-                else:
-                    # Simple deletion without retries
-                    os.remove(worker_log_file)
-                    items_cleaned.append(f"worker log: {worker_log_file}")
-                    logging.info(f"Cleaned up worker log file at: {normalize_path_for_logging(worker_log_file)}")
-            except Exception as e:
-                logging.warning(f"Failed to delete worker log file at {normalize_path_for_logging(worker_log_file)}: {e}")
-    except Exception as e:
-        logging.warning(f"Error finding worker log files in {normalize_path_for_logging(cleanup_dir)}: {e}")
-    
-    return items_cleaned
 
-def cleanup_iray_database_and_cache():
-    """Clean up all Iray-related files and folders from all possible locations."""
-    try:
-        cleanup_locations = []
-        all_cleaned_items = []
-        
-        # Add source directory
-        cleanup_locations.append(os.path.dirname(__file__))
-        
-        # Add LocalAppData directory if different
-        local_app_data_dir = get_local_app_data_path()
-        if local_app_data_dir != os.path.dirname(__file__):
-            cleanup_locations.append(local_app_data_dir)
-        
-        for cleanup_dir in cleanup_locations:
-            logging.info(f"Cleaning up Iray files in directory: {normalize_path_for_logging(cleanup_dir)}")
-            cleaned_items = cleanup_iray_files_in_directory(cleanup_dir, with_retries=True)
-            all_cleaned_items.extend(cleaned_items)
-        
-        if all_cleaned_items:
-            logging.info(f"Total cleanup completed: {len(all_cleaned_items)} items cleaned")
-        else:
-            logging.info("No Iray files found to clean up")
-                
-    except Exception as e:
-        logging.error(f"Error during comprehensive Iray cleanup: {e}")
+
 
 
 
@@ -913,17 +706,7 @@ class SettingsValidator:
         except ValueError:
             return False
     
-    @staticmethod
-    def validate_animations(files: list) -> bool:
-        """Validate animations list."""
-        if not files:
-            return False
-        return all(validate_file_path(f, must_exist=True) for f in files)
-    
-    @staticmethod
-    def validate_output_directory(directory: str) -> bool:
-        """Validate output directory."""
-        return validate_directory_path(directory, must_exist=False)
+
 
 # Directory memory helper functions
 def get_last_directory(directory_type: str) -> str:
@@ -1175,8 +958,7 @@ class CleanupManager:
             global is_rendering
             is_rendering = False
             
-            # Stop Iray Server processes using the global function
-            stop_iray_server()
+            # No longer stop Iray Server processes on cleanup (only when stop render is clicked)
             
             # Only save settings if callback is available, widgets are still valid, and settings haven't been saved already
             if self.save_settings_callback and not self.settings_saved_on_close:
@@ -1260,9 +1042,7 @@ def register_cleanup():
         atexit.register(cleanup_manager.cleanup_all)
         cleanup_manager.cleanup_registered = True
 
-def is_iray_server_running():
-    """Check if Iray Server processes are already running"""
-    return check_process_running(['iray_server.exe', 'iray_server_worker.exe'])
+
 
 
 
@@ -1509,32 +1289,15 @@ def start_headless_render(settings):
     global cleanup_manager
     cleanup_manager = CleanupManager()
     
-    # Stop any existing processes
-    logging.info('Closing any existing Iray Server and DAZ Studio instances...')
+    # Work with existing processes in headless mode too
+    logging.info('Starting headless render with existing DAZ Studio and Iray Server instances...')
     
-    # Kill processes manually for headless mode
-    import psutil
-    killed_daz = 0
-    try:
-        # Kill all DAZStudio processes
-        for proc in psutil.process_iter(['name']):
-            try:
-                if proc.info['name'] and 'DAZStudio' in proc.info['name']:
-                    proc.kill()
-                    killed_daz += 1
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                continue
-        logging.info(f'Killed {killed_daz} DAZStudio process(es)')
-    except Exception as e:
-        logging.error(f'Failed to stop DAZ processes: {e}')
-    
-    # Clean up Iray database and cache
+    # No longer kill processes or clean up in headless mode - work with existing instances
     app_data_dir = get_local_app_data_path()
-    cleanup_iray_database_and_cache()
     
     # Start Iray Server
     logging.info('Starting fresh Iray Server...')
-    results_dir = os.path.join(app_data_dir, "results", "admin")
+    results_dir = os.path.join(app_data_dir, "IrayServer", "results", "admin")
     final_output_dir = settings["output_directory"]
     
     # Create directories
@@ -1580,7 +1343,8 @@ def start_headless_render(settings):
         # Copy all scripts to user directory
         scripts_to_copy = [
             ("masterRenderer.dsa", "masterRenderer.dsa"),
-            ("restartIrayServer.vbs", "restartIrayServer.vbs")
+            ("stopIrayServer.vbs", "stopIrayServer.vbs"),
+            ("startIrayServer.vbs", "startIrayServer.vbs")
         ]
         
         import shutil
@@ -1750,11 +1514,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 stop_image_monitoring()
                 stop_output_details_monitoring()
                 
-                # Kill render processes
-                logging.info('Killing render-related processes...')
-                kill_render_related_processes()
-                
-                # Full cleanup
+                # Full cleanup (no longer kills render processes on close)
                 logging.info('Performing final cleanup...')
                 cleanup_manager.cleanup_all()
                 
@@ -3473,29 +3233,19 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             return
         
         try:
-            # Calculate folder statistics - optimize for memory usage during active monitoring
+            # Calculate actual folder statistics - count all files and calculate actual total size
             total_size = 0
             file_count = 0
-            files_scanned = 0
-            max_files_to_scan = 5000 if is_active_monitoring else 10000  # Limit scanning during active monitoring
             
             for rootdir, dirs, files in os.walk(output_dir):
                 for file in files:
-                    if files_scanned >= max_files_to_scan:
-                        logging.debug(f"Limiting file scan to {max_files_to_scan} files to preserve memory")
-                        break
-                    
+                    file_count += 1
                     file_path = os.path.join(rootdir, file)
                     try:
                         file_size = os.path.getsize(file_path)
                         total_size += file_size
-                        file_count += 1
-                        files_scanned += 1
                     except (OSError, IOError):
                         continue
-                
-                if files_scanned >= max_files_to_scan:
-                    break
             
             # Check if folder stats changed
             count_changed = update_output_status.last_file_count != file_count
@@ -3724,8 +3474,9 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
         logging.info("Output details monitoring stopped")
 
     def start_render():        
-        # Prevent multiple render starts
-        if button.cget("state") == "disabled":
+        # Prevent multiple render starts using rendering state
+        global is_rendering
+        if is_rendering:
             logging.info("Start Render already in progress, ignoring additional click")
             return
 
@@ -3878,9 +3629,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
         
         images_remaining_var.set(f"Images remaining: {total_images}")
         
-        # Disable Start Render button and enable Stop Render button
-        button.config(state="disabled")
-        stop_button.config(state="normal")
+        # No longer toggle button states - both buttons remain clickable
         # Disable all input fields and settings during render
         set_inputs_enabled(False)
         root.update_idletasks()  # Force UI update
@@ -3896,25 +3645,17 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 
 
                 
-                # First, ensure all render-related processes are stopped
+                # Start render (no longer kills existing processes)
                 logging.info('Start Render button clicked')
-                logging.info('Closing any existing Iray Server and DAZ Studio instances...')
+                logging.info('Starting render with existing DAZ Studio and Iray Server instances...')
                 
                 # Stop file monitoring first to prevent conflicts
                 # File monitoring cleanup no longer needed
                 
-                # Kill all existing render-related processes
-                kill_render_related_processes()
+                # No longer kill existing processes - work with existing instances
+                # No longer clean up database/cache - work with existing Iray Server state
                 
-                # Clean up database and cache from any previous sessions
-                cleanup_iray_database_and_cache()
-                
-                logging.info('All previous instances closed. Cleanup completed.')
-                
-                # Since we removed the intermediate server directory, just clean up the app data directory
-                app_data_dir = get_local_app_data_path()
-                logging.info(f"Cleanup in app data directory: {app_data_dir}")
-                cleanup_iray_files_in_directory(app_data_dir, with_retries=False)
+                logging.info('Ready to start render with existing instances.')
                 
                 # Iray Server will be started by DAZ Script - no need to start it here
                 logging.info('Iray Server startup will be handled by DAZ Script')
@@ -3937,23 +3678,19 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                             def cleanup_and_restart_background():
                                 global is_rendering
                                 try:
-                                    # Stop Iray Server processes only (keep DAZ Studio running)
-                                    stop_iray_server()
+                                    # No longer stop Iray Server processes automatically (keep both DAZ Studio and Iray Server running)
+                                    # No longer clean up database/cache - keep Iray Server state intact
                                     
-                                    # Clean up database and cache
-                                    cleanup_iray_database_and_cache()
+                                    logging.info('Render completion - keeping DAZ Studio and Iray Server running with intact state.')
                                     
-                                    logging.info('Cleanup complete. Iray Server restart will be handled by DAZ Script.')
+                                    # No automatic restart needed - both processes continue running
+                                    logging.info('No process restart needed - both DAZ Studio and Iray Server continue running')
                                     
-                                    # DAZ Script will handle Iray Server restart - no manual restart needed
-                                    logging.info('Iray Server restart will be handled by DAZ Script')
-                                    
-                                    # Since DAZ Studio no longer needs to restart when Iray Server restarts,
-                                    # just refresh the UI for the existing DAZ instances
-                                    logging.info('UI refresh for existing DAZ Studio instances')
+                                    # UI refresh for existing instances
+                                    logging.info('UI refresh for existing DAZ Studio and Iray Server instances')
                                     image_output_dir = value_entries["Output Directory"].get().replace("\\", "/")
                                     
-                                    logging.info('Render completion cycle finished successfully - Iray Server restarted, DAZ Studio instances continue running')
+                                    logging.info('Render completion cycle finished successfully - all processes continue running')
                                     
                                     # Reset rendering state - file monitoring handled by masterRenderer.dsa
                                     is_rendering = False
@@ -3963,8 +3700,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                                     # Reset rendering state on error
                                     is_rendering = False
                                     # File monitoring cleanup no longer needed
-                                    # Still re-enable buttons even if cleanup fails - schedule on main thread
-                                    root.after(0, lambda: (button.config(state="normal"), stop_button.config(state="disabled")))
+                                    # No longer toggle button states - both remain clickable
                             
                             # Start the heavy operations in a background thread
                             cleanup_thread = threading.Thread(target=cleanup_and_restart_background, daemon=True)
@@ -3986,8 +3722,8 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 # File monitoring cleanup no longer needed
                 # Reset initial total images count
                 initial_total_images = 0
-                # Re-enable Start Render button and disable Stop Render button on error
-                root.after(0, lambda: (button.config(state="normal"), stop_button.config(state="disabled"), images_remaining_var.set("Images remaining:")))
+                # No longer toggle button states on error - both remain clickable
+                root.after(0, lambda: images_remaining_var.set("Images remaining:"))
         
         def continue_render_setup(session_completion_callback):
             global is_rendering, render_start_time, initial_total_images
@@ -4007,9 +3743,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 # File monitoring cleanup no longer needed
                 # Reset initial total images count
                 initial_total_images = 0
-                # Re-enable Start Render button and disable Stop Render button on error
-                button.config(state="normal")
-                stop_button.config(state="disabled")
+                # No longer toggle button states on error - both remain clickable
                 images_remaining_var.set("Images remaining:")
         
         # Start the background process
@@ -4040,9 +3774,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 global initial_total_images, render_start_time
                 initial_total_images = 0
                 render_start_time = None  # Reset render start time
-                # Re-enable Start Render button and disable Stop Render button
-                button.config(state="normal")
-                stop_button.config(state="disabled")
+                # No longer toggle button states when user cancels - both remain clickable
                 images_remaining_var.set("Images remaining:")
                 return
 
@@ -4064,7 +3796,8 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             # Copy all scripts to user directory
             scripts_to_copy = [
                 ("masterRenderer.dsa", "masterRenderer.dsa"),
-                ("restartIrayServer.vbs", "restartIrayServer.vbs")
+                ("stopIrayServer.vbs", "stopIrayServer.vbs"),
+                ("startIrayServer.vbs", "startIrayServer.vbs")
             ]
             
             import shutil
@@ -4120,7 +3853,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
         cache_size_threshold = value_entries["Cache Size Threshold (GB)"].get()
         # Create results directory path (admin subfolder in results directory, in app data directory)
         app_data_dir = get_local_app_data_path()
-        results_directory_path = os.path.join(app_data_dir, "results", "admin").replace("\\", "/")
+        results_directory_path = os.path.join(app_data_dir, "IrayServer", "results", "admin").replace("\\", "/")
         json_map = (
             f'{{'
             f'"num_instances": "{num_instances}", '
@@ -4196,8 +3929,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
     def stop_render():        
         logging.info('Stop Render button clicked')
         
-        # Immediately disable the stop button to prevent multiple clicks
-        stop_button.config(state="disabled")
+        # No longer disable buttons - both remain clickable at all times
         root.update_idletasks()  # Force UI update
         
         try:
@@ -4242,15 +3974,12 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             logging.info('Stopping render processes...')
             kill_render_related_processes()
             
-            # Clean up database and cache after processes are killed
-            logging.info('Cleaning up Iray database and cache...')
-            cleanup_iray_database_and_cache()
+            # Database and cache cleanup is now handled by stopIrayServer.vbs
             
         except Exception as e:
             logging.error(f'Error during stop render: {e}')
         finally:
-            # Always re-enable Start Render button
-            button.config(state="normal", text="Start Render")
+            # No longer toggle button states - both remain clickable
             # Re-enable all input fields
             set_inputs_enabled(True)
             
@@ -4288,7 +4017,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
         font=("Arial", 16, "bold"),
         width=16,
         height=2,
-        state="disabled"  # Initially disabled until Start Render is clicked
+        state="normal"  # Both buttons are always clickable
     )
     stop_button.pack(side="left", padx=10, pady=10)
     theme_manager.register_widget(stop_button, "button")
@@ -4325,7 +4054,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
     except KeyboardInterrupt:
         logging.info('Application interrupted by user')
     finally:
-        # Ensure cleanup happens even if mainloop exits abnormally
+        # Ensure cleanup happens even if mainloop exits abnormally (no longer stops processes)
         cleanup_manager.cleanup_all()
         logging.info('Application cleanup completed')
 

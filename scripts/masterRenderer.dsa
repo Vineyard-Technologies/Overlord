@@ -41,7 +41,8 @@ var oCacheDbFile;
 var sScriptFileName = getScriptFileName();
 var oScriptFileInfo = new DzFileInfo(sScriptFileName);
 var oScriptDirectory = oScriptFileInfo.dir(); // DzDir object
-var sRestartIrayServerScript = oScriptDirectory.absoluteFilePath('restartIrayServer.vbs');
+var sStartIrayServerScript = oScriptDirectory.absoluteFilePath('startIrayServer.vbs');
+var sStopIrayServerScript = oScriptDirectory.absoluteFilePath('stopIrayServer.vbs');
 var nAUTODETECT_EXPORTER_PARAMETER = -1;
 
 var sAddress = '127.0.0.1';
@@ -70,12 +71,17 @@ function wait(seconds) {
 // Kill Iray server if it's running, then remove the cache file if it exists, then restart it
 function restartIrayServer() {
 
-	// Use the combined restart script that handles kill, cache cleanup, and start
-	App.log('Restarting Iray Server with ' + sRestartIrayServerScript);
-	App.showURL(sRestartIrayServerScript);
+	App.log('Stopping Iray Server with ' + sStopIrayServerScript);
+	App.showURL(sStopIrayServerScript);
+
+	App.log('Waiting 10 seconds for Iray Server to stop...');
+	wait(10);
+
+	App.log('Starting Iray Server with ' + sStartIrayServerScript);
+	App.showURL(sStartIrayServerScript);
 	
 	// Wait for the restart process to complete
-	wait(30);
+	wait(10);
 }
 // Check if an image exists and isn't truncated
 function isValidImage(sFilePath) {
@@ -89,27 +95,25 @@ function isValidImage(sFilePath) {
 		oFile.open(DzFile.ReadOnly);
 
 		// PNG files end with an IEND chunk
-		if (sFilePath.slice(-4).toLowerCase() == '.png') {
+		if (oFileInfo.suffix() == 'png') {
 
-			// Seek to 8 bytes from end to check for IEND
-			oFile.seek(nFileSize - 8);
-			var aEndChunk = oFile.read(4);
-			var sEndChunk = String.fromCharCode(aEndChunk[0], aEndChunk[1], aEndChunk[2], aEndChunk[3]);
+			var nIEND_CHUNK_POSITION = 8;
 
-			oFile.close();
+			oFile.seek(nFileSize - nIEND_CHUNK_POSITION);
 
-			// Valid PNG must end with IEND chunk
+			var nIEND_CHUNK_LENGTH = 4;
+			var aEndChunk = oFile.read(nIEND_CHUNK_LENGTH);
+			var sEndChunk = aEndChunk.convertToString();
+
+			App.log('Last chunk of PNG file: "' + sEndChunk + '"');
 			return sEndChunk === "IEND";
 		}
 
-		// EXR files end with a null byte
-		if(sFilePath.slice(-4).toLowerCase() == '.exr') {
+		// There's no specification for the end of an EXR file.
+		// We currently do not have a solid way to verify the integrity of EXR files.
+		else if(oFileInfo.suffix() == 'exr') {
 
-			oFile.seek(nFileSize - 1);
-
-    		var aLastByte = oFile.read(1);
-
-			return aLastByte[0] === 0x00;
+			return true;
 		}
 		
 	} catch (e) {
@@ -332,20 +336,11 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 
 			oRenderer.exportRenderToBridgeQueue(sFinalName, 'png', oCamera, oRenderOptions, 0);
 
-			var nAttempts = 0;
-			var nAllowedAttempts = 20;
 			while (!isValidImage(sNameInResultsFolder)) {
 
-				App.log('Attempt ' + nAttempts + ': Waiting for ' + sNameInResultsFolder + ' to appear.');
+				App.log('Waiting for ' + sNameInResultsFolder + ' to appear...');
 
 				wait(1);
-				nAttempts++;
-
-				if (nAttempts > nAllowedAttempts) {
-					App.log('Waited more than ' + nAllowedAttempts + ' seconds for ' + sFinalName + '. Retrying this frame.');
-					nFrame--; // retry this frame
-					break;
-				}
 			}
 
 			var oImage = oImageMgr.loadImage(sNameInResultsFolder);
@@ -485,4 +480,7 @@ if (thereAre(aAnimationFilepaths)) {
 	renderCore(sSubjectName, 'static', false, false);
 }
 
-// App.delayedExit();
+App.log('Stopping Iray Server with ' + sStopIrayServerScript);
+App.showURL(sStopIrayServerScript);
+
+App.delayedExit();
