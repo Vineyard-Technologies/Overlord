@@ -1829,13 +1829,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 return False
         
         def show_settings():
-            """
-            Show Settings dialog window with system tray and startup options.
-            
-            Available Settings:
-            - Minimize to system tray: When enabled, minimizing Overlord hides it to the system tray
-            - Start on Windows startup: When enabled, Overlord automatically starts with Windows
-            """
+            """Show Settings dialog window with system tray and startup options."""
             settings_window = tk.Toplevel(root)
             settings_window.title("Overlord Settings")
             settings_window.geometry("400x300")
@@ -1875,15 +1869,6 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             minimize_checkbox.pack(anchor="w")
             theme_manager.register_widget(minimize_checkbox, "checkbutton")
             
-            minimize_desc = tk.Label(
-                minimize_frame,
-                text="When enabled, minimizing Overlord will hide it to the system tray\ninstead of the taskbar.",
-                font=("Arial", 9),
-                justify="left"
-            )
-            minimize_desc.pack(anchor="w", padx=(25, 0), pady=(5, 0))
-            theme_manager.register_widget(minimize_desc, "label")
-            
             # Start on startup setting
             start_on_startup_var = tk.BooleanVar(value=current_settings.get("start_on_startup", True))
             startup_frame = tk.Frame(main_frame)
@@ -1899,42 +1884,30 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             startup_checkbox.pack(anchor="w")
             theme_manager.register_widget(startup_checkbox, "checkbutton")
             
-            startup_desc = tk.Label(
-                startup_frame,
-                text="When enabled, Overlord will automatically start when Windows boots up.",
-                font=("Arial", 9),
-                justify="left"
-            )
-            startup_desc.pack(anchor="w", padx=(25, 0), pady=(5, 0))
-            theme_manager.register_widget(startup_desc, "label")
-            
-            # Buttons frame
-            buttons_frame = tk.Frame(main_frame)
-            buttons_frame.pack(fill="x", pady=(20, 0))
-            theme_manager.register_widget(buttons_frame, "frame")
-            
-            def save_settings():
-                """Save the settings and close the dialog."""
+            # Live save functions for immediate settings updates
+            def on_minimize_to_tray_change():
+                """Save minimize to tray setting immediately when changed."""
                 try:
-                    # Update settings
                     minimize_enabled = minimize_to_tray_var.get()
-                    startup_enabled_var = start_on_startup_var.get()
-                    
                     current_settings["minimize_to_tray"] = minimize_enabled
-                    current_settings["start_on_startup"] = startup_enabled_var
-                    
-                    # Save to file
                     settings_manager.save_settings(current_settings)
                     
                     # Update cached minimize to tray setting
                     nonlocal cached_minimize_to_tray
                     cached_minimize_to_tray = minimize_enabled
                     
-                    # Log settings changes
-                    logging.info(f"Settings updated: minimize_to_tray={minimize_enabled}, start_on_startup={startup_enabled_var}")
+                    logging.info(f"Minimize to tray setting updated: {minimize_enabled}")
+                except Exception as e:
+                    logging.error(f"Failed to save minimize to tray setting: {e}")
+            
+            def on_startup_change():
+                """Save startup setting immediately when changed."""
+                try:
+                    startup_enabled = start_on_startup_var.get()
+                    current_settings["start_on_startup"] = startup_enabled
+                    settings_manager.save_settings(current_settings)
                     
                     # Handle Windows startup registry
-                    startup_enabled = start_on_startup_var.get()
                     if manage_windows_startup(startup_enabled):
                         if startup_enabled:
                             logging.info("Overlord will start on Windows startup")
@@ -1942,39 +1915,14 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                             logging.info("Overlord will not start on Windows startup")
                     else:
                         messagebox.showerror("Error", "Failed to update Windows startup setting. Please run as administrator if the issue persists.")
-                    
-                    logging.info("Settings saved successfully")
-                    settings_window.destroy()
-                    
+                        
+                    logging.info(f"Startup setting updated: {startup_enabled}")
                 except Exception as e:
-                    logging.error(f"Failed to save settings: {e}")
-                    messagebox.showerror("Error", f"Failed to save settings: {e}")
+                    logging.error(f"Failed to save startup setting: {e}")
             
-            def cancel_settings():
-                """Cancel and close the dialog without saving."""
-                settings_window.destroy()
-            
-            # Save button
-            save_button = tk.Button(
-                buttons_frame,
-                text="Save",
-                command=save_settings,
-                font=("Arial", 10),
-                width=10
-            )
-            save_button.pack(side="right", padx=(5, 0))
-            theme_manager.register_widget(save_button, "button")
-            
-            # Cancel button
-            cancel_button = tk.Button(
-                buttons_frame,
-                text="Cancel",
-                command=cancel_settings,
-                font=("Arial", 10),
-                width=10
-            )
-            cancel_button.pack(side="right")
-            theme_manager.register_widget(cancel_button, "button")
+            # Bind live save functions to checkbox changes
+            minimize_to_tray_var.trace_add('write', lambda *args: on_minimize_to_tray_change())
+            start_on_startup_var.trace_add('write', lambda *args: on_startup_change())
         
         def exit_overlord():
             """Exit the application"""
