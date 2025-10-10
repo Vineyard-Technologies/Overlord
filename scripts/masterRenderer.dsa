@@ -1,5 +1,4 @@
 var oContentMgr = App.getContentMgr();
-var oImageMgr = App.getImageMgr();
 var oScriptArgs = JSON.parse(App.scriptArgs[0]);
 var nTotalNumberOfInstances = oScriptArgs['num_instances'];
 var sMasterTemplatePath = oScriptArgs['template_path'];
@@ -34,7 +33,6 @@ var oSettings = new DzSettings();
 var oHttpHelper = new DzHttpHelper();
 var oHttp = new DzHttpHelper();
 var nCacheDbSizeThreshold = oScriptArgs['cache_db_size_threshold_gb'];
-// Cleanest way I can find to get the active user profile name
 var sUserName = App.getAppDataPath().split('/')[2];
 var sCacheFolderPath = 'C:/Users/' + sUserName + '/AppData/Local/Overlord/IrayServer/cache';
 var oCacheDbFile;
@@ -44,7 +42,6 @@ var oScriptDirectory = oScriptFileInfo.dir(); // DzDir object
 var sStartIrayServerScript = oScriptDirectory.absoluteFilePath('startIrayServer.vbs');
 var sStopIrayServerScript = oScriptDirectory.absoluteFilePath('stopIrayServer.vbs');
 var nAUTODETECT_EXPORTER_PARAMETER = -1;
-
 var sAddress = '127.0.0.1';
 var sPort = 9090;
 var sSecurity = 'http';
@@ -233,26 +230,34 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 
 	// Loop through each angle...
 	for (var nAngle = 0; nAngle != nDEGREES_IN_CIRCLE; nAngle = nAngle + nDegrees) {
+
 		var nOutputAngle = 90 - nAngle;
-		if (nOutputAngle <= -180) nOutputAngle += 360;
+
+		if (nOutputAngle <= -180) {
+
+			nOutputAngle += 360;
+		}
 
 		// Loop through each frame...
 		for (var nFrame = 0; nFrame <= nFramesTotal; nFrame++) {
+
 			// Check if the current Daz instance should render this frame.
 			if ((nFrame - (nInstanceNumber - 1)) % nTotalNumberOfInstances != 0) continue;
 
 			var sFinalName = sSubjectName + (bIsShadow ? '_shadow-' : '-') + sAnimationName + '_' + nOutputAngle + '-' + ('000' + nFrame).slice(-3);
-			var sNameInResultsFolder = sResultsDirectory + '/' + sFinalName + '/' + sFinalName + (bIsGear && !bIsShadow ? '-GearCanvas-Beauty.exr' : '-Beauty.png');
-			var sNameInOutputFolder = sOutputDirectory + '/' + sFinalName + '.png';
+			var sImageFileResultsPath = sResultsDirectory + '/' + sFinalName + '/' + sFinalName + (bIsGear && !bIsShadow ? '-GearCanvas-Beauty.exr' : '-Beauty.png');
+			var sResultsZipFilePath = sResultsDirectory + '/' + sFinalName + '.zip';
+			var sResultsFolderPath = sResultsDirectory + '/' + sFinalName;
+			var sImageFileOutputPath = sOutputDirectory + '/' + sFinalName + '.png';
 
-			if (isValidImage(sNameInOutputFolder)) {
+			if (isValidImage(sImageFileOutputPath)) {
 
-				App.log(sNameInOutputFolder + ' already exists. Skipping this frame.');
+				App.log(sImageFileOutputPath + ' already exists. Skipping this frame.');
 
 				continue;
 			} else {
 
-				App.log(sNameInOutputFolder + ' does not exist. Rendering this frame.');
+				App.log(sImageFileOutputPath + ' does not exist. Rendering this frame.');
 			}
 
 			App.log('Setting frame to ' + nFrame);
@@ -295,8 +300,6 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 				App.log('Cache database is under ' + nCacheDbSizeThreshold + 'GBs: ' + oCacheDbFile.size() / (1024 * 1024 * 1024) + 'GBs.');
 			}
 
-
-			
 			var sHttpRequestError;
 			var nHttpAttempts = 0;
 			var nMAX_HTTP_ATTEMPTS = 5;
@@ -340,47 +343,66 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 			oRenderer.exportRenderToBridgeQueue(sFinalName, 'png', oCamera, oRenderOptions, 0);
 			App.log('Render sent to Iray Server.');
 
+			wait(2); // Plausible minimum render time
+
 			do {
-				App.log('Waiting for ' + sNameInResultsFolder + ' to appear...');
 
 				wait(1);
 
-			} while (!isValidImage(sNameInResultsFolder));
+				var oProcess = new DzProcess();
+				var aProcessArgs = [
+					"powershell.exe",
+					"-Command",
+					"magick \"" + sImageFileResultsPath + "\" -auto-level \"" + sImageFileOutputPath + "\""
+				];
 
-			App.log(sNameInResultsFolder + ' has appeared.');
+				oProcess.communication = DzProcess.Stdin | DzProcess.Stdout | DzProcess.Stderr;
+				oProcess.arguments = aProcessArgs;
+
+				// Connect to receive standard output
+				connect(oProcess, "readyReadStdout()", function() {
+					App.log("ImageMagick stdout: " + oProcess.readStdout());
+				});
+
+				// Connect to receive standard error
+				connect(oProcess, "readyReadStderr()", function() {
+					App.log("ImageMagick stderr: " + oProcess.readStderr());
+				});
+
+				// https://github.com/Vineyard-Technologies/Overlord/discussions/28
+				App.log('Converting, renaming, and copying ' + sImageFileResultsPath + ' to ' + sImageFileOutputPath + '...');
+				
+				if (!oProcess.start()) {
+					App.log("Could not start ImageMagick conversion process");
+				} else {
+					while (oProcess.running) {
+						processEvents();
+					}
+					
+					App.log("ImageMagick conversion completed.");
+					
+					// Read any remaining output
+					if (oProcess.readStdout().length > 0) {
+						App.log("Final ImageMagick stdout: " + oProcess.readStdout());
+					}
+					if (oProcess.readStderr().length > 0) {
+						App.log("Final ImageMagick stderr: " + oProcess.readStderr());
+					}
+				}
+			} while (!isValidImage(sImageFileOutputPath));
+			App.log('File has appeared in output folder.');
 			
-			App.log('Converting, renaming, and moving ' + sNameInResultsFolder + ' to ' + sNameInOutputFolder + '...');
+			App.log('Deleting ' + sImageFileResultsPath + '...');
+			oResultsDirectory.remove(sImageFileResultsPath);
+			App.log('Deleted ' + sImageFileResultsPath);
 
-			// Keep trying to load, convert, rename and save the image until it appears in the output folder
-			do {
+			App.log('Deleting canvas .zip file: ' + sResultsZipFilePath + '...');
+			oResultsDirectory.remove(sResultsZipFilePath);
+			App.log('Deleted ' + sResultsZipFilePath);
 
-				// The variant of this function that returns a DzError still returns "No error" even when
-				// "Operation failed" is logged.
-				App.log('Loading image...');
-				var oImage = oImageMgr.loadImage(sNameInResultsFolder);
-				App.log('Image loaded.');
-
-				// We either need to linearly remap RGB values here (using the Image class),
-				// or execute an ImageMagick command with -auto-level
-				// We could also try tweaking with the importer settings in loadImage
-
-				// This converts, renames and moves all in one
-				App.log('Saving image...');
-				oImageMgr.saveImage(sNameInOutputFolder, oImage, nAUTODETECT_EXPORTER_PARAMETER);
-				App.log('Image saved.');
-
-				wait(1);
-
-			} while (!isValidImage(sNameInOutputFolder));
-			
-			oResultsDirectory.remove(sNameInResultsFolder);
-
-			App.log('Deleting canvas .zip file: ' + sResultsDirectory + '/' + sFinalName + '.zip');
-			oResultsDirectory.remove(sFinalName + '.zip');
-
-			// TODO: Can we delete the folder if it's not empty?
-			App.log('Deleting folder: ' + sResultsDirectory + '/' + sFinalName);
-			oResultsDirectory.rmdir(sFinalName);
+			App.log('Deleting folder: ' + sResultsFolderPath + '...');
+			oResultsDirectory.rmdir(sResultsFolderPath);
+			App.log('Deleted ' + sResultsFolderPath);
 		}
 	}
 	if (bRenderShadows) {
@@ -390,6 +412,18 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 
 // Clean up any previous Iray Server instance, and start with a clean slate
 restartIrayServer();
+
+// Make the output directory if it doesn't exist
+if(!oOutputDirectory.exists()) {
+
+	App.log('Output directory does not exist. Creating: ' + sOutputDirectory + '...');
+	oOutputDirectory.mkdir(sOutputDirectory);
+	App.log('Created output directory: ' + sOutputDirectory);
+
+} else {
+
+	App.log('Output directory already exists: ' + sOutputDirectory);
+}
 
 var sSubjectName = getName(sSubjectFilepath);
 
