@@ -9,6 +9,8 @@ var sOutputDirectory = oScriptArgs['image_output_dir'];
 var oOutputDirectory = new DzDir(sOutputDirectory);
 var sResultsDirectory = oScriptArgs['results_directory_path'];
 var oResultsDirectory = new DzDir(sResultsDirectory);
+var sIrayServerDirectory = oScriptArgs['irayserver_directory_path'];
+var oIrayServerDirectory = new DzDir(sIrayServerDirectory);
 var sSubjectFilepath = oScriptArgs['subject_file'];
 var aAnimationFilepaths = oScriptArgs['animations'].toString().split(',');
 var aPropAnimationFilepaths = oScriptArgs['prop_animations'].toString().split(',');
@@ -39,19 +41,22 @@ var oCacheDbFile;
 var sScriptFileName = getScriptFileName();
 var oScriptFileInfo = new DzFileInfo(sScriptFileName);
 var oScriptDirectory = oScriptFileInfo.dir(); // DzDir object
-var sStartIrayServerScript = oScriptDirectory.absoluteFilePath('startIrayServer.ps1');
 var sStopIrayServerScript = oScriptDirectory.absoluteFilePath('stopIrayServer.ps1');
 var oStartIrayServerProcess = new DzProcess();
 var oStopIrayServerProcess = new DzProcess();
-var oProcessArguments = ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File"];
 var nAUTODETECT_EXPORTER_PARAMETER = -1;
 var sAddress = '127.0.0.1';
 var sPort = 9090;
 var sSecurity = 'http';
 var sSecureProtocol = 'https';
 
-oStartIrayServerProcess.arguments = oProcessArguments.concat([sStartIrayServerScript]);
-oStopIrayServerProcess.arguments = oProcessArguments.concat([sStopIrayServerScript]);
+oStartIrayServerProcess.arguments = [
+    "C:/Program Files/NVIDIA Corporation/Iray Server/server/iray_server.exe",
+    "--install-path",
+    "C:/Program Files/NVIDIA Corporation/Iray Server",
+    "--start-queue"
+];
+oStopIrayServerProcess.arguments = ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File", sStopIrayServerScript];
 oHttp.setConnectionMode(sSecurity);
 oHttp.setHost(sAddress);
 oHttp.setPort(sPort);
@@ -428,6 +433,17 @@ if(!oOutputDirectory.exists()) {
 } else {
 
 	App.log('Output directory already exists: ' + sOutputDirectory);
+}
+
+// Make the IrayServer directory if it doesn't exist
+if(!oIrayServerDirectory.exists()) {
+
+	App.log('IrayServer directory does not exist. Creating: ' + sIrayServerDirectory + '...');
+	oIrayServerDirectory.mkdir(sIrayServerDirectory);
+	App.log('Created IrayServer directory: ' + sIrayServerDirectory);
+
+} else {
+	App.log('IrayServer directory already exists: ' + sIrayServerDirectory);
 }
 
 var sSubjectName = getName(sSubjectFilepath);
