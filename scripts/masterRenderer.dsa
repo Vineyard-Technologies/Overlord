@@ -349,37 +349,26 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 
 			App.log(sNameInResultsFolder + ' has appeared.');
 			
-			App.log('Loading image ' + sNameInResultsFolder + '...');
+			App.log('Converting, renaming, and moving ' + sNameInResultsFolder + ' to ' + sNameInOutputFolder + '...');
 
-			var oLoadImageError;
-			var oImage;
-
-			// do this tomorrow: loop over the whole thing, loading and saving, until the final final PNG exists
-			// Keep trying to load the image until there's no error	
+			// Keep trying to load, convert, rename and save the image until it appears in the output folder
 			do {
 
-				try {
+				// The variant of this function that returns a DzError still returns "No error" even when
+				// "Operation failed" is logged.
+				App.log('Loading image...');
+				var oImage = oImageMgr.loadImage(sNameInResultsFolder);
+				App.log('Image loaded.');
 
-				} catch (e) {
-
-					App.log('Error loading image: ' + e.message);
-				}
-
-				oImage = new Image();
-
-				oLoadImageError = oImageMgr.loadImage(sNameInResultsFolder, oImage, nAUTODETECT_EXPORTER_PARAMETER);
-
-				var sErrorMessage = getErrorMessage(oLoadImageError);
-
-				App.log('Load image error: ' + sErrorMessage);
+				// This converts, renames and moves all in one
+				App.log('Saving image...');
+				oImageMgr.saveImage(sNameInOutputFolder, oImage, nAUTODETECT_EXPORTER_PARAMETER);
+				App.log('Image saved.');
 
 				wait(1);
 
-			} while (sErrorMessage != 'No error');
-
-			// This converts, renames, and copies the image to the output folder
-			oImageMgr.saveImage(sNameInOutputFolder, oImage, nAUTODETECT_EXPORTER_PARAMETER);
-
+			} while (!isValidImage(sNameInOutputFolder));
+			
 			oResultsDirectory.remove(sNameInResultsFolder);
 
 			App.log('Deleting canvas .zip file: ' + sResultsDirectory + '/' + sFinalName + '.zip');
