@@ -360,6 +360,9 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 				var oImage = oImageMgr.loadImage(sNameInResultsFolder);
 				App.log('Image loaded.');
 
+				// We either need to linearly remap RGB values here (using the Image class),
+				// or execute an ImageMagick command with -auto-level
+
 				// This converts, renames and moves all in one
 				App.log('Saving image...');
 				oImageMgr.saveImage(sNameInOutputFolder, oImage, nAUTODETECT_EXPORTER_PARAMETER);
