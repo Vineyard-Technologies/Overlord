@@ -1228,6 +1228,7 @@ def run_headless_mode(cmd_args):
             settings["frame_rate"] = str(cmd_args.frame_rate)
         if cmd_args.render_shadows is not None:
             settings["render_shadows"] = cmd_args.render_shadows
+        # Note: render_shadows defaults to True, so only --no-render-shadows will set it to False
         if cmd_args.shutdown_on_finish is not None:
             settings["shutdown_on_finish"] = cmd_args.shutdown_on_finish
     
@@ -4033,10 +4034,8 @@ if __name__ == "__main__":
                         help='Number of render instances to run')
     parser.add_argument('--frame-rate', type=int, 
                         help='Frame rate for animations')
-    parser.add_argument('--render-shadows', action='store_true', default=None,
-                        help='Enable shadow rendering')
-    parser.add_argument('--no-render-shadows', dest='render_shadows', action='store_false',
-                        help='Disable shadow rendering')
+    parser.add_argument('--no-render-shadows', dest='render_shadows', action='store_false', default=None,
+                        help='Disable shadow rendering (shadows enabled by default)')
     parser.add_argument('--shutdown-on-finish', action='store_true', default=None,
                         help='Shutdown computer when render completes')
     parser.add_argument('--no-shutdown-on-finish', dest='shutdown_on_finish', action='store_false',
