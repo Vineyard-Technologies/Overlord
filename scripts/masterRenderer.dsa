@@ -362,6 +362,7 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 
 				// We either need to linearly remap RGB values here (using the Image class),
 				// or execute an ImageMagick command with -auto-level
+				// We could also try tweaking with the importer settings in loadImage
 
 				// This converts, renames and moves all in one
 				App.log('Saving image...');
