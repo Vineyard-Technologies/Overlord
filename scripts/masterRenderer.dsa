@@ -39,14 +39,19 @@ var oCacheDbFile;
 var sScriptFileName = getScriptFileName();
 var oScriptFileInfo = new DzFileInfo(sScriptFileName);
 var oScriptDirectory = oScriptFileInfo.dir(); // DzDir object
-var sStartIrayServerScript = oScriptDirectory.absoluteFilePath('startIrayServer.vbs');
-var sStopIrayServerScript = oScriptDirectory.absoluteFilePath('stopIrayServer.vbs');
+var sStartIrayServerScript = oScriptDirectory.absoluteFilePath('startIrayServer.ps1');
+var sStopIrayServerScript = oScriptDirectory.absoluteFilePath('stopIrayServer.ps1');
+var oStartIrayServerProcess = new DzProcess();
+var oStopIrayServerProcess = new DzProcess();
+var oProcessArguments = ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File"];
 var nAUTODETECT_EXPORTER_PARAMETER = -1;
 var sAddress = '127.0.0.1';
 var sPort = 9090;
 var sSecurity = 'http';
 var sSecureProtocol = 'https';
 
+oStartIrayServerProcess.arguments = oProcessArguments.concat([sStartIrayServerScript]);
+oStopIrayServerProcess.arguments = oProcessArguments.concat([sStopIrayServerScript]);
 oHttp.setConnectionMode(sSecurity);
 oHttp.setHost(sAddress);
 oHttp.setPort(sPort);
@@ -69,13 +74,13 @@ function wait(seconds) {
 function restartIrayServer() {
 
 	App.log('Stopping Iray Server with ' + sStopIrayServerScript);
-	App.showURL(sStopIrayServerScript);
+	oStopIrayServerProcess.start();
 
 	App.log('Waiting 10 seconds for Iray Server to stop...');
 	wait(10);
 
 	App.log('Starting Iray Server with ' + sStartIrayServerScript);
-	App.showURL(sStartIrayServerScript);
+	oStartIrayServerProcess.start();
 	
 	// Wait for the restart process to complete
 	wait(10);
@@ -540,6 +545,6 @@ if (thereAre(aAnimationFilepaths)) {
 }
 
 App.log('Stopping Iray Server with ' + sStopIrayServerScript);
-App.showURL(sStopIrayServerScript);
+oStopIrayServerProcess.start();
 
 App.delayedExit();

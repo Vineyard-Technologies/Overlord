@@ -22,8 +22,8 @@ VersionInfoDescription=Overlord - Render Pipeline Manager
 [Files]
 Source: "dist\overlord.exe"; DestDir: "{app}"; Flags: ignoreversion 64bit
 Source: "scripts\masterRenderer.dsa"; DestDir: "{app}\scripts"; Flags: ignoreversion 64bit
-Source: "scripts\startIrayServer.vbs"; DestDir: "{app}\scripts"; Flags: ignoreversion 64bit
-Source: "scripts\stopIrayServer.vbs"; DestDir: "{app}\scripts"; Flags: ignoreversion 64bit
+Source: "scripts\startIrayServer.ps1"; DestDir: "{app}\scripts"; Flags: ignoreversion 64bit
+Source: "scripts\stopIrayServer.ps1"; DestDir: "{app}\scripts"; Flags: ignoreversion 64bit
 Source: "images\splashScreen.png"; DestDir: "{app}\images"; Flags: ignoreversion 64bit
 Source: "templates\masterTemplate.duf"; DestDir: "{userappdata}\Overlord\templates"; Flags: ignoreversion
 

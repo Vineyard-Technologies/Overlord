@@ -385,45 +385,45 @@ def is_iray_server_running() -> bool:
     return check_process_running(IRAY_SERVER_PROCESSES)
 
 def stop_iray_server() -> int:
-    """Stop all iray_server.exe and iray_server_worker.exe processes using stopIrayServer.vbs."""
+    """Stop all iray_server.exe and iray_server_worker.exe processes using stopIrayServer.ps1."""
     try:
-        # Get the stopIrayServer.vbs script path
+        # Get the stopIrayServer.ps1 script path
         if getattr(sys, 'frozen', False):
             # Running from executable - use user scripts directory
             user_scripts_dir = os.path.join(get_app_data_path(), 'scripts')
-            script_path = os.path.join(user_scripts_dir, "stopIrayServer.vbs")
+            script_path = os.path.join(user_scripts_dir, "stopIrayServer.ps1")
         else:
             # Running from source - use source scripts directory
             install_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-            script_path = os.path.join(install_dir, "scripts", "stopIrayServer.vbs")
+            script_path = os.path.join(install_dir, "scripts", "stopIrayServer.ps1")
         
         if not os.path.exists(script_path):
-            logging.error(f"stopIrayServer.vbs not found at: {normalize_path_for_logging(script_path)}")
+            logging.error(f"stopIrayServer.ps1 not found at: {normalize_path_for_logging(script_path)}")
             return 0
         
-        # Run the VBS script silently
-        logging.info('Stopping Iray Server using stopIrayServer.vbs')
+        # Run the PowerShell script silently
+        logging.info('Stopping Iray Server using stopIrayServer.ps1')
         result = subprocess.run(
-            ["cscript", "//NoLogo", script_path],
+            ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File", script_path],
             capture_output=True,
             text=True,
             timeout=30
         )
         
         if result.returncode == 0:
-            logging.info('Iray Server stopped successfully via VBS script')
+            logging.info('Iray Server stopped successfully via PowerShell script')
             return 1  # Assume processes were stopped
         else:
-            logging.warning(f'stopIrayServer.vbs returned non-zero exit code: {result.returncode}')
+            logging.warning(f'stopIrayServer.ps1 returned non-zero exit code: {result.returncode}')
             if result.stderr:
-                logging.warning(f'VBS script stderr: {result.stderr}')
+                logging.warning(f'PowerShell script stderr: {result.stderr}')
             return 0
             
     except subprocess.TimeoutExpired:
-        logging.error('stopIrayServer.vbs timed out after 30 seconds')
+        logging.error('stopIrayServer.ps1 timed out after 30 seconds')
         return 0
     except Exception as e:
-        logging.error(f'Failed to run stopIrayServer.vbs: {e}')
+        logging.error(f'Failed to run stopIrayServer.ps1: {e}')
         return 0
 
 def stop_all_render_processes() -> dict:
@@ -1343,8 +1343,8 @@ def start_headless_render(settings):
         # Copy all scripts to user directory
         scripts_to_copy = [
             ("masterRenderer.dsa", "masterRenderer.dsa"),
-            ("stopIrayServer.vbs", "stopIrayServer.vbs"),
-            ("startIrayServer.vbs", "startIrayServer.vbs")
+            ("stopIrayServer.ps1", "stopIrayServer.ps1"),
+            ("startIrayServer.ps1", "startIrayServer.ps1")
         ]
         
         import shutil
@@ -3744,8 +3744,8 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             # Copy all scripts to user directory
             scripts_to_copy = [
                 ("masterRenderer.dsa", "masterRenderer.dsa"),
-                ("stopIrayServer.vbs", "stopIrayServer.vbs"),
-                ("startIrayServer.vbs", "startIrayServer.vbs")
+                ("stopIrayServer.ps1", "stopIrayServer.ps1"),
+                ("startIrayServer.ps1", "startIrayServer.ps1")
             ]
             
             import shutil
@@ -3922,7 +3922,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             logging.info('Stopping render processes...')
             kill_render_related_processes()
             
-            # Database and cache cleanup is now handled by stopIrayServer.vbs
+            # Database and cache cleanup is now handled by stopIrayServer.ps1
             
         except Exception as e:
             logging.error(f'Error during stop render: {e}')
