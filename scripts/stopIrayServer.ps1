@@ -1,6 +1,3 @@
-# PowerShell script to stop Iray Server processes and clean up cache (Silent Mode)
-
-# Set error action preference to continue on errors (like VBS "On Error Resume Next")
 $ErrorActionPreference = "SilentlyContinue"
 
 # Working directory - use LocalAppData\Overlord\IrayServer
@@ -21,22 +18,28 @@ foreach ($processName in $processNames) {
     }
 }
 
-# Wait a moment for processes to fully terminate
-Start-Sleep -Seconds 2
-
-# Step 2: Delete entire IrayServer folder if it exists
+# Step 2: Delete contents of IrayServer folder if it exists (keep the folder itself)
 if (Test-Path $irayServerDir) {
-    # Retry loop for folder deletion (in case files are still locked)
-    $retryCount = 0
-    $maxRetries = 10
+    # Get all items inside the IrayServer folder
+    $items = Get-ChildItem -Path $irayServerDir -Force -ErrorAction SilentlyContinue
     
-    while ((Test-Path $irayServerDir) -and ($retryCount -lt $maxRetries)) {
-        try {
-            Remove-Item -Path $irayServerDir -Recurse -Force -ErrorAction Stop
-            break
-        } catch {
+    if ($items) {
+        # Retry loop for content deletion (in case files are still locked)
+        do {
+            $remainingItems = Get-ChildItem -Path $irayServerDir -Force -ErrorAction SilentlyContinue
+            if (-not $remainingItems) {
+                break
+            }
+            
+            foreach ($item in $remainingItems) {
+                try {
+                    Remove-Item -Path $item.FullName -Recurse -Force -ErrorAction Stop
+                } catch {
+                    # Continue trying other items even if one fails
+                }
+            }
+            
             Start-Sleep -Seconds 1
-            $retryCount++
-        }
+        } while ($remainingItems)
     }
 }

@@ -34,29 +34,73 @@ var oHttpHelper = new DzHttpHelper();
 var oHttp = new DzHttpHelper();
 var nCacheDbSizeThreshold = oScriptArgs['cache_db_size_threshold_gb'];
 var sUserName = App.getAppDataPath().split('/')[2];
-var sCacheFolderPath = 'C:/Users/' + sUserName + '/AppData/Local/Overlord/IrayServer/cache';
+var sIrayServerDirectory = 'C:/Users/' + sUserName + '/AppData/Local/Overlord/IrayServer';
+var oIrayServerDirectory = new DzDir(sIrayServerDirectory);
+var sCacheFolderPath = sIrayServerDirectory + '/cache';
 var oCacheDbFile;
 var sScriptFileName = getScriptFileName();
 var oScriptFileInfo = new DzFileInfo(sScriptFileName);
 var oScriptDirectory = oScriptFileInfo.dir(); // DzDir object
-var sStartIrayServerScript = oScriptDirectory.absoluteFilePath('startIrayServer.ps1');
-var sStopIrayServerScript = oScriptDirectory.absoluteFilePath('stopIrayServer.ps1');
-var oStartIrayServerProcess = new DzProcess();
-var oStopIrayServerProcess = new DzProcess();
-var oProcessArguments = ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File"];
+var sIrayServerStopperScript = oScriptDirectory.absoluteFilePath('stopIrayServer.ps1');
+var oIrayServerProcess = new DzProcess();
+var oIrayServerStopperProcess = new DzProcess();
+var oProcessArguments = ['powershell.exe', '-ExecutionPolicy', 'Bypass', '-File'];
 var nAUTODETECT_EXPORTER_PARAMETER = -1;
 var sAddress = '127.0.0.1';
 var sPort = 9090;
 var sSecurity = 'http';
 var sSecureProtocol = 'https';
+var bENABLE_IRAY_SERVER_LOGGING = false;
+var bENABLE_IRAY_SERVER_STOPPER_LOGGING = true;
 
-oStartIrayServerProcess.arguments = oProcessArguments.concat([sStartIrayServerScript]);
-oStopIrayServerProcess.arguments = oProcessArguments.concat([sStopIrayServerScript]);
+oIrayServerProcess.workingDirectory = sIrayServerDirectory;
+oIrayServerProcess.arguments = [
+	'C:/Program Files/NVIDIA Corporation/Iray Server/server/iray_server.exe',
+	'--install-path',
+	'C:/Program Files/NVIDIA Corporation/Iray Server',
+	'--start-queue'
+];
+
+// We can't just use DzProcess.kill() because that only kills processes
+// started in this session. A PowerShell script can kill the Iray Server
+// processes by name, and can also be called from Overlord. PowerShell can
+// also recursively delete the IrayServer folder, but Daz Script cannot.
+// DzDir.removeRecursively() is undocumented and I couldn't get it to work.
+oIrayServerStopperProcess.arguments = [
+	'powershell.exe',
+	'-ExecutionPolicy',
+	'Bypass',
+	'-File',
+	sIrayServerStopperScript
+];
+
+// Connect Iray Server process to logger (if enabled)
+if (bENABLE_IRAY_SERVER_LOGGING) {
+	oIrayServerProcess.communication = DzProcess.Stdin | DzProcess.Stdout | DzProcess.Stderr;
+	connect(oIrayServerProcess, 'readyReadStdout()', function() {
+		App.log('Iray Server stdout: ' + oIrayServerProcess.readStdout());
+	});
+	connect(oIrayServerProcess, 'readyReadStderr()', function() {
+		App.log('Iray Server stderr: ' + oIrayServerProcess.readStderr());
+	});
+}
+
+// Connect Iray Server Stopper process to logger (if enabled)
+if (bENABLE_IRAY_SERVER_STOPPER_LOGGING) {
+	oIrayServerStopperProcess.communication = DzProcess.Stdin | DzProcess.Stdout | DzProcess.Stderr;
+	connect(oIrayServerStopperProcess, 'readyReadStdout()', function() {
+		App.log('Iray Server Stopper stdout: ' + oIrayServerStopperProcess.readStdout());
+	});
+	connect(oIrayServerStopperProcess, 'readyReadStderr()', function() {
+		App.log('Iray Server Stopper stderr: ' + oIrayServerStopperProcess.readStderr());
+	});
+}
+
 oHttp.setConnectionMode(sSecurity);
 oHttp.setHost(sAddress);
 oHttp.setPort(sPort);
-oHttp.setPath("/");
-oHttp.setRequestMethod("GET");
+oHttp.setPath('/');
+oHttp.setRequestMethod('GET');
 
 oSettings.setIntValue('Connection', 0);
 oSettings.setStringValue('Server', sAddress);
@@ -69,20 +113,37 @@ function wait(seconds) {
 
 	sleep(seconds * 1000);
 }
+function startProcess(oProcess, sProcessName) {
 
-// Kill Iray server if it's running, then remove the cache file if it exists, then restart it
+		App.log('Launching ' + sProcessName + '...');
+
+	if (oProcess.start()) {
+
+		App.log(sProcessName + ' launched');
+
+		while (oProcess.running) {
+
+			App.log(sProcessName + ' is running...');
+
+			processEvents();
+
+			wait(1);
+		}
+		
+		App.log(sProcessName + ' has finished.');
+
+	} else {
+
+		App.log('Could not start ' + sProcessName + '.');
+	}
+}
+// Kill Iray server if it's running, remove the server files, then restart it
 function restartIrayServer() {
 
-	App.log('Stopping Iray Server with ' + sStopIrayServerScript);
-	oStopIrayServerProcess.start();
+	startProcess(oIrayServerStopperProcess, 'Iray Server Stopper');
 
-	App.log('Waiting 10 seconds for Iray Server to stop...');
-	wait(10);
-
-	App.log('Starting Iray Server with ' + sStartIrayServerScript);
-	oStartIrayServerProcess.start();
-	
-	// Wait for the restart process to complete
+	//TODO: see if startProcess() can be used here
+	oIrayServerProcess.start();
 	wait(10);
 }
 // Check if an image exists and isn't truncated
@@ -107,8 +168,8 @@ function isValidImage(sFilePath) {
 			var aEndChunk = oFile.read(nIEND_CHUNK_LENGTH);
 			var sEndChunk = aEndChunk.convertToString();
 
-			App.log('Last chunk of PNG file: "' + sEndChunk + '"');
-			return sEndChunk === "IEND";
+			App.log('Last chunk of PNG file: ' + sEndChunk);
+			return sEndChunk === 'IEND';
 		}
 
 		// There's no specification for the end of an EXR file.
@@ -129,7 +190,6 @@ function isValidImage(sFilePath) {
 		oFile.close();
 	}
 }
-
 // Obtain the desired name out of a filepath or filename.
 function getName(sFileName) {
 	return new DzFileInfo(sFileName).completeBaseName();
@@ -254,6 +314,7 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 			var sResultsZipFilePath = sResultsDirectory + '/' + sFinalName + '.zip';
 			var sResultsFolderPath = sResultsDirectory + '/' + sFinalName;
 			var sImageFileOutputPath = sOutputDirectory + '/' + sFinalName + '.png';
+			var oImageFileResultsPathFileInfo = new DzFileInfo(sImageFileResultsPath);
 
 			if (isValidImage(sImageFileOutputPath)) {
 
@@ -353,47 +414,37 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 			do {
 
 				wait(1);
-
-				var oProcess = new DzProcess();
-				var aProcessArgs = [
-					"powershell.exe",
-					"-Command",
-					"magick \"" + sImageFileResultsPath + "\" -auto-level \"" + sImageFileOutputPath + "\""
+				
+				var oImageMagickProcess = new DzProcess();
+				var aImageMagickProcessArgs = [
+					'powershell.exe',
+					'-Command',
+					'magick "' + sImageFileResultsPath + '" ' +
+					// Only use -auto-level on EXR files.
+					// We're still using this command to move and rename PNGs because
+					// We were neither the results DzDir or the output DzDir were letting
+					// us use move() from one directory to the other.
+					(oImageFileResultsPathFileInfo.suffix() == 'exr' ? '-auto-level ' : '') +
+					'"' + sImageFileOutputPath + '"'
 				];
 
-				oProcess.communication = DzProcess.Stdin | DzProcess.Stdout | DzProcess.Stderr;
-				oProcess.arguments = aProcessArgs;
+				oImageMagickProcess.communication = DzProcess.Stdin | DzProcess.Stdout | DzProcess.Stderr;
+				oImageMagickProcess.arguments = aImageMagickProcessArgs;
 
 				// Connect to receive standard output
-				connect(oProcess, "readyReadStdout()", function() {
-					App.log("ImageMagick stdout: " + oProcess.readStdout());
+				connect(oImageMagickProcess, 'readyReadStdout()', function() {
+					App.log('ImageMagick stdout: ' + oImageMagickProcess.readStdout());
 				});
 
 				// Connect to receive standard error
-				connect(oProcess, "readyReadStderr()", function() {
-					App.log("ImageMagick stderr: " + oProcess.readStderr());
+				connect(oImageMagickProcess, 'readyReadStderr()', function() {
+					App.log('ImageMagick stderr: ' + oImageMagickProcess.readStderr());
 				});
 
 				// https://github.com/Vineyard-Technologies/Overlord/discussions/28
-				App.log('Converting, renaming, and copying ' + sImageFileResultsPath + ' to ' + sImageFileOutputPath + '...');
-				
-				if (!oProcess.start()) {
-					App.log("Could not start ImageMagick conversion process");
-				} else {
-					while (oProcess.running) {
-						processEvents();
-					}
-					
-					App.log("ImageMagick conversion completed.");
-					
-					// Read any remaining output
-					if (oProcess.readStdout().length > 0) {
-						App.log("Final ImageMagick stdout: " + oProcess.readStdout());
-					}
-					if (oProcess.readStderr().length > 0) {
-						App.log("Final ImageMagick stderr: " + oProcess.readStderr());
-					}
-				}
+				App.log('ImageMagick arguments: ' + aImageMagickProcessArgs.join(' '));	
+				startProcess(oImageMagickProcess, 'ImageMagick');
+
 			} while (!isValidImage(sImageFileOutputPath));
 			App.log('File has appeared in output folder.');
 			
@@ -429,6 +480,17 @@ if(!oOutputDirectory.exists()) {
 
 	App.log('Output directory already exists: ' + sOutputDirectory);
 }
+// Make the Iray Server directory if it doesn't exist
+if(!oIrayServerDirectory.exists()) {
+
+	App.log('Iray Server directory does not exist. Creating: ' + sIrayServerDirectory + '...');
+	oIrayServerDirectory.mkdir(sIrayServerDirectory);
+	App.log('Created Iray Server directory: ' + sIrayServerDirectory);
+
+} else {
+
+	App.log('Iray Server directory already exists: ' + sIrayServerDirectory);
+}
 
 var sSubjectName = getName(sSubjectFilepath);
 
@@ -447,8 +509,8 @@ if (thereAre(aAnimationFilepaths)) {
 		
 		/*
 		We have to turn off limits for the subject and its children
-		because the perferences parameter "When importing a Pose/Shaping file that exceeds limits :"
-		(under the 'Content' tab) is _not_ set to "Always turn limits off"
+		because the perferences parameter 'When importing a Pose/Shaping file that exceeds limits :'
+		(under the 'Content' tab) is _not_ set to 'Always turn limits off'
 		on headless runs and fresh Daz Studio installs.
 		*/
 		oSubject.aPropertyList = oSubject.getPropertyList();
@@ -481,7 +543,7 @@ if (thereAre(aAnimationFilepaths)) {
 			}
 		}
 
-		// Limits are called "limits" in the UI, and "clamps" in Daz Script
+		// Limits are called 'limits' in the UI, and 'clamps' in Daz Script
 		function turnLimitOff(oProperty) {
 
 			// If this property has a 'setIsClamped' function...
@@ -544,7 +606,7 @@ if (thereAre(aAnimationFilepaths)) {
 	renderCore(sSubjectName, 'static', false, false);
 }
 
-App.log('Stopping Iray Server with ' + sStopIrayServerScript);
-oStopIrayServerProcess.start();
+App.log('Stopping Iray Server with ' + sIrayServerStopperScript);
+oIrayServerStopperProcess.start();
 
 App.delayedExit();

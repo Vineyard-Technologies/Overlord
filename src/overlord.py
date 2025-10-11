@@ -3063,8 +3063,8 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
     image_frame.pack_propagate(False)
     theme_manager.register_widget(image_frame, "frame")
     
-    # Image display label
-    image_display = tk.Label(image_frame, bg="black", fg="white")
+    # Image display label - use theme background instead of black
+    image_display = tk.Label(image_frame)
     image_display.pack(fill=tk.BOTH, expand=True)
     theme_manager.register_widget(image_display, "label")
 
@@ -3289,11 +3289,24 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                     
                     # Display the image at original size
                     try:
-                        photo = ImageTk.PhotoImage(Image.open(newest_img_path))
+                        # Load image and handle LA mode (grayscale + alpha) for better display
+                        with Image.open(newest_img_path) as img:
+                            if img.mode == 'LA':
+                                # Convert LA (grayscale + alpha) to RGBA for better ImageTk compatibility
+                                # This only affects display, not the file on disk
+                                display_img = img.convert('RGBA')
+                                photo = ImageTk.PhotoImage(display_img)
+                            else:
+                                # For other modes (RGB, RGBA, etc.), display as-is
+                                photo = ImageTk.PhotoImage(img)
+                        
                         image_display.config(image=photo, text="")
                         image_display.image = photo  # Keep reference
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logging.warning(f"Failed to display image {os.path.basename(newest_img_path)}: {e}")
+                        # Clear the image display on error
+                        image_display.config(image="", text="Image display error")
+                        image_display.image = None
                     
                     break
                 except Exception:
