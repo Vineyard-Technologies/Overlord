@@ -44,15 +44,24 @@ var oScriptDirectory = oScriptFileInfo.dir(); // DzDir object
 var sIrayServerStopperScript = oScriptDirectory.absoluteFilePath('stopIrayServer.ps1');
 var oIrayServerProcess = new DzProcess();
 var oIrayServerStopperProcess = new DzProcess();
-var oProcessArguments = ['powershell.exe', '-ExecutionPolicy', 'Bypass', '-File'];
+var oImageMagickProcess = new DzProcess();
+var aProcesses = [
+	oIrayServerProcess,
+	oIrayServerStopperProcess,
+	oImageMagickProcess
+];
 var nAUTODETECT_EXPORTER_PARAMETER = -1;
 var sAddress = '127.0.0.1';
 var sPort = 9090;
 var sSecurity = 'http';
 var sSecureProtocol = 'https';
-var bENABLE_IRAY_SERVER_LOGGING = false;
-var bENABLE_IRAY_SERVER_STOPPER_LOGGING = true;
 
+oIrayServerProcess.name = 'Iray Server';
+oIrayServerStopperProcess.name = 'Iray Server Stopper';
+oImageMagickProcess.name = 'ImageMagick';
+oIrayServerProcess.logging = false;
+oIrayServerStopperProcess.logging = true;
+oImageMagickProcess.logging = true;
 oIrayServerProcess.workingDirectory = sIrayServerDirectory;
 oIrayServerProcess.arguments = [
 	'C:/Program Files/NVIDIA Corporation/Iray Server/server/iray_server.exe',
@@ -60,12 +69,6 @@ oIrayServerProcess.arguments = [
 	'C:/Program Files/NVIDIA Corporation/Iray Server',
 	'--start-queue'
 ];
-
-// We can't just use DzProcess.kill() because that only kills processes
-// started in this session. A PowerShell script can kill the Iray Server
-// processes by name, and can also be called from Overlord. PowerShell can
-// also recursively delete the IrayServer folder, but Daz Script cannot.
-// DzDir.removeRecursively() is undocumented and I couldn't get it to work.
 oIrayServerStopperProcess.arguments = [
 	'powershell.exe',
 	'-ExecutionPolicy',
@@ -73,35 +76,11 @@ oIrayServerStopperProcess.arguments = [
 	'-File',
 	sIrayServerStopperScript
 ];
-
-// Connect Iray Server process to logger (if enabled)
-if (bENABLE_IRAY_SERVER_LOGGING) {
-	oIrayServerProcess.communication = DzProcess.Stdin | DzProcess.Stdout | DzProcess.Stderr;
-	connect(oIrayServerProcess, 'readyReadStdout()', function() {
-		App.log('Iray Server stdout: ' + oIrayServerProcess.readStdout());
-	});
-	connect(oIrayServerProcess, 'readyReadStderr()', function() {
-		App.log('Iray Server stderr: ' + oIrayServerProcess.readStderr());
-	});
-}
-
-// Connect Iray Server Stopper process to logger (if enabled)
-if (bENABLE_IRAY_SERVER_STOPPER_LOGGING) {
-	oIrayServerStopperProcess.communication = DzProcess.Stdin | DzProcess.Stdout | DzProcess.Stderr;
-	connect(oIrayServerStopperProcess, 'readyReadStdout()', function() {
-		App.log('Iray Server Stopper stdout: ' + oIrayServerStopperProcess.readStdout());
-	});
-	connect(oIrayServerStopperProcess, 'readyReadStderr()', function() {
-		App.log('Iray Server Stopper stderr: ' + oIrayServerStopperProcess.readStderr());
-	});
-}
-
 oHttp.setConnectionMode(sSecurity);
 oHttp.setHost(sAddress);
 oHttp.setPort(sPort);
 oHttp.setPath('/');
 oHttp.setRequestMethod('GET');
-
 oSettings.setIntValue('Connection', 0);
 oSettings.setStringValue('Server', sAddress);
 oSettings.setBoolValue('Secure', sSecurity == sSecureProtocol);
@@ -113,13 +92,15 @@ function wait(seconds) {
 
 	sleep(seconds * 1000);
 }
-function startProcess(oProcess, sProcessName) {
+function startProcess(oProcess, sProcessName, bIsContinuous) {
 
 		App.log('Launching ' + sProcessName + '...');
 
 	if (oProcess.start()) {
 
 		App.log(sProcessName + ' launched');
+
+		if(bIsContinuous) return;
 
 		while (oProcess.running) {
 
@@ -140,11 +121,9 @@ function startProcess(oProcess, sProcessName) {
 // Kill Iray server if it's running, remove the server files, then restart it
 function restartIrayServer() {
 
-	startProcess(oIrayServerStopperProcess, 'Iray Server Stopper');
+	startProcess(oIrayServerStopperProcess, 'Iray Server Stopper', false);
 
-	//TODO: see if startProcess() can be used here
-	oIrayServerProcess.start();
-	wait(10);
+	startProcess(oIrayServerProcess, 'Iray Server', true);
 }
 // Check if an image exists and isn't truncated
 function isValidImage(sFilePath) {
@@ -304,7 +283,7 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 		}
 
 		// Loop through each frame...
-		for (var nFrame = 0; nFrame <= nFramesTotal; nFrame++) {
+		frameLoop: for (var nFrame = 0; nFrame <= nFramesTotal; nFrame++) {
 
 			// Check if the current Daz instance should render this frame.
 			if ((nFrame - (nInstanceNumber - 1)) % nTotalNumberOfInstances != 0) continue;
@@ -411,12 +390,17 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 
 			wait(2); // Plausible minimum render time
 
+			var nImageMagickAttempts = 0;
+			var nMAX_IMAGEMAGICK_ATTEMPTS = 10;
+
 			do {
 
 				wait(1);
 				
-				var oImageMagickProcess = new DzProcess();
-				var aImageMagickProcessArgs = [
+				nImageMagickAttempts++;
+				App.log('ImageMagick attempt ' + nImageMagickAttempts + '/' + nMAX_IMAGEMAGICK_ATTEMPTS);
+
+				oImageMagickProcess.arguments = [
 					'powershell.exe',
 					'-Command',
 					'magick "' + sImageFileResultsPath + '" ' +
@@ -427,9 +411,6 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 					(oImageFileResultsPathFileInfo.suffix() == 'exr' ? '-auto-level ' : '') +
 					'"' + sImageFileOutputPath + '"'
 				];
-
-				oImageMagickProcess.communication = DzProcess.Stdin | DzProcess.Stdout | DzProcess.Stderr;
-				oImageMagickProcess.arguments = aImageMagickProcessArgs;
 
 				// Connect to receive standard output
 				connect(oImageMagickProcess, 'readyReadStdout()', function() {
@@ -442,27 +423,48 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 				});
 
 				// https://github.com/Vineyard-Technologies/Overlord/discussions/28
-				App.log('ImageMagick arguments: ' + aImageMagickProcessArgs.join(' '));	
-				startProcess(oImageMagickProcess, 'ImageMagick');
+				App.log('ImageMagick arguments: ' + oImageMagickProcess.arguments.join(' '));	
+				startProcess(oImageMagickProcess, 'ImageMagick', false);
+
+				// If we've reached max attempts and still no valid image, restart this frame
+				if (nImageMagickAttempts >= nMAX_IMAGEMAGICK_ATTEMPTS && !isValidImage(sImageFileOutputPath)) {
+					App.log('Maximum ImageMagick attempts reached for frame ' + nFrame + '. Restarting this frame...');
+					nFrame--;
+					continue frameLoop;
+				}
 
 			} while (!isValidImage(sImageFileOutputPath));
 			App.log('File has appeared in output folder.');
-			
-			App.log('Deleting ' + sImageFileResultsPath + '...');
-			oResultsDirectory.remove(sImageFileResultsPath);
-			App.log('Deleted ' + sImageFileResultsPath);
-
-			App.log('Deleting canvas .zip file: ' + sResultsZipFilePath + '...');
-			oResultsDirectory.remove(sResultsZipFilePath);
-			App.log('Deleted ' + sResultsZipFilePath);
-
-			App.log('Deleting folder: ' + sResultsFolderPath + '...');
-			oResultsDirectory.rmdir(sResultsFolderPath);
-			App.log('Deleted ' + sResultsFolderPath);
 		}
 	}
 	if (bRenderShadows) {
 		if (!bIsShadow) renderCore(sSubjectName, sAnimationName, bIsGear, true);
+	}
+}
+
+// Setup process logging for all processes
+for (var nProcessCounter = 0; nProcessCounter < aProcesses.length; nProcessCounter++) {
+
+	var oCurrentProcess = aProcesses[nProcessCounter];
+	
+	if (oCurrentProcess.logging) {
+
+		App.log('Logging for ' + oCurrentProcess.name + ' is enabled. Connecting to stdout and stderr...');
+		oCurrentProcess.communication = DzProcess.Stdin | DzProcess.Stdout | DzProcess.Stderr;
+		
+		// Create closure to capture the process name for logging
+		(function(processName, process) {
+			connect(process, 'readyReadStdout()', function() {
+				App.log(processName + ' stdout: ' + process.readStdout());
+			});
+			connect(process, 'readyReadStderr()', function() {
+				App.log(processName + ' stderr: ' + process.readStderr());
+			});
+		})(oCurrentProcess.name, oCurrentProcess);
+
+		App.log('Logging for ' + oCurrentProcess.name + ' is now live.');
+	} else {
+		App.log('Logging for ' + oCurrentProcess.name + ' is disabled.');
 	}
 }
 
@@ -606,7 +608,6 @@ if (thereAre(aAnimationFilepaths)) {
 	renderCore(sSubjectName, 'static', false, false);
 }
 
-App.log('Stopping Iray Server with ' + sIrayServerStopperScript);
-oIrayServerStopperProcess.start();
+startProcess(oIrayServerStopperProcess, 'Iray Server Stopper (final cleanup)', false);
 
 App.delayedExit();
