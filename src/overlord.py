@@ -3622,8 +3622,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 # Iray Server will be started by DAZ Script - no need to start it here
                 logging.info('Iray Server startup will be handled by DAZ Script')
                 
-                # Set rendering state
-                is_rendering = True
+                # Don't set rendering state here - wait for user confirmation in complete_render_setup
                 reset_shutdown_timer()  # Reset any pending shutdown timer
                 output_directory = value_entries["Output Directory"].get().strip()
                 logging.info('File conversion and monitoring now handled by masterRenderer.dsa')
@@ -3684,7 +3683,8 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 # File monitoring cleanup no longer needed
                 # Reset initial total images count
                 initial_total_images = 0
-                # No longer toggle button states on error - both remain clickable
+                # Re-enable input fields on error
+                root.after(0, lambda: set_inputs_enabled(True))
                 root.after(0, lambda: images_remaining_var.set("Images remaining:"))
         
         def continue_render_setup(session_completion_callback):
@@ -3705,7 +3705,8 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 # File monitoring cleanup no longer needed
                 # Reset initial total images count
                 initial_total_images = 0
-                # No longer toggle button states on error - both remain clickable
+                # Re-enable input fields on error
+                set_inputs_enabled(True)
                 images_remaining_var.set("Images remaining:")
         
         # Start the background process
@@ -3733,12 +3734,19 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             if not result:
                 logging.info('Start Render cancelled by user - DAZ Studio running')
                 # Reset initial total images count
-                global initial_total_images, render_start_time
+                global initial_total_images, render_start_time, is_rendering
                 initial_total_images = 0
                 render_start_time = None  # Reset render start time
-                # No longer toggle button states when user cancels - both remain clickable
+                is_rendering = False  # Reset rendering state when user cancels
+                # Re-enable input fields when user cancels
+                set_inputs_enabled(True)
                 images_remaining_var.set("Images remaining:")
                 return
+
+        # User confirmed - now set rendering state
+        global is_rendering
+        is_rendering = True
+        logging.info('Rendering state set to True after user confirmation')
 
         # Update button to show launching state
         root.update_idletasks()
