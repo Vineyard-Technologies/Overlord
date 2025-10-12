@@ -3714,6 +3714,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
         render_thread.start()
         
     def complete_render_setup(session_completion_callback=None):
+        global initial_total_images, render_start_time, is_rendering
         logging.info("complete_render_setup: Starting render setup...")
         
         # Get animations for the render script
@@ -3734,7 +3735,6 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             if not result:
                 logging.info('Start Render cancelled by user - DAZ Studio running')
                 # Reset initial total images count
-                global initial_total_images, render_start_time, is_rendering
                 initial_total_images = 0
                 render_start_time = None  # Reset render start time
                 is_rendering = False  # Reset rendering state when user cancels
@@ -3744,7 +3744,6 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 return
 
         # User confirmed - now set rendering state
-        global is_rendering
         is_rendering = True
         logging.info('Rendering state set to True after user confirmation')
 
