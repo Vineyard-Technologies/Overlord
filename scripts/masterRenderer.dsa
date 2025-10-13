@@ -30,14 +30,11 @@ var oEnvironmentModeProperty;
 var oRoot;
 var oShadowPlane;
 var oSettings = new DzSettings();
-var oHttpHelper = new DzHttpHelper();
-var oHttp = new DzHttpHelper();
 var nCacheDbSizeThreshold = oScriptArgs['cache_db_size_threshold_gb'];
 var sUserName = App.getAppDataPath().split('/')[2];
 var sIrayServerDirectory = 'C:/Users/' + sUserName + '/AppData/Local/Overlord/IrayServer';
 var oIrayServerDirectory = new DzDir(sIrayServerDirectory);
 var sCacheFolderPath = sIrayServerDirectory + '/cache';
-var oCacheDbFile;
 var sScriptFileName = getScriptFileName();
 var oScriptFileInfo = new DzFileInfo(sScriptFileName);
 var oScriptDirectory = oScriptFileInfo.dir(); // DzDir object
@@ -55,6 +52,8 @@ var sAddress = '127.0.0.1';
 var sPort = 9090;
 var sSecurity = 'http';
 var sSecureProtocol = 'https';
+var nIEND_CHUNK_POSITION = 8;
+var nIEND_CHUNK_LENGTH = 4;
 
 oIrayServerProcess.name = 'Iray Server';
 oIrayServerStopperProcess.name = 'Iray Server Stopper';
@@ -76,11 +75,6 @@ oIrayServerStopperProcess.arguments = [
 	'-File',
 	sIrayServerStopperScript
 ];
-oHttp.setConnectionMode(sSecurity);
-oHttp.setHost(sAddress);
-oHttp.setPort(sPort);
-oHttp.setPath('/');
-oHttp.setRequestMethod('GET');
 oSettings.setIntValue('Connection', 0);
 oSettings.setStringValue('Server', sAddress);
 oSettings.setBoolValue('Secure', sSecurity == sSecureProtocol);
@@ -128,46 +122,28 @@ function restartIrayServer() {
 // Check if an image exists and isn't truncated
 function isValidImage(sFilePath) {
 
-	try {
+	var oFileInfo = new DzFileInfo(sFilePath);
 
-		var oFile = new DzFile(sFilePath);
-		var oFileInfo = new DzFileInfo(sFilePath);
-		var nFileSize = oFileInfo.size();
-
-		oFile.open(DzFile.ReadOnly);
-
-		// PNG files end with an IEND chunk
-		if (oFileInfo.suffix() == 'png') {
-
-			var nIEND_CHUNK_POSITION = 8;
-
-			oFile.seek(nFileSize - nIEND_CHUNK_POSITION);
-
-			var nIEND_CHUNK_LENGTH = 4;
-			var aEndChunk = oFile.read(nIEND_CHUNK_LENGTH);
-			var sEndChunk = aEndChunk.convertToString();
-
-			App.log('Last chunk of PNG file: ' + sEndChunk);
-			return sEndChunk === 'IEND';
-		}
-
-		// There's no specification for the end of an EXR file.
-		// We currently do not have a solid way to verify the integrity of EXR files.
-		else if(oFileInfo.suffix() == 'exr') {
-
-			return true;
-		}
-		
-	} catch (e) {
-
-		App.log('Error reading file ' + sFilePath + ': ' + e.message);
+	if (!oFileInfo.exists()) {
 
 		return false;
-
-	} finally {
-
-		oFile.close();
 	}
+	var oFile = new DzFile(sFilePath);
+	var nFileSize = oFileInfo.size();
+
+
+	oFile.open(DzFile.ReadOnly);
+
+	oFile.seek(nFileSize - nIEND_CHUNK_POSITION);
+
+	var aEndChunk = oFile.read(nIEND_CHUNK_LENGTH);
+
+	oFile.close();
+
+	var sEndChunk = aEndChunk.convertToString();
+
+	App.log('Last chunk of PNG file: ' + sEndChunk);
+	return sEndChunk === 'IEND';
 }
 // Obtain the desired name out of a filepath or filename.
 function getName(sFileName) {
@@ -290,8 +266,6 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 
 			var sFinalName = sSubjectName + (bIsShadow ? '_shadow-' : '-') + sAnimationName + '_' + nOutputAngle + '-' + ('000' + nFrame).slice(-3);
 			var sImageFileResultsPath = sResultsDirectory + '/' + sFinalName + '/' + sFinalName + (bIsGear && !bIsShadow ? '-GearCanvas-Beauty.exr' : '-Beauty.png');
-			var sResultsZipFilePath = sResultsDirectory + '/' + sFinalName + '.zip';
-			var sResultsFolderPath = sResultsDirectory + '/' + sFinalName;
 			var sImageFileOutputPath = sOutputDirectory + '/' + sFinalName + '.png';
 			var oImageFileResultsPathFileInfo = new DzFileInfo(sImageFileResultsPath);
 
@@ -303,6 +277,11 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 			} else {
 
 				App.log(sImageFileOutputPath + ' does not exist. Rendering this frame.');
+
+				// Daz Studio hangs here and doesn't even get to the next log message.
+				// This wait is waiting for something to catch up, I don't know what.
+				wait(10);
+
 			}
 
 			App.log('Setting frame to ' + nFrame);
@@ -327,66 +306,39 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 				if (bIsGear) oIrayOptions.renderToCanvases = true;
 			}
 			// Wait for everything else to finish first, specifically the mesh smoother
-			while (backgroundProgressIsActive()) processEvents();
+			// while (backgroundProgressIsActive()) processEvents();
 
-			oCacheDbFile = new DzFileInfo(sCacheFolderPath + '/cache.db');
+			var oCacheDbFile = new DzFileInfo(sCacheFolderPath + '/cache.db');
+			var nCacheDbSize = oCacheDbFile.size();
+
+			App.log('Current cache database size: ' + nCacheDbSize / (1024 * 1024 * 1024) + 'GBs.');
 
 			// Check if cache.db is over the threshold (10GBs)
-			if (oCacheDbFile.size() > nCacheDbSizeThreshold * 1024 * 1024 * 1024) {
-
-				App.log('Cache database is over ' + nCacheDbSizeThreshold + 'GBs: ' + oCacheDbFile.size() / (1024 * 1024 * 1024) + 'GBs. Restarting Iray Server...');
+			if (nCacheDbSize > nCacheDbSizeThreshold * 1024 * 1024 * 1024) {
 
 				restartIrayServer();
-
-			}
-			else {
-				App.log('Cache database path: ' + oCacheDbFile.absoluteFilePath());
-				App.log('Cache database exists? ' + oCacheDbFile.exists());
-				App.log('Cache database is under ' + nCacheDbSizeThreshold + 'GBs: ' + oCacheDbFile.size() / (1024 * 1024 * 1024) + 'GBs.');
 			}
 
-			var sHttpRequestError;
-			var nHttpAttempts = 0;
-			var nMAX_HTTP_ATTEMPTS = 5;
-
-			App.log('Checking if the Iray Server is online...');
+			var oResponse;
 
 			do {
 
-				// This returns a truthy byteArray regardless of the status
-				// of the server, so we're not using it to check server status.
-				oHttp.doSynchronousRequest();
+				App.log('Sending render to Iray Server...');
+				// Daz Studio hangs here and doesn't even get to the next log message.
+				// This wait is waiting for something to catch up, I don't know what.
+				wait(10);
+				// This method is undocumented, but used in an example.
+				oResponse = oRenderer.exportRenderToBridgeQueue(sFinalName, 'png', oCamera, oRenderOptions, 0);
+				App.log('Render sent to Iray Server.');
 
-				// This returns an empty string upon successful connection,
-				// otherwise it returns the error as a string.
-				sHttpRequestError = oHttp.getError();
+				if(oResponse['errorMsg']) {
 
-				if (sHttpRequestError) {
-					nHttpAttempts++;
-					App.log('HTTP request error (attempt ' + nHttpAttempts + '/' + nMAX_HTTP_ATTEMPTS + '): ' + sHttpRequestError);
+					App.log('Error message from Iray Server: ' + oResponse['errorMsg']);
 
-					if (nHttpAttempts >= nMAX_HTTP_ATTEMPTS) {
-
-						App.log('Maximum HTTP attempts reached. Restarting Iray Server...');
-
-						restartIrayServer();
-
-						nHttpAttempts = 0;
-												
-					} else {
-
-						wait(1);
-					}
+					wait(1);
 				}
-				else {
-					App.log('HTTP request successful - Iray Server is online.');
-				}
-
-			} while (sHttpRequestError);
-
-			App.log('Sending render to Iray Server...');
-			oRenderer.exportRenderToBridgeQueue(sFinalName, 'png', oCamera, oRenderOptions, 0);
-			App.log('Render sent to Iray Server.');
+				 
+			} while (oResponse['errorMsg']);
 
 			wait(2); // Plausible minimum render time
 
