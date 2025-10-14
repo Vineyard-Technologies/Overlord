@@ -36,7 +36,8 @@ def get_display_version() -> str:
 # ============================================================================
 
 # Application constants
-LOG_SIZE_MB = 100
+LOG_SIZE_MB = 10
+LOG_SIZE_DAZ = "10m"  # DAZ Studio log size using suffix notation
 RECENT_RENDER_TIMES_LIMIT = 25
 
 # Process startup delays (milliseconds)
@@ -1400,7 +1401,7 @@ def start_headless_render(settings):
             daz_executable_path,
             "-scriptArg", json_map_str,
             "-instanceName", "#",
-            "-logSize", "100000000",
+            "-logSize", LOG_SIZE_DAZ,
             "-headless",
             "-noPrompt", 
             render_script_path
@@ -1435,13 +1436,13 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
     image_monitoring_active = False
     
     # We can't use PowerShell or Batch for this because the total length of the command is over 256 characters.
-    def create_daz_command_array(daz_executable_path, json_map, log_size, render_script_path):
+    def create_daz_command_array(daz_executable_path, json_map, render_script_path):
         """Create the DAZ Studio command array with all required parameters."""
         return [
             daz_executable_path,
             "-scriptArg", json_map,
             "-instanceName", "#",
-            "-logSize", str(log_size),
+            "-logSize", LOG_SIZE_DAZ,
             "-headless",
             "-noPrompt", 
             render_script_path
@@ -3808,7 +3809,6 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
         subject_file = value_entries["Subject"].get()
         image_output_dir = value_entries["Output Directory"].get().replace("\\", "/")
         num_instances = value_entries["Number of Instances"].get()
-        log_size = LOG_SIZE_MB * 1000000  # Convert MBs to bytes (hardcoded constant)
         frame_rate = value_entries["Frame Rate"].get()
 
         try:
@@ -3842,7 +3842,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
 
         def create_daz_command():
             """Create the DAZ Studio command array with all required parameters."""
-            return create_daz_command_array(daz_executable_path, json_map, log_size, render_script_path)
+            return create_daz_command_array(daz_executable_path, json_map, render_script_path)
 
         def run_instance():
             logging.info('Launching Daz Studio render instance')

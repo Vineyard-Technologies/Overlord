@@ -35,7 +35,7 @@ command = [
     '-instanceName',
     '#',
     '-logSize',
-    '100000000',
+    '10m',
     '-headless',
     '-noPrompt',
     'c:/Users/Andrew/Documents/GitHub/Overlord/scripts/masterRenderer.dsa'

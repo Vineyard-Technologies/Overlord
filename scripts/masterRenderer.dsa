@@ -60,7 +60,8 @@ oIrayServerStopperProcess.name = 'Iray Server Stopper';
 oImageMagickProcess.name = 'ImageMagick';
 oIrayServerProcess.logging = false;
 oIrayServerStopperProcess.logging = true;
-oImageMagickProcess.logging = true;
+// Setting this to false as it currently outputting a lot of blank stderr lines
+oImageMagickProcess.logging = false;
 oIrayServerProcess.workingDirectory = sIrayServerDirectory;
 oIrayServerProcess.arguments = [
 	'C:/Program Files/NVIDIA Corporation/Iray Server/server/iray_server.exe',
@@ -81,6 +82,20 @@ oSettings.setBoolValue('Secure', sSecurity == sSecureProtocol);
 oSettings.setIntValue('Port', sPort);
 oSettings.setStringValue('Username', 'admin');
 oSettings.setStringValue('Password', 'admin');
+
+// Everywhere this function in called, we witnessed Daz Studio hanging.
+// No more log messages were generated and the executable stayed open,
+// with low resource consumption. Since wait(10) works, there obviously
+// is some process going on that needs to catch up. What it is, and whether or not
+// we can programatically wait for it, is the question.
+function theMagicWait() {
+
+	// Currently testing this one.
+	while (backgroundProgressIsActive()) processEvents();
+
+	// This works
+	// wait(10);
+}
 
 function wait(seconds) {
 
@@ -278,10 +293,7 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 
 				App.log(sImageFileOutputPath + ' does not exist. Rendering this frame.');
 
-				// Daz Studio hangs here and doesn't even get to the next log message.
-				// This wait is waiting for something to catch up, I don't know what.
-				wait(10);
-
+				theMagicWait();
 			}
 
 			App.log('Setting frame to ' + nFrame);
@@ -306,7 +318,7 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 				if (bIsGear) oIrayOptions.renderToCanvases = true;
 			}
 			// Wait for everything else to finish first, specifically the mesh smoother
-			// while (backgroundProgressIsActive()) processEvents();
+			while (backgroundProgressIsActive()) processEvents();
 
 			var oCacheDbFile = new DzFileInfo(sCacheFolderPath + '/cache.db');
 			var nCacheDbSize = oCacheDbFile.size();
@@ -324,9 +336,8 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 			do {
 
 				App.log('Sending render to Iray Server...');
-				// Daz Studio hangs here and doesn't even get to the next log message.
-				// This wait is waiting for something to catch up, I don't know what.
-				wait(10);
+
+				theMagicWait();
 				// This method is undocumented, but used in an example.
 				oResponse = oRenderer.exportRenderToBridgeQueue(sFinalName, 'png', oCamera, oRenderOptions, 0);
 				App.log('Render sent to Iray Server.');
