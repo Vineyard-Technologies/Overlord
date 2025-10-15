@@ -90,11 +90,11 @@ oSettings.setStringValue('Password', 'admin');
 // we can programatically wait for it, is the question.
 function theMagicWait() {
 
-	// Currently testing this one.
-	while (backgroundProgressIsActive()) processEvents();
+	// This doesn't work
+	// while (backgroundProgressIsActive()) processEvents();
 
 	// This works
-	// wait(10);
+	wait(5);
 }
 
 function wait(seconds) {
