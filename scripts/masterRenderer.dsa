@@ -54,7 +54,7 @@ var sSecurity = 'http';
 var sSecureProtocol = 'https';
 var nIEND_CHUNK_POSITION = 8;
 var nIEND_CHUNK_LENGTH = 4;
-var bFlushLogBuffer = true;
+var bFlushLogBuffer = false;
 var oHttpHelper = new DzHttpHelper();
 var sAddress = '127.0.0.1';
 var sPort = 9090;
@@ -142,6 +142,10 @@ function restartIrayServer() {
 	startProcess(oIrayServerStopperProcess, 'Iray Server Stopper', false);
 
 	startProcess(oIrayServerProcess, 'Iray Server', true);
+
+	// https://github.com/Vineyard-Technologies/Overlord/issues/31
+	wait(5);
+	
 }
 // Check if an image exists and isn't truncated
 function isValidImage(sFilePath) {
@@ -303,10 +307,6 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 
 				log(sImageFileOutputPath + ' does not exist. Rendering this frame.');
 
-				// https://github.com/Vineyard-Technologies/Overlord/issues/31
-				App.log('Waiting for 5 seconds to let background processes finish...');
-				wait(5);
-				App.log('Wait completed.');
 			}
 
 			log('Setting frame to ' + nFrame);
@@ -397,6 +397,7 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 				var nRENDER_PRIORITY = 0;
 				// This method is undocumented, but used in an example.
 				try {
+					App.flushLogBuffer();
 					oResponse = oRenderer.exportRenderToBridgeQueue(sFinalName, 'png', oCamera, oRenderOptions, nRENDER_PRIORITY);
 					log('Render sent to Iray Server.');
 				} catch (e) {

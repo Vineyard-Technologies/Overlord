@@ -764,6 +764,7 @@ class SettingsManager:
             "frame_rate": "30",
             "render_shadows": True,
             "shutdown_on_finish": True,
+            "hide_daz_instances": True,
             "cache_db_size_threshold_gb": "10",
             "minimize_to_tray": True,
             "start_on_startup": True,
@@ -844,6 +845,9 @@ class SettingsManager:
             gear_animations_text = value_entries["Gear Animations"].get("1.0", tk.END).strip()
             gear_animations = [f.strip() for f in gear_animations_text.split('\n') if f.strip()]
             
+            # Load current settings to get hide_daz_instances (stored in Settings dialog)
+            current_saved_settings = self.load_settings()
+            
             return {
                 "subject": value_entries["Subject"].get(),
                 "animations": animations,
@@ -855,6 +859,7 @@ class SettingsManager:
                 "frame_rate": value_entries["Frame Rate"].get(),
                 "render_shadows": render_shadows_var.get(),
                 "shutdown_on_finish": shutdown_on_finish_var.get(),
+                "hide_daz_instances": current_saved_settings.get("hide_daz_instances", True),
                 "cache_db_size_threshold_gb": value_entries["Cache Size Threshold (GB)"].get()
             }
         except tk.TclError:
@@ -905,7 +910,7 @@ class SettingsManager:
             value_entries["Cache Size Threshold (GB)"].delete(0, tk.END)
             value_entries["Cache Size Threshold (GB)"].insert(0, settings["cache_db_size_threshold_gb"])
             
-            # Checkboxes
+            # Checkboxes (hide_daz_instances is now in Settings dialog, not main UI)
             render_shadows_var.set(settings["render_shadows"])
             shutdown_on_finish_var.set(settings.get("shutdown_on_finish", True))
             
@@ -1436,17 +1441,21 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
     image_monitoring_active = False
     
     # We can't use PowerShell or Batch for this because the total length of the command is over 256 characters.
-    def create_daz_command_array(daz_executable_path, json_map, render_script_path):
+    def create_daz_command_array(daz_executable_path, json_map, render_script_path, hide_daz=True):
         """Create the DAZ Studio command array with all required parameters."""
-        return [
+        command = [
             daz_executable_path,
             "-scriptArg", json_map,
             "-instanceName", "#",
             "-logSize", LOG_SIZE_DAZ,
-            "-headless",
+        ]
+        if hide_daz:
+            command.append("-headless")
+        command.extend([
             "-noPrompt", 
             render_script_path
-        ]
+        ])
+        return command
     
     # Check for existing instance before showing splash screen
     if not ensure_single_instance():
@@ -1886,6 +1895,21 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
             startup_checkbox.pack(anchor="w")
             theme_manager.register_widget(startup_checkbox, "checkbutton")
             
+            # Hide Daz Studio Instance(s) setting
+            hide_daz_instances_var = tk.BooleanVar(value=current_settings.get("hide_daz_instances", True))
+            hide_daz_frame = tk.Frame(main_frame)
+            hide_daz_frame.pack(fill="x", pady=(0, 15))
+            theme_manager.register_widget(hide_daz_frame, "frame")
+            
+            hide_daz_checkbox = tk.Checkbutton(
+                hide_daz_frame,
+                text="Hide Daz Studio Instance(s) when rendering",
+                variable=hide_daz_instances_var,
+                font=("Arial", 10)
+            )
+            hide_daz_checkbox.pack(anchor="w")
+            theme_manager.register_widget(hide_daz_checkbox, "checkbutton")
+            
             # Live save functions for immediate settings updates
             def on_minimize_to_tray_change():
                 """Save minimize to tray setting immediately when changed."""
@@ -1922,9 +1946,21 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
                 except Exception as e:
                     logging.error(f"Failed to save startup setting: {e}")
             
+            def on_hide_daz_instances_change():
+                """Save hide daz instances setting immediately when changed."""
+                try:
+                    hide_daz_enabled = hide_daz_instances_var.get()
+                    current_settings["hide_daz_instances"] = hide_daz_enabled
+                    settings_manager.save_settings(current_settings)
+                    
+                    logging.info(f"Hide Daz Studio Instance(s) setting updated: {hide_daz_enabled}")
+                except Exception as e:
+                    logging.error(f"Failed to save hide daz instances setting: {e}")
+            
             # Bind live save functions to checkbox changes
             minimize_to_tray_var.trace_add('write', lambda *args: on_minimize_to_tray_change())
             start_on_startup_var.trace_add('write', lambda *args: on_startup_change())
+            hide_daz_instances_var.trace_add('write', lambda *args: on_hide_daz_instances_change())
         
         def exit_overlord():
             """Exit the application"""
@@ -2729,7 +2765,8 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
         param_table_frame,
         variable=render_shadows_var,
         width=2,
-        anchor="w"
+        anchor="w",
+        command=auto_save_settings
     )
     render_shadows_checkbox.grid(row=1, column=current_column+1, padx=(0, 10), pady=5, sticky="w")
     theme_manager.register_widget(render_shadows_checkbox, "checkbutton")
@@ -2744,7 +2781,8 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
         param_table_frame,
         variable=shutdown_on_finish_var,
         width=2,
-        anchor="w"
+        anchor="w",
+        command=auto_save_settings
     )
     shutdown_on_finish_checkbox.grid(row=1, column=current_column+1, padx=(0, 10), pady=5, sticky="w")
     theme_manager.register_widget(shutdown_on_finish_checkbox, "checkbutton")
@@ -3818,6 +3856,9 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
 
         # Add render_shadows to json_map
         render_shadows = render_shadows_var.get()
+        # Get hide_daz_instances setting from saved settings
+        current_settings = settings_manager.load_settings()
+        hide_daz_instances = current_settings.get("hide_daz_instances", True)
         # Get cache size threshold
         cache_size_threshold = value_entries["Cache Size Threshold (GB)"].get()
         # Create results directory path (admin subfolder in results directory, in app data directory)
@@ -3842,7 +3883,7 @@ def main(auto_start_render=False, cmd_args=None, headless=False):
 
         def create_daz_command():
             """Create the DAZ Studio command array with all required parameters."""
-            return create_daz_command_array(daz_executable_path, json_map, render_script_path)
+            return create_daz_command_array(daz_executable_path, json_map, render_script_path, hide_daz_instances)
 
         def run_instance():
             logging.info('Launching Daz Studio render instance')
