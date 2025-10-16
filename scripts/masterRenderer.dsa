@@ -55,6 +55,16 @@ var sSecureProtocol = 'https';
 var nIEND_CHUNK_POSITION = 8;
 var nIEND_CHUNK_LENGTH = 4;
 var bFlushLogBuffer = true;
+var oHttpHelper = new DzHttpHelper();
+var sAddress = '127.0.0.1';
+var sPort = 9090;
+var sSecurity = 'http';
+var sSecureProtocol = 'https';
+oHttpHelper.setConnectionMode(sSecurity);
+oHttpHelper.setHost(sAddress);
+oHttpHelper.setPort(sPort);
+oHttpHelper.setPath('/');
+oHttpHelper.setRequestMethod('GET');
 
 oIrayServerProcess.name = 'Iray Server';
 oIrayServerStopperProcess.name = 'Iray Server Stopper';
@@ -275,8 +285,6 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 		// Loop through each frame...
 		frameLoop: for (var nFrame = 0; nFrame <= nFramesTotal; nFrame++) {
 
-			// wait(5); we can't do this here because it'll wait 5 seconds in between checking the existence of the image
-
 			// Check if the current Daz instance should render this frame.
 			if ((nFrame - (nInstanceNumber - 1)) % nTotalNumberOfInstances != 0) {
 
@@ -295,10 +303,11 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 
 				log(sImageFileOutputPath + ' does not exist. Rendering this frame.');
 
-				// gc();
+				// https://github.com/Vineyard-Technologies/Overlord/issues/31
+				App.log('Waiting for 5 seconds to let background processes finish...');
+				wait(5);
+				App.log('Wait completed.');
 			}
-
-			// wait(5); // this works
 
 			log('Setting frame to ' + nFrame);
 			Scene.setFrame(nFrame);
@@ -329,13 +338,52 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 
 			log('Current cache database size: ' + nCacheDbSize / (1024 * 1024 * 1024) + 'GBs.');
 
-			// wait(5); // this works
-
 			// Check if cache.db is over the threshold (10GBs)
 			if (nCacheDbSize > nCacheDbSizeThreshold * 1024 * 1024 * 1024) {
 
 				log('Cache database size is over the threshold of ' + nCacheDbSizeThreshold + 'GBs. Restarting Iray Server...');
 				restartIrayServer();
+			}
+
+			var sHttpRequestError = "initial"; // Start with error to enter the loop
+			var nHttpAttempts = 0;
+			var nMAX_HTTP_ATTEMPTS = 5;
+
+			App.log('Checking if the Iray Server is online...');
+
+			while (sHttpRequestError) {
+
+				App.log('Sending HTTP request to Iray Server...');
+				// This returns a truthy byteArray regardless of the status
+				// of the server, so we're not using it to check server status.
+				oHttpHelper.doSynchronousRequest();
+
+				App.log('HTTP request sent. Capturing errors (if any)...');
+				// This returns an empty string upon successful connection,
+				// otherwise it returns the error as a string.
+				sHttpRequestError = oHttpHelper.getError();
+
+				if (sHttpRequestError) {
+					nHttpAttempts++;
+					App.log('HTTP request error (attempt ' + nHttpAttempts + '/' + nMAX_HTTP_ATTEMPTS + '): ' + sHttpRequestError);
+
+					if (nHttpAttempts >= nMAX_HTTP_ATTEMPTS) {
+
+						App.log('Maximum HTTP attempts reached. Restarting Iray Server...');
+
+						restartIrayServer();
+
+						nHttpAttempts = 0;
+												
+					} else {
+
+						wait(1);
+					}
+				}
+				else {
+					App.log('HTTP request successful - Iray Server is online.');
+				}
+
 			}
 
 			var oResponse;
@@ -344,12 +392,17 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 
 				log('Sending render to Iray Server...');
 
-				// https://github.com/Vineyard-Technologies/Overlord/issues/31
-				// wait(5); // this works
+				// here was the original location
 
+				var nRENDER_PRIORITY = 0;
 				// This method is undocumented, but used in an example.
-				oResponse = oRenderer.exportRenderToBridgeQueue(sFinalName, 'png', oCamera, oRenderOptions, 0);
-				log('Render sent to Iray Server.');
+				try {
+					oResponse = oRenderer.exportRenderToBridgeQueue(sFinalName, 'png', oCamera, oRenderOptions, nRENDER_PRIORITY);
+					log('Render sent to Iray Server.');
+				} catch (e) {
+					log('Exception caught while sending render to Iray Server: ' + e);
+					oResponse = { errorMsg: e.toString() };
+				}
 
 				if(oResponse['errorMsg']) {
 
@@ -400,8 +453,6 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 
 			} while (!isValidImage(sImageFileOutputPath));
 			log('File has appeared in output folder.');
-
-			// wait(5); // this doesn't work
 		}
 	}
 	if (bRenderShadows) {
