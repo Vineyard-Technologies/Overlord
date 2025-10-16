@@ -54,6 +54,7 @@ var sSecurity = 'http';
 var sSecureProtocol = 'https';
 var nIEND_CHUNK_POSITION = 8;
 var nIEND_CHUNK_LENGTH = 4;
+var bFlushLogBuffer = true;
 
 oIrayServerProcess.name = 'Iray Server';
 oIrayServerStopperProcess.name = 'Iray Server Stopper';
@@ -82,40 +83,47 @@ oSettings.setIntValue('Port', sPort);
 oSettings.setStringValue('Username', 'admin');
 oSettings.setStringValue('Password', 'admin');
 
-// https://github.com/Vineyard-Technologies/Overlord/issues/31
-function theMagicWait() {
-
-	wait(5);
-}
-
 function wait(seconds) {
 
 	sleep(seconds * 1000);
 }
+
+function log(sMessage) {
+
+	App.log(sMessage);
+
+	// bFlushLogBuffer should be true when debugging crashes and hangs
+	// that might occur before a log message could be written.
+	// Otherwise, leave it false to prevent excessive disk writes.
+	if (bFlushLogBuffer) {
+
+		App.flushLogBuffer();
+	}
+}
 function startProcess(oProcess, sProcessName, bIsContinuous) {
 
-		App.log('Launching ' + sProcessName + '...');
+		log('Launching ' + sProcessName + '...');
 
 	if (oProcess.start()) {
 
-		App.log(sProcessName + ' launched');
+		log(sProcessName + ' launched');
 
 		if(bIsContinuous) return;
 
 		while (oProcess.running) {
 
-			App.log(sProcessName + ' is running...');
+			log(sProcessName + ' is running...');
 
 			processEvents();
 
 			wait(1);
 		}
 		
-		App.log(sProcessName + ' has finished.');
+		log(sProcessName + ' has finished.');
 
 	} else {
 
-		App.log('Could not start ' + sProcessName + '.');
+		log('Could not start ' + sProcessName + '.');
 	}
 }
 // Kill Iray server if it's running, remove the server files, then restart it
@@ -148,7 +156,7 @@ function isValidImage(sFilePath) {
 
 	var sEndChunk = aEndChunk.convertToString();
 
-	App.log('Last chunk of PNG file: ' + sEndChunk);
+	log('Last chunk of PNG file: ' + sEndChunk);
 	return sEndChunk === 'IEND';
 }
 // Obtain the desired name out of a filepath or filename.
@@ -267,30 +275,35 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 		// Loop through each frame...
 		frameLoop: for (var nFrame = 0; nFrame <= nFramesTotal; nFrame++) {
 
+			// wait(5); we can't do this here because it'll wait 5 seconds in between checking the existence of the image
+
 			// Check if the current Daz instance should render this frame.
-			if ((nFrame - (nInstanceNumber - 1)) % nTotalNumberOfInstances != 0) continue;
+			if ((nFrame - (nInstanceNumber - 1)) % nTotalNumberOfInstances != 0) {
+
+				continue frameLoop;
+			}
 
 			var sFinalName = sSubjectName + (bIsShadow ? '_shadow-' : '-') + sAnimationName + '_' + nOutputAngle + '-' + ('000' + nFrame).slice(-3);
-			var sImageFileResultsPath = sResultsDirectory + '/' + sFinalName + '/' + sFinalName + (bIsGear && !bIsShadow ? '-GearCanvas-Beauty.exr' : '-Beauty.png');
 			var sImageFileOutputPath = sOutputDirectory + '/' + sFinalName + '.png';
-			var oImageFileResultsPathFileInfo = new DzFileInfo(sImageFileResultsPath);
 
 			if (isValidImage(sImageFileOutputPath)) {
 
-				App.log(sImageFileOutputPath + ' already exists. Skipping this frame.');
+				log(sImageFileOutputPath + ' already exists. Skipping this frame.');
 
-				continue;
+				continue frameLoop;
 			} else {
 
-				App.log(sImageFileOutputPath + ' does not exist. Rendering this frame.');
+				log(sImageFileOutputPath + ' does not exist. Rendering this frame.');
 
-				theMagicWait();
+				// gc();
 			}
 
-			App.log('Setting frame to ' + nFrame);
+			// wait(5); // this works
+
+			log('Setting frame to ' + nFrame);
 			Scene.setFrame(nFrame);
 			// Do this every frame, or else it will interpolate.
-			App.log('Setting root Y rotation to ' + nAngle);
+			log('Setting root Y rotation to ' + nAngle);
 			oRootYRotControl.setValue(nAngle);
 
 			if (bIsShadow) {
@@ -309,16 +322,19 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 				if (bIsGear) oIrayOptions.renderToCanvases = true;
 			}
 			// Wait for everything else to finish first, specifically the mesh smoother
-			while (backgroundProgressIsActive()) processEvents();
+			// while (backgroundProgressIsActive()) processEvents();
 
 			var oCacheDbFile = new DzFileInfo(sCacheFolderPath + '/cache.db');
 			var nCacheDbSize = oCacheDbFile.size();
 
-			App.log('Current cache database size: ' + nCacheDbSize / (1024 * 1024 * 1024) + 'GBs.');
+			log('Current cache database size: ' + nCacheDbSize / (1024 * 1024 * 1024) + 'GBs.');
+
+			// wait(5); // this works
 
 			// Check if cache.db is over the threshold (10GBs)
 			if (nCacheDbSize > nCacheDbSizeThreshold * 1024 * 1024 * 1024) {
 
+				log('Cache database size is over the threshold of ' + nCacheDbSizeThreshold + 'GBs. Restarting Iray Server...');
 				restartIrayServer();
 			}
 
@@ -326,17 +342,19 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 
 			do {
 
-				App.log('Sending render to Iray Server...');
+				log('Sending render to Iray Server...');
 
-				theMagicWait();
+				// https://github.com/Vineyard-Technologies/Overlord/issues/31
+				// wait(5); // this works
+
 				// This method is undocumented, but used in an example.
 				oResponse = oRenderer.exportRenderToBridgeQueue(sFinalName, 'png', oCamera, oRenderOptions, 0);
-				App.log('Render sent to Iray Server.');
+				log('Render sent to Iray Server.');
 
 				if(oResponse['errorMsg']) {
 
-					App.log('Error message from Iray Server: ' + oResponse['errorMsg']);
-
+					// Errors are already written to the console
+					
 					wait(1);
 				}
 				 
@@ -346,13 +364,16 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 
 			var nImageMagickAttempts = 0;
 			var nMAX_IMAGEMAGICK_ATTEMPTS = 10;
+			var sImageFileResultsPath = sResultsDirectory + '/' + sFinalName + '/' + sFinalName + (bIsGear && !bIsShadow ? '-GearCanvas-Beauty.exr' : '-Beauty.png');
+			var oImageFileResultsPathFileInfo = new DzFileInfo(sImageFileResultsPath);
 
+			// ImageMagick
 			do {
 
 				wait(1);
 				
 				nImageMagickAttempts++;
-				App.log('ImageMagick attempt ' + nImageMagickAttempts + '/' + nMAX_IMAGEMAGICK_ATTEMPTS);
+				log('ImageMagick attempt ' + nImageMagickAttempts + '/' + nMAX_IMAGEMAGICK_ATTEMPTS);
 
 				oImageMagickProcess.arguments = [
 					'powershell.exe',
@@ -367,18 +388,20 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 				];
 
 				// https://github.com/Vineyard-Technologies/Overlord/discussions/28
-				App.log('ImageMagick arguments: ' + oImageMagickProcess.arguments.join(' '));	
+				log('ImageMagick arguments: ' + oImageMagickProcess.arguments.join(' '));	
 				startProcess(oImageMagickProcess, 'ImageMagick', false);
 
 				// If we've reached max attempts and still no valid image, restart this frame
 				if (nImageMagickAttempts >= nMAX_IMAGEMAGICK_ATTEMPTS && !isValidImage(sImageFileOutputPath)) {
-					App.log('Maximum ImageMagick attempts reached for frame ' + nFrame + '. Restarting this frame...');
+					log('Maximum ImageMagick attempts reached for frame ' + nFrame + '. Restarting this frame...');
 					nFrame--;
 					continue frameLoop;
 				}
 
 			} while (!isValidImage(sImageFileOutputPath));
-			App.log('File has appeared in output folder.');
+			log('File has appeared in output folder.');
+
+			// wait(5); // this doesn't work
 		}
 	}
 	if (bRenderShadows) {
@@ -393,24 +416,26 @@ for (var nProcessCounter = 0; nProcessCounter < aProcesses.length; nProcessCount
 	
 	if (oCurrentProcess.logging) {
 
-		App.log('Logging for ' + oCurrentProcess.name + ' is enabled. Connecting to stdout and stderr...');
+		log('Logging for ' + oCurrentProcess.name + ' is enabled. Connecting to stdout and stderr...');
 		oCurrentProcess.communication = DzProcess.Stdin | DzProcess.Stdout | DzProcess.Stderr;
 		
 		// Create closure to capture the process name for logging
 		(function(processName, process) {
 			connect(process, 'readyReadStdout()', function() {
-				if(process.readStdout()) App.log(processName + ' stdout: ' + process.readStdout());
+				if(process.readStdout()) log(processName + ' stdout: ' + process.readStdout());
 			});
 			connect(process, 'readyReadStderr()', function() {
-				if(process.readStderr()) App.log(processName + ' stderr: ' + process.readStderr());
+				if(process.readStderr()) log(processName + ' stderr: ' + process.readStderr());
 			});
 		})(oCurrentProcess.name, oCurrentProcess);
 
-		App.log('Logging for ' + oCurrentProcess.name + ' is now live.');
+		log('Logging for ' + oCurrentProcess.name + ' is now live.');
 	} else {
-		App.log('Logging for ' + oCurrentProcess.name + ' is disabled.');
+		log('Logging for ' + oCurrentProcess.name + ' is disabled.');
 	}
 }
+
+App.enableMultiThreading(true);
 
 // Clean up any previous Iray Server instance, and start with a clean slate
 restartIrayServer();
@@ -418,24 +443,24 @@ restartIrayServer();
 // Make the output directory if it doesn't exist
 if(!oOutputDirectory.exists()) {
 
-	App.log('Output directory does not exist. Creating: ' + sOutputDirectory + '...');
+	log('Output directory does not exist. Creating: ' + sOutputDirectory + '...');
 	oOutputDirectory.mkdir(sOutputDirectory);
-	App.log('Created output directory: ' + sOutputDirectory);
+	log('Created output directory: ' + sOutputDirectory);
 
 } else {
 
-	App.log('Output directory already exists: ' + sOutputDirectory);
+	log('Output directory already exists: ' + sOutputDirectory);
 }
 // Make the Iray Server directory if it doesn't exist
 if(!oIrayServerDirectory.exists()) {
 
-	App.log('Iray Server directory does not exist. Creating: ' + sIrayServerDirectory + '...');
+	log('Iray Server directory does not exist. Creating: ' + sIrayServerDirectory + '...');
 	oIrayServerDirectory.mkdir(sIrayServerDirectory);
-	App.log('Created Iray Server directory: ' + sIrayServerDirectory);
+	log('Created Iray Server directory: ' + sIrayServerDirectory);
 
 } else {
 
-	App.log('Iray Server directory already exists: ' + sIrayServerDirectory);
+	log('Iray Server directory already exists: ' + sIrayServerDirectory);
 }
 
 var sSubjectName = getName(sSubjectFilepath);
