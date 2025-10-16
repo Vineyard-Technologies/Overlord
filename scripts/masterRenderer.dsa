@@ -60,8 +60,7 @@ oIrayServerStopperProcess.name = 'Iray Server Stopper';
 oImageMagickProcess.name = 'ImageMagick';
 oIrayServerProcess.logging = false;
 oIrayServerStopperProcess.logging = true;
-// Setting this to false as it currently outputting a lot of blank stderr lines
-oImageMagickProcess.logging = false;
+oImageMagickProcess.logging = true;
 oIrayServerProcess.workingDirectory = sIrayServerDirectory;
 oIrayServerProcess.arguments = [
 	'C:/Program Files/NVIDIA Corporation/Iray Server/server/iray_server.exe',
@@ -83,17 +82,9 @@ oSettings.setIntValue('Port', sPort);
 oSettings.setStringValue('Username', 'admin');
 oSettings.setStringValue('Password', 'admin');
 
-// Everywhere this function in called, we witnessed Daz Studio hanging.
-// No more log messages were generated and the executable stayed open,
-// with low resource consumption. Since wait(10) works, there obviously
-// is some process going on that needs to catch up. What it is, and whether or not
-// we can programatically wait for it, is the question.
+// https://github.com/Vineyard-Technologies/Overlord/issues/31
 function theMagicWait() {
 
-	// This doesn't work
-	// while (backgroundProgressIsActive()) processEvents();
-
-	// This works
 	wait(5);
 }
 
@@ -375,16 +366,6 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 					'"' + sImageFileOutputPath + '"'
 				];
 
-				// Connect to receive standard output
-				connect(oImageMagickProcess, 'readyReadStdout()', function() {
-					App.log('ImageMagick stdout: ' + oImageMagickProcess.readStdout());
-				});
-
-				// Connect to receive standard error
-				connect(oImageMagickProcess, 'readyReadStderr()', function() {
-					App.log('ImageMagick stderr: ' + oImageMagickProcess.readStderr());
-				});
-
 				// https://github.com/Vineyard-Technologies/Overlord/discussions/28
 				App.log('ImageMagick arguments: ' + oImageMagickProcess.arguments.join(' '));	
 				startProcess(oImageMagickProcess, 'ImageMagick', false);
@@ -418,10 +399,10 @@ for (var nProcessCounter = 0; nProcessCounter < aProcesses.length; nProcessCount
 		// Create closure to capture the process name for logging
 		(function(processName, process) {
 			connect(process, 'readyReadStdout()', function() {
-				App.log(processName + ' stdout: ' + process.readStdout());
+				if(process.readStdout()) App.log(processName + ' stdout: ' + process.readStdout());
 			});
 			connect(process, 'readyReadStderr()', function() {
-				App.log(processName + ' stderr: ' + process.readStderr());
+				if(process.readStderr()) App.log(processName + ' stderr: ' + process.readStderr());
 			});
 		})(oCurrentProcess.name, oCurrentProcess);
 
