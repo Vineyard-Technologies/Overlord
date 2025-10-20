@@ -20,7 +20,7 @@ For technical issues, bugs, or setup problems:
 2. **Create a Bug Report**: If you find a new bug, please [open an issue](https://github.com/Vineyard-Technologies/Overlord/issues/new) with:
    - Clear description of the problem
    - Steps to reproduce the issue
-   - System specifications (OS, Python version, Daz Studio version)
+   - System specifications (OS, Node.js version, Electron version, Daz Studio version)
    - Iray Server version and configuration
    - Complete error messages and stack traces
    - Log files if available
@@ -54,7 +54,8 @@ For questions about contributing to Overlord:
 ### Supported Platforms
 
 - **Operating Systems**: Windows 10/11 (primary), Windows Server
-- **Python Versions**: 3.8 or higher
+- **Node.js Versions**: 18 or higher
+- **Electron**: Latest stable version
 - **Daz Studio**: Version 4.x
 - **Iray Server**: Latest versions from IrayPlugins.com
 - **Hardware**: NVIDIA GPUs with CUDA support (recommended for rendering)
@@ -120,11 +121,11 @@ When seeking support:
 - Ensure correct ports are open
 - Review Iray Server logs
 
-**Q: Python dependency issues**
-- Use Python 3.8 or higher
-- Install with pip: `pip install -r requirements.txt`
-- Consider using virtual environments
+**Q: Node.js dependency issues**
+- Use Node.js 18 or higher
+- Install with npm: `npm install`
 - Check for conflicting packages
+- Clear npm cache if needed: `npm cache clean --force`
 
 ### Performance Issues
 
@@ -161,10 +162,10 @@ When seeking support:
 1. **Check Prerequisites**:
    - Daz Studio 4 installed and functional
    - Iray Server installed and running
-   - Python 3.8+ with all dependencies
+   - Node.js 18+ with all dependencies
 
 2. **Verify Installation**:
-   - Run Overlord with `--help` flag
+   - Run Overlord with `npm start`
    - Check all required files are present
    - Test basic functionality
 
@@ -208,7 +209,8 @@ You can help improve support for everyone:
 
 - **Daz Studio**: [Daz3D.com](https://www.daz3d.com)
 - **Iray Server**: [IrayPlugins.com](https://www.irayplugins.com)
-- **Python**: [Python.org](https://www.python.org)
+- **Node.js**: [Node.js.org](https://nodejs.org)
+- **Electron**: [Electronjs.org](https://www.electronjs.org)
 - **NVIDIA CUDA**: [Developer.nvidia.com](https://developer.nvidia.com/cuda-zone)
 
 ### Related Projects

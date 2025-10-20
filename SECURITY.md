@@ -15,7 +15,7 @@ We take security vulnerabilities seriously. If you discover a security vulnerabi
 ### How to Report
 
 1. **Do not** open a public issue
-2. Email security concerns to: [security contact - to be added]
+2. Email security concerns to: contact@VineyardTechnologies.org
 3. Include detailed information about the vulnerability
 4. Provide steps to reproduce if possible
 
@@ -24,7 +24,7 @@ We take security vulnerabilities seriously. If you discover a security vulnerabi
 - Description of the vulnerability
 - Potential impact on system and Daz Studio integration
 - Steps to reproduce
-- System environment details (OS, Python version, Daz Studio version)
+- System environment details (OS, Node.js version, Electron version, Daz Studio version)
 - Any suggested fixes (optional)
 - Your contact information
 
@@ -56,12 +56,13 @@ When contributing to Overlord:
 
 ### Application Security
 
-- Follow secure coding practices for Python
+- Follow secure coding practices for JavaScript/Node.js
 - Validate all inputs and user data
 - Implement proper authentication/authorization
 - Use secure communication protocols
 - Handle sensitive data appropriately
 - Implement proper session management
+- Follow Electron security best practices
 
 ### System Integration Security
 
@@ -95,14 +96,15 @@ Be aware of these potential security issues:
 - **Resource Exhaustion**: Memory leaks or CPU abuse over time
 - **File System Access**: Improper file permissions or path traversal
 - **Network Communication**: Insecure protocols or exposed endpoints
-- **Dependency Vulnerabilities**: Outdated Python packages
+- **Dependency Vulnerabilities**: Outdated Node.js packages
 - **Script Injection**: Malicious Daz Script execution
+- **Electron-specific**: Context isolation, nodeIntegration, remote module security
 
 ## Dependency Security
 
-- Regularly update Python dependencies
+- Regularly update Node.js dependencies
 - Monitor security advisories for used packages
-- Use virtual environments for isolation
+- Use npm audit to check for vulnerabilities
 - Pin dependency versions for stability
 - Review new dependencies for security implications
 

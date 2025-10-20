@@ -16,8 +16,9 @@ keywords:
   - "3d-rendering"
   - "game-assets"
   - "automation"
-  - "python"
-version: "1.0.0"
+  - "electron"
+  - "javascript"
+version: "2.1.7"
 date-released: "2025-08-20"
 preferred-citation:
   type: software
@@ -26,6 +27,6 @@ preferred-citation:
     - family-names: "Vineyard Technologies"
       email: "contact@VineyardTechnologies.org"
   repository-code: "https://github.com/Vineyard-Technologies/Overlord"
-  version: "1.0.0"
+  version: "2.1.7"
   date-released: "2025-08-20"
   license: AGPL-3.0

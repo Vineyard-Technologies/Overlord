@@ -1,6 +1,6 @@
 # Contributing to Overlord
 
-Thank you for your interest in contributing to Overlord! This is a Python dashboard that controls Daz Studio for long-running operations.
+Thank you for your interest in contributing to Overlord! This is an Electron desktop application that controls Daz Studio for long-running rendering operations.
 
 ## Getting Started
 
@@ -16,26 +16,26 @@ Thank you for your interest in contributing to Overlord! This is a Python dashbo
 
 Overlord is designed to:
 
-- Control Daz Studio through Python automation
-- Run for months with low CPU/GPU footprint
-- Provide a dashboard interface for long-running operations
+- Control Daz Studio through automated scripting
+- Run for extended periods with efficient resource usage
+- Provide a desktop GUI interface for rendering operations
 - Interface with Daz Script (QtScript-based scripting language)
 
 ## Development Environment
 
 To contribute to Overlord:
 
-- Python 3.x knowledge
-- Understanding of GUI frameworks (likely tkinter, PyQt, or similar)
+- Node.js and JavaScript knowledge
+- Understanding of Electron framework
 - Familiarity with Daz Studio and Daz Script
 - Knowledge of long-running application design patterns
 - Understanding of system resource optimization
 
 ### Setup
 
-1. Install Python dependencies:
+1. Install Node.js dependencies:
    ```bash
-   pip install -r requirements.txt
+   npm install
    ```
 
 2. Ensure Daz Studio is installed and accessible
@@ -62,12 +62,13 @@ To contribute to Overlord:
 
 ## Code Style and Standards
 
-- Follow PEP 8 Python style guidelines
-- Use type hints where appropriate
-- Write comprehensive docstrings
+- Follow JavaScript standard style guidelines
+- Use modern ES6+ syntax where appropriate
+- Write comprehensive JSDoc comments
 - Implement proper error handling
 - Use meaningful variable and function names
 - Keep functions focused and modular
+- Maintain single-file architecture for main application
 
 ## Daz Studio Integration
 
@@ -95,7 +96,7 @@ When reporting bugs:
 
 - Describe the issue clearly
 - Include steps to reproduce
-- Provide system information (OS, Python version, Daz Studio version)
+- Provide system information (OS, Node.js version, Electron version, Daz Studio version)
 - Include relevant log files or error messages
 - Note resource usage patterns if relevant
 - Specify duration of operation before issue occurred
