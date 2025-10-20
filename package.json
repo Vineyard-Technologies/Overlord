@@ -68,9 +68,7 @@
   },
   "devDependencies": {
     "electron": "^38.3.0",
-    "electron-builder": "^26.0.12",
-    "rcedit": "^4.0.1",
-    "to-ico": "^1.0.1"
+    "electron-builder": "^26.0.12"
   },
   "dependencies": {
     "archiver": "^7.0.1",
