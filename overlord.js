@@ -134,40 +134,58 @@ function detectWindowsTheme() {
 // ============================================================================
 
 function setupLogger() {
-  const logDir = getAppDataPath();
-  if (!fs.existsSync(logDir)) {
-    fs.mkdirSync(logDir, { recursive: true });
+  try {
+    const logDir = getAppDataPath();
+    if (!fs.existsSync(logDir)) {
+      fs.mkdirSync(logDir, { recursive: true });
+    }
+    
+    const logPath = path.join(logDir, 'log.txt');
+    console.log(`--- Overlord started --- (log file: ${normalizePathForLogging(logPath)}, max size: ${LOG_SIZE_MB} MB)`);
+    
+    // Redirect console to file (simple implementation)
+    const logStream = fs.createWriteStream(logPath, { flags: 'a' });
+    const originalLog = console.log;
+    const originalError = console.error;
+    const originalWarn = console.warn;
+    
+    console.log = function(...args) {
+      const timestamp = new Date().toISOString();
+      const message = `${timestamp} INFO: ${args.join(' ')}\n`;
+      try {
+        logStream.write(message);
+      } catch (e) {
+        // Silently fail if log write fails
+      }
+      originalLog.apply(console, args);
+    };
+    
+    console.error = function(...args) {
+      const timestamp = new Date().toISOString();
+      const message = `${timestamp} ERROR: ${args.join(' ')}\n`;
+      try {
+        logStream.write(message);
+      } catch (e) {
+        // Silently fail if log write fails
+      }
+      originalError.apply(console, args);
+    };
+    
+    console.warn = function(...args) {
+      const timestamp = new Date().toISOString();
+      const message = `${timestamp} WARNING: ${args.join(' ')}\n`;
+      try {
+        logStream.write(message);
+      } catch (e) {
+        // Silently fail if log write fails
+      }
+      originalWarn.apply(console, args);
+    };
+  } catch (error) {
+    // If logger setup fails, continue without file logging
+    console.error('Failed to setup logger:', error);
+    throw error; // Re-throw so app initialization can handle it
   }
-  
-  const logPath = path.join(logDir, 'log.txt');
-  console.log(`--- Overlord started --- (log file: ${normalizePathForLogging(logPath)}, max size: ${LOG_SIZE_MB} MB)`);
-  
-  // Redirect console to file (simple implementation)
-  const logStream = fs.createWriteStream(logPath, { flags: 'a' });
-  const originalLog = console.log;
-  const originalError = console.error;
-  const originalWarn = console.warn;
-  
-  console.log = function(...args) {
-    const timestamp = new Date().toISOString();
-    const message = `${timestamp} INFO: ${args.join(' ')}\n`;
-    logStream.write(message);
-    originalLog.apply(console, args);
-  };
-  
-  console.error = function(...args) {
-    const timestamp = new Date().toISOString();
-    const message = `${timestamp} ERROR: ${args.join(' ')}\n`;
-    logStream.write(message);
-    originalError.apply(console, args);
-  };
-  
-  console.warn = function(...args) {
-    const timestamp = new Date().toISOString();
-    const message = `${timestamp} WARNING: ${args.join(' ')}\n`;
-    logStream.write(message);
-    originalWarn.apply(console, args);
-  };
 }
 
 // ============================================================================
@@ -914,190 +932,239 @@ app.on('second-instance', () => {
 // ============================================================================
 
 function createSplashScreen() {
-  currentTheme = detectWindowsTheme();
-  const bgColor = THEME_COLORS[currentTheme].bg;
-  
-  splashWindow = new BrowserWindow({
-    width: SPLASH_WIDTH,
-    height: SPLASH_HEIGHT,
-    transparent: true,
-    frame: false,
-    alwaysOnTop: true,
-    show: false,
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true
+  try {
+    currentTheme = detectWindowsTheme();
+    const bgColor = THEME_COLORS[currentTheme].bg;
+    
+    splashWindow = new BrowserWindow({
+      width: SPLASH_WIDTH,
+      height: SPLASH_HEIGHT,
+      transparent: true,
+      frame: false,
+      alwaysOnTop: true,
+      show: false,
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true
+      }
+    });
+    
+    // Check if splash image exists
+    const splashImagePath = resourcePath(path.join('images', 'splashScreen.webp'));
+    let hasSplashImage = false;
+    
+    try {
+      hasSplashImage = fs.existsSync(splashImagePath);
+    } catch (error) {
+      console.warn('Could not check for splash image:', error);
     }
-  });
-  
-  // Check if splash image exists
-  const splashImagePath = resourcePath(path.join('images', 'splashScreen.webp'));
-  const hasSplashImage = fs.existsSync(splashImagePath);
-  
-  let splashHTML;
-  if (hasSplashImage) {
-    // Use image splash - no text, no border
-    const imageData = fs.readFileSync(splashImagePath);
-    const base64Image = imageData.toString('base64');
-    splashHTML = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="UTF-8">
-        <style>
-          * { margin: 0; padding: 0; }
-          body {
-            width: 100vw;
-            height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: transparent;
-            overflow: hidden;
-          }
-          .splash-image {
-            max-width: 100%;
-            max-height: 100%;
-            object-fit: contain;
-          }
-        </style>
-      </head>
-      <body>
-        <img src="data:image/png;base64,${base64Image}" class="splash-image" alt="Overlord">
-      </body>
-      </html>
-    `;
-  } else {
-    // Fallback to text splash
-    splashHTML = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="UTF-8">
-        <style>
-          * { margin: 0; padding: 0; }
-          body {
-            width: 100vw;
-            height: 100vh;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            background: #2c2c2c;
-            color: white;
-            font-family: Arial, sans-serif;
-          }
-          .title {
-            font-size: 24px;
-            font-weight: bold;
-            margin-bottom: 10px;
-          }
-          .subtitle {
-            font-size: 16px;
-            margin-bottom: 20px;
-          }
-          .status {
-            font-size: 12px;
-            margin-top: 20px;
-            opacity: 0.8;
-          }
-        </style>
-      </head>
-      <body>
-        <div class="title">Overlord ${getDisplayVersion()}</div>
-        <div class="subtitle">Render Pipeline Manager</div>
-        <div class="status">Starting up...</div>
-      </body>
-      </html>
-    `;
+    
+    let splashHTML;
+    if (hasSplashImage) {
+      try {
+        // Use image splash - no text, no border
+        const imageData = fs.readFileSync(splashImagePath);
+        const base64Image = imageData.toString('base64');
+        splashHTML = `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="UTF-8">
+            <style>
+              * { margin: 0; padding: 0; }
+              body {
+                width: 100vw;
+                height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                background: transparent;
+                overflow: hidden;
+              }
+              .splash-image {
+                max-width: 100%;
+                max-height: 100%;
+                object-fit: contain;
+              }
+            </style>
+          </head>
+          <body>
+            <img src="data:image/webp;base64,${base64Image}" class="splash-image" alt="Overlord">
+          </body>
+          </html>
+        `;
+      } catch (error) {
+        console.warn('Failed to load splash image, using fallback:', error);
+        hasSplashImage = false;
+      }
+    }
+    
+    if (!hasSplashImage) {
+      // Fallback to text splash
+      splashHTML = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <style>
+            * { margin: 0; padding: 0; }
+            body {
+              width: 100vw;
+              height: 100vh;
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              justify-content: center;
+              background: #2c2c2c;
+              color: white;
+              font-family: Arial, sans-serif;
+            }
+            .title {
+              font-size: 24px;
+              font-weight: bold;
+              margin-bottom: 10px;
+            }
+            .subtitle {
+              font-size: 16px;
+              margin-bottom: 20px;
+            }
+            .status {
+              font-size: 12px;
+              margin-top: 20px;
+              opacity: 0.8;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="title">Overlord ${getDisplayVersion()}</div>
+          <div class="subtitle">Render Pipeline Manager</div>
+          <div class="status">Starting up...</div>
+        </body>
+        </html>
+      `;
+    }
+    
+    splashWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(splashHTML)}`);
+    splashWindow.center();
+    splashWindow.once('ready-to-show', () => {
+      splashWindow.show();
+      splashStartTime = Date.now(); // Track when splash was shown
+    });
+  } catch (error) {
+    console.error('Failed to create splash screen:', error);
+    // Continue without splash screen
   }
-  
-  splashWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(splashHTML)}`);
-  splashWindow.center();
-  splashWindow.once('ready-to-show', () => {
-    splashWindow.show();
-    splashStartTime = Date.now(); // Track when splash was shown
-  });
 }
 
 function createWindow() {
-  currentTheme = detectWindowsTheme();
-  
-  mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 900,
-    minWidth: 800,
-    minHeight: 600,
-    icon: resourcePath(path.join('images', 'favicon.ico')),
-    backgroundColor: THEME_COLORS[currentTheme].bg,
-    show: false,
-    webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false
-    }
-  });
-  
-  // Hide default Electron menu bar (we have our own in the HTML)
-  mainWindow.setMenuBarVisibility(false);
-  mainWindow.setMenu(null);
-  
-  // Create HTML content
-  const htmlContent = generateHTML();
-  mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
-  
-  mainWindow.once('ready-to-show', () => {
-    // Ensure splash screen is shown for at least 1 second
-    const minSplashTime = 1000; // 1 second
-    const elapsed = splashStartTime ? Date.now() - splashStartTime : 0;
-    const remainingTime = Math.max(0, minSplashTime - elapsed);
+  try {
+    currentTheme = detectWindowsTheme();
     
-    setTimeout(() => {
-      // Close splash screen
-      if (splashWindow) {
-        splashWindow.close();
-        splashWindow = null;
+    // Check if icon exists before creating window
+    const iconPath = resourcePath(path.join('images', 'favicon.ico'));
+    let windowOptions = {
+      width: 1200,
+      height: 900,
+      minWidth: 800,
+      minHeight: 600,
+      backgroundColor: THEME_COLORS[currentTheme].bg,
+      show: false,
+      webPreferences: {
+        nodeIntegration: true,
+        contextIsolation: false
       }
-      
-      mainWindow.show();
-      mainWindow.maximize();
-      
-      // Start continuous image monitoring with current output directory
-      const settings = settingsManager.loadSettings();
-      if (settings.output_directory) {
-        startContinuousImageMonitoring(settings.output_directory);
+    };
+    
+    // Only set icon if it exists
+    try {
+      if (fs.existsSync(iconPath)) {
+        windowOptions.icon = iconPath;
+      } else {
+        console.warn('Window icon not found at:', iconPath);
       }
-      
-      // Check for auto-start
-      const autoStart = process.argv.includes('--startRender');
-      if (autoStart) {
-        mainWindow.webContents.executeJavaScript('if (window.autoStartRender) window.autoStartRender();');
-      }
-    }, remainingTime);
-  });
-  
-  mainWindow.on('minimize', () => {
-    const settings = settingsManager.loadSettings();
-    if (settings.minimize_to_tray && tray) {
-      mainWindow.hide();
+    } catch (error) {
+      console.warn('Could not check for window icon:', error);
     }
-  });
-  
-  mainWindow.on('close', () => {
-    stopFileMonitoring();
-    stopContinuousImageMonitoring();
-    if (tray) {
-      tray.destroy();
-      tray = null;
+    
+    mainWindow = new BrowserWindow(windowOptions);
+    
+    // Hide default Electron menu bar (we have our own in the HTML)
+    mainWindow.setMenuBarVisibility(false);
+    mainWindow.setMenu(null);
+    
+    // Create HTML content
+    const htmlContent = generateHTML();
+    mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
+    
+    mainWindow.once('ready-to-show', () => {
+      // Ensure splash screen is shown for at least 1 second
+      const minSplashTime = 1000; // 1 second
+      const elapsed = splashStartTime ? Date.now() - splashStartTime : 0;
+      const remainingTime = Math.max(0, minSplashTime - elapsed);
+      
+      setTimeout(() => {
+        // Close splash screen
+        if (splashWindow) {
+          splashWindow.close();
+          splashWindow = null;
+        }
+        
+        mainWindow.show();
+        mainWindow.maximize();
+        
+        // Start continuous image monitoring with current output directory
+        try {
+          const settings = settingsManager.loadSettings();
+          if (settings.output_directory) {
+            startContinuousImageMonitoring(settings.output_directory);
+          }
+        } catch (error) {
+          console.error('Error starting continuous monitoring:', error);
+        }
+        
+        // Check for auto-start
+        const autoStart = process.argv.includes('--startRender');
+        if (autoStart) {
+          mainWindow.webContents.executeJavaScript('if (window.autoStartRender) window.autoStartRender();');
+        }
+      }, remainingTime);
+    });
+    
+    mainWindow.on('minimize', () => {
+      try {
+        const settings = settingsManager.loadSettings();
+        if (settings.minimize_to_tray && tray) {
+          mainWindow.hide();
+        }
+      } catch (error) {
+        console.error('Error handling minimize:', error);
+      }
+    });
+    
+    mainWindow.on('close', () => {
+      try {
+        stopFileMonitoring();
+        stopContinuousImageMonitoring();
+        if (tray) {
+          tray.destroy();
+          tray = null;
+        }
+      } catch (error) {
+        console.error('Error handling window close:', error);
+      }
+    });
+    
+    mainWindow.on('closed', () => {
+      mainWindow = null;
+    });
+    
+    // Development mode
+    if (process.argv.includes('--dev')) {
+      mainWindow.webContents.openDevTools();
     }
-  });
-  
-  mainWindow.on('closed', () => {
-    mainWindow = null;
-  });
-  
-  // Development mode
-  if (process.argv.includes('--dev')) {
-    mainWindow.webContents.openDevTools();
+  } catch (error) {
+    console.error('Failed to create main window:', error);
+    throw error; // Re-throw so app initialization can handle it
   }
 }
 
@@ -2439,23 +2506,49 @@ ipcMain.handle('get-version', () => {
 // APP LIFECYCLE
 // ============================================================================
 
+// Global error handlers
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error);
+  dialog.showErrorBox('Fatal Error', `An unexpected error occurred:\n\n${error.message}\n\nThe application will now exit.`);
+  app.quit();
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
 app.whenReady().then(() => {
-  setupLogger();
-  
-  // Show splash screen first
-  createSplashScreen();
-  
-  // Create main window after a short delay to ensure splash is visible
-  setTimeout(() => {
-    createWindow();
-    createTray();
-  }, 500);
-  
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
-    }
-  });
+  try {
+    setupLogger();
+    
+    // Show splash screen first
+    createSplashScreen();
+    
+    // Create main window after a short delay to ensure splash is visible
+    setTimeout(() => {
+      try {
+        createWindow();
+        createTray();
+      } catch (error) {
+        console.error('Error creating main window or tray:', error);
+        dialog.showErrorBox('Startup Error', `Failed to create application window:\n\n${error.message}`);
+      }
+    }, 500);
+    
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        createWindow();
+      }
+    });
+  } catch (error) {
+    console.error('Error during app initialization:', error);
+    dialog.showErrorBox('Startup Error', `Failed to initialize application:\n\n${error.message}`);
+    app.quit();
+  }
+}).catch((error) => {
+  console.error('Error in app.whenReady:', error);
+  dialog.showErrorBox('Fatal Error', `Application failed to start:\n\n${error.message}`);
+  app.quit();
 });
 
 app.on('window-all-closed', () => {
@@ -2465,19 +2558,27 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
-  stopFileMonitoring();
-  stopContinuousImageMonitoring();
-  if (tray) {
-    tray.destroy();
+  try {
+    stopFileMonitoring();
+    stopContinuousImageMonitoring();
+    if (tray) {
+      tray.destroy();
+    }
+  } catch (error) {
+    console.error('Error during cleanup:', error);
   }
 });
 
 // Theme change listener
 nativeTheme.on('updated', () => {
-  currentTheme = detectWindowsTheme();
-  if (mainWindow) {
-    const htmlContent = generateHTML();
-    mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
+  try {
+    currentTheme = detectWindowsTheme();
+    if (mainWindow) {
+      const htmlContent = generateHTML();
+      mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
+    }
+  } catch (error) {
+    console.error('Error updating theme:', error);
   }
 });
 
