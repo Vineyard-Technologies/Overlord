@@ -1,6 +1,6 @@
 {
   "name": "overlord",
-  "version": "2.1.7",
+  "version": "3.0.0",
   "description": "An Asset Creation Pipeline Management Tool for Daz Studio",
   "main": "overlord.js",
   "scripts": {
@@ -8,9 +8,10 @@
     "dev": "electron overlord.js --dev",
     "clean": "node -e \"const fs = require('fs'); const path = require('path'); const distPath = path.join(__dirname, 'dist'); if (fs.existsSync(distPath)) { fs.rmSync(distPath, { recursive: true, force: true }); console.log('Cleaned dist folder'); }\"",
     "prebuild": "npm run clean",
-    "build": "electron-builder --win --x64 --dir",
-    "build:portable": "electron-builder --win --x64 portable",
-    "postbuild": "node set-icon.js",
+    "build": "electron-builder --win --x64",
+    "postbuild": "node -e \"const fs = require('fs'); const path = require('path'); const pkg = require('./package.json'); const version = pkg.version.replace(/\\./g, '-'); const distPath = path.join(__dirname, 'dist'); const oldPath = path.join(distPath, `OverlordInstaller${pkg.version}.exe`); const newPath = path.join(distPath, `OverlordInstaller${version}.exe`); if (fs.existsSync(oldPath)) { fs.renameSync(oldPath, newPath); console.log(`Renamed to OverlordInstaller${version}.exe`); } const items = fs.readdirSync(distPath); items.forEach(item => { const itemPath = path.join(distPath, item); if (item !== `OverlordInstaller${version}.exe`) { const stat = fs.statSync(itemPath); if (stat.isDirectory()) { fs.rmSync(itemPath, { recursive: true, force: true }); } else { fs.unlinkSync(itemPath); } console.log(`Deleted: ${item}`); } }); console.log('Build complete! Installer ready.')\"",
+    "build:dir": "electron-builder --win --x64 --dir",
+    "postbuild:dir": "node set-icon.js",
     "zip": "node scripts/constructZipper.js"
   },
   "keywords": [
@@ -35,15 +36,26 @@
     "win": {
       "target": [
         {
-          "target": "dir",
-          "arch": ["x64"]
-        },
-        {
-          "target": "portable",
-          "arch": ["x64"]
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
         }
       ],
-      "icon": "build/icon.ico"
+      "icon": "build/icon.ico",
+      "artifactName": "OverlordInstaller${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "license": "LICENSE",
+      "runAfterFinish": true,
+      "shortcutName": "Overlord",
+      "artifactName": "OverlordInstaller${version}.${ext}"
     },
     "files": [
       "overlord.js",
@@ -58,7 +70,7 @@
     "electron": "^38.3.0",
     "electron-builder": "^26.0.12",
     "rcedit": "^4.0.1",
-    "to-ico": "^1.1.5"
+    "to-ico": "^1.0.1"
   },
   "dependencies": {
     "archiver": "^7.0.1",

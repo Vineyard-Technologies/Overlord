@@ -15,7 +15,7 @@ const execPromise = util.promisify(exec);
 // CONSTANTS AND CONFIGURATION
 // ============================================================================
 
-const APP_VERSION = '2.1.7';
+const APP_VERSION = '3.0.0';
 const LOG_SIZE_MB = 10;
 const LOG_SIZE_DAZ = '10m';
 const RECENT_RENDER_TIMES_LIMIT = 25;
