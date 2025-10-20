@@ -120,7 +120,8 @@ function normalizePathForLogging(filePath) {
 
 function resourcePath(relativePath) {
   if (app.isPackaged) {
-    return path.join(process.resourcesPath, relativePath);
+    // When asar is disabled, files are in resources/app/
+    return path.join(process.resourcesPath, 'app', relativePath);
   }
   return path.join(__dirname, relativePath);
 }

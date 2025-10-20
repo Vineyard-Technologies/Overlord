@@ -9,6 +9,8 @@
     "clean": "node -e \"const fs = require('fs'); const path = require('path'); const distPath = path.join(__dirname, 'dist'); if (fs.existsSync(distPath)) { fs.rmSync(distPath, { recursive: true, force: true }); console.log('Cleaned dist folder'); }\"",
     "prebuild": "npm run clean",
     "build": "electron-builder --win --x64 --dir",
+    "build:portable": "electron-builder --win --x64 portable",
+    "postbuild": "node set-icon.js",
     "zip": "node scripts/constructZipper.js"
   },
   "keywords": [
@@ -31,8 +33,17 @@
     "copyright": "Copyright © 2025 Vineyard Technologies",
     "asar": false,
     "win": {
-      "target": "dir",
-      "icon": "images/favicon.ico"
+      "target": [
+        {
+          "target": "dir",
+          "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "build/icon.ico"
     },
     "files": [
       "overlord.js",
@@ -45,7 +56,9 @@
   },
   "devDependencies": {
     "electron": "^38.3.0",
-    "electron-builder": "^26.0.12"
+    "electron-builder": "^26.0.12",
+    "rcedit": "^4.0.1",
+    "to-ico": "^1.1.5"
   },
   "dependencies": {
     "archiver": "^7.0.1",
