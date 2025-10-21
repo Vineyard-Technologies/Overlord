@@ -216,6 +216,7 @@ async function stopRender() {
   document.getElementById('progress-fill').style.width = '0%';
   
   // Clear output details
+  document.getElementById('session-images').textContent = '-';
   document.getElementById('total-images').textContent = '-';
   document.getElementById('images-remaining').textContent = '-';
   document.getElementById('est-completion').textContent = '-';
@@ -344,7 +345,10 @@ async function showSettings() {
 function closeSettings() {
   const modal = document.getElementById('settings-modal');
   if (modal) {
-    modal.remove();
+    modal.classList.add('fade-out');
+    setTimeout(() => {
+      modal.remove();
+    }, 200);
   }
 }
 
@@ -610,7 +614,10 @@ function escapeHtml(text) {
 function closeAbout() {
   const modal = document.getElementById('about-modal');
   if (modal) {
-    modal.remove();
+    modal.classList.add('fade-out');
+    setTimeout(() => {
+      modal.remove();
+    }, 200);
   }
 }
 
@@ -654,13 +661,29 @@ ipcRenderer.on('image-updated', (event, imageData) => {
     const imageBuffer = fs.readFileSync(imageData.path);
     const base64Image = imageBuffer.toString('base64');
     const mimeType = 'image/png'; // Always PNG as specified
+    
+    // Create an image element to get dimensions
+    const img = new Image();
+    img.onload = function() {
+      document.getElementById('info-resolution').textContent = `${this.width} × ${this.height}`;
+    };
+    img.src = 'data:' + mimeType + ';base64,' + base64Image;
+    
     preview.innerHTML = '<img src="data:' + mimeType + ';base64,' + base64Image + '" alt="Rendered Image">';
   } catch (error) {
     console.error('Error loading image:', error);
-    preview.innerHTML = '<div class="no-image">Error loading image</div>';
+    preview.innerHTML = '<img src="images/noImagesFound.webp" alt="No images found">';
+    document.getElementById('info-resolution').textContent = '-';
   }
   
-  document.getElementById('info-file').textContent = imageData.filename || '-';
+  // Update filename with clickable styling
+  const infoFileElement = document.getElementById('info-file');
+  infoFileElement.textContent = imageData.filename || '-';
+  infoFileElement.style.cursor = 'pointer';
+  infoFileElement.style.textDecoration = 'underline';
+  infoFileElement.style.color = 'var(--select-bg)';
+  infoFileElement.onclick = openImageFile;
+  
   document.getElementById('info-size').textContent = formatSize(imageData.size) || '-';
   document.getElementById('info-created').textContent = imageData.created ? 
     formatDateWithDay(new Date(imageData.created)) : '-';
@@ -677,9 +700,28 @@ ipcRenderer.on('render-progress', (event, progressData) => {
   progressFill.style.width = progressData.progressPercent.toFixed(1) + '%';
   
   // Update output details
+  document.getElementById('session-images').textContent = progressData.sessionCount;
   document.getElementById('total-images').textContent = progressData.renderedCount;
   document.getElementById('images-remaining').textContent = progressData.remaining;
   document.getElementById('est-completion').textContent = progressData.estimatedCompletion;
+});
+
+// Listen for no images found event
+ipcRenderer.on('no-images-found', () => {
+  const preview = document.getElementById('image-preview');
+  preview.innerHTML = '<img src="images/noImagesFound.webp" alt="No images found">';
+  
+  // Reset image info and remove clickable styling
+  const infoFileElement = document.getElementById('info-file');
+  infoFileElement.textContent = '-';
+  infoFileElement.style.cursor = 'default';
+  infoFileElement.style.textDecoration = 'none';
+  infoFileElement.style.color = 'inherit';
+  infoFileElement.onclick = null;
+  
+  document.getElementById('info-resolution').textContent = '-';
+  document.getElementById('info-size').textContent = '-';
+  document.getElementById('info-created').textContent = '-';
 });
 
 function formatSize(bytes) {

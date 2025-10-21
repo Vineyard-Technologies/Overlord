@@ -25,7 +25,7 @@
     <div class="menu-item" onclick="toggleMenu('edit-menu')">
       Edit
       <div id="edit-menu" class="dropdown-menu">
-        <div class="dropdown-item" onclick="event.stopPropagation(); clearAllFields(); closeAllMenus();">Clear All Input Fields</div>
+        <div class="dropdown-item" onclick="event.stopPropagation(); clearAllFields(); closeAllMenus();">Clear Inputs</div>
         <div class="dropdown-item" onclick="event.stopPropagation(); restoreDefaults(); closeAllMenus();">Restore Default Settings</div>
       </div>
     </div>
@@ -45,7 +45,10 @@
   
   <div class="container">
     <div class="left-panel">
-      <h2>Options</h2>
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <h2 style="margin: 0;">Options</h2>
+        <button onclick="clearAllFields()" style="padding: 6px 16px; font-size: 14px;">Clear Inputs</button>
+      </div>
       
       <div class="form-group">
         <label>Subject:</label>
@@ -137,7 +140,11 @@
           </div>
           <div class="info-box">
             <div class="info-row">
-              <span class="info-label">Images Completed:</span>
+              <span class="info-label">Images Completed this Session:</span>
+              <span id="session-images">-</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">Total Images Completed:</span>
               <span id="total-images">-</span>
             </div>
             <div class="info-row">
@@ -158,8 +165,12 @@
           </div>
           <div class="info-box">
             <div class="info-row">
-              <span class="info-label">File:</span>
-              <span id="info-file" style="cursor: pointer; text-decoration: underline; color: var(--select-bg);" onclick="openImageFile()">-</span>
+              <span class="info-label">Name:</span>
+              <span id="info-file">-</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">Resolution:</span>
+              <span id="info-resolution">-</span>
             </div>
             <div class="info-row">
               <span class="info-label">Size:</span>
@@ -178,7 +189,7 @@
       <h2>Last Rendered Image</h2>
       
       <div class="image-preview" id="image-preview">
-        <div class="no-image">No image rendered yet</div>
+        <img src="images/noImagesFound.webp" alt="No images found">
       </div>
     </div>
   </div>

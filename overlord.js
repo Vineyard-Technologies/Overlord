@@ -11,7 +11,7 @@ const execPromise = util.promisify(exec);
 // CONSTANTS AND CONFIGURATION
 // ============================================================================
 
-const APP_VERSION = '3.0.0';
+const APP_VERSION = '3.0.1';
 const LOG_SIZE_MB = 10;
 const LOG_SIZE_DAZ = '10m';
 
@@ -62,6 +62,7 @@ let splashStartTime = null;
 let tray = null;
 let isRendering = false;
 let initialTotalImages = 0;
+let sessionStartImageCount = 0;
 let renderStartTime = null;
 let periodicMonitoringHandle = null;
 let fileWatcherHandle = null;
@@ -109,7 +110,7 @@ function normalizePathForLogging(filePath) {
 
 function resourcePath(relativePath) {
   if (app.isPackaged) {
-    // When asar is disabled, files are in resources/app/
+    // When packaged with asar disabled, files are in resources/app/
     return path.join(process.resourcesPath, 'app', relativePath);
   }
   return path.join(__dirname, relativePath);
@@ -425,7 +426,7 @@ async function killProcessesByName(processNames) {
 async function stopIrayServer() {
   try {
     const scriptPath = app.isPackaged
-      ? path.join(process.resourcesPath, 'scripts', 'stopIrayServer.ps1')
+      ? path.join(process.resourcesPath, 'app', 'scripts', 'stopIrayServer.ps1')
       : path.join(__dirname, 'scripts', 'stopIrayServer.ps1');
     
     if (!fs.existsSync(scriptPath)) {
@@ -600,6 +601,9 @@ async function startRender(settings) {
   const resultsDir = path.join(appDataDir, 'IrayServer', 'results', 'admin');
   const finalOutputDir = settings.output_directory;
   
+  // Count existing images at session start
+  sessionStartImageCount = countImagesInDirectory(finalOutputDir);
+  
   // Create directories
   if (!fs.existsSync(resultsDir)) {
     fs.mkdirSync(resultsDir, { recursive: true });
@@ -625,8 +629,8 @@ async function startRender(settings) {
   let renderScriptPath, templatePath;
   
   if (app.isPackaged) {
-    renderScriptPath = path.join(process.resourcesPath, 'scripts', 'masterRenderer.dsa').replace(/\\/g, '/');
-    templatePath = path.join(process.resourcesPath, 'templates', 'masterTemplate.duf').replace(/\\/g, '/');
+    renderScriptPath = path.join(process.resourcesPath, 'app', 'scripts', 'masterRenderer.dsa').replace(/\\/g, '/');
+    templatePath = path.join(process.resourcesPath, 'app', 'templates', 'masterTemplate.duf').replace(/\\/g, '/');
   } else {
     renderScriptPath = path.join(__dirname, 'scripts', 'masterRenderer.dsa').replace(/\\/g, '/');
     templatePath = path.join(__dirname, 'templates', 'masterTemplate.duf').replace(/\\/g, '/');
@@ -800,6 +804,7 @@ function startFileMonitoring(directory) {
       mainWindow.webContents.send('render-progress', {
         totalImages: initialTotalImages,
         renderedCount: renderedCount,
+        sessionCount: Math.max(0, renderedCount - sessionStartImageCount),
         remaining: remaining,
         progressPercent: progressPercent,
         estimatedCompletion: estimatedCompletion
@@ -816,12 +821,21 @@ function stopFileMonitoring() {
 }
 
 function startContinuousImageMonitoring(outputDirectory) {
-  if (!outputDirectory || !fs.existsSync(outputDirectory)) {
+  if (!outputDirectory) {
     return;
   }
   
   // Monitor for newest image every 5 seconds
   const checkForNewestImage = () => {
+    // Check if directory exists
+    if (!fs.existsSync(outputDirectory)) {
+      if (currentImagePath !== null && mainWindow) {
+        currentImagePath = null;
+        mainWindow.webContents.send('no-images-found');
+      }
+      return;
+    }
+    
     const images = findNewestImage(outputDirectory);
     
     if (images && images.length > 0) {
@@ -845,6 +859,12 @@ function startContinuousImageMonitoring(outputDirectory) {
         } catch (error) {
           console.error('Error getting image stats:', error);
         }
+      }
+    } else if (currentImagePath !== null) {
+      // No images found and we previously had an image - send no-images-found event
+      currentImagePath = null;
+      if (mainWindow) {
+        mainWindow.webContents.send('no-images-found');
       }
     }
   };

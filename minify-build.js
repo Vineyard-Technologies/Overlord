@@ -73,12 +73,16 @@ async function main() {
   );
   console.log('✓ Copied styles.css');
   
-  // Copy package.json
-  fs.copyFileSync(
-    path.join(__dirname, 'package.json'),
-    path.join(tempDir, 'package.json')
+  // Copy package.json without build config (electron-builder 3.0+ requirement)
+  const packageJson = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
+  delete packageJson.build; // Remove build config from application package.json
+  delete packageJson.devDependencies; // Remove dev dependencies
+  fs.writeFileSync(
+    path.join(tempDir, 'package.json'),
+    JSON.stringify(packageJson, null, 2),
+    'utf8'
   );
-  console.log('✓ Copied package.json');
+  console.log('✓ Copied package.json (without build config)');
   
   // Copy directories
   const dirsToCopy = ['images', 'scripts', 'templates'];

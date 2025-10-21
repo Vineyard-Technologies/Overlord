@@ -1,3 +1,18 @@
+/* Custom Fonts */
+@font-face {
+  font-family: 'Cinzel';
+  src: url('fonts/Cinzel-Bold.ttf') format('truetype');
+  font-weight: bold;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'Grenze';
+  src: url('fonts/Grenze-Medium.ttf') format('truetype');
+  font-weight: 500;
+  font-style: normal;
+}
+
 * { 
   margin: 0; 
   padding: 0; 
@@ -5,7 +20,7 @@
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: 'Grenze', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   font-size: 14px;
   overflow: hidden;
   height: 100vh;
@@ -40,7 +55,23 @@ body.theme-dark {
 
 body { 
   background: var(--bg); 
-  color: var(--fg); 
+  color: var(--fg);
+  position: relative;
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-image: url('images/overlordBackground.webp');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  opacity: 0.25;
+  z-index: -1;
 }
 
 /* Menu Bar */
@@ -50,6 +81,7 @@ body {
   display: flex;
   padding: 0 8px;
   user-select: none;
+  font-family: 'Grenze', sans-serif;
 }
 
 .menu-item {
@@ -71,11 +103,17 @@ body {
   box-shadow: 0 2px 8px rgba(0,0,0,0.3);
   min-width: 220px;
   z-index: 1000;
-  display: none;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-8px);
+  transition: opacity 0.2s ease, transform 0.2s ease, visibility 0s linear 0.2s;
 }
 
 .dropdown-menu.show {
-  display: block;
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+  transition: opacity 0.2s ease, transform 0.2s ease, visibility 0s linear 0s;
 }
 
 .dropdown-item {
@@ -120,6 +158,11 @@ body {
 }
 
 /* Typography */
+h2, h3 {
+  font-family: 'Cinzel', serif;
+  font-weight: bold;
+}
+
 h2 {
   margin-bottom: 16px;
   font-size: 18px;
@@ -172,6 +215,7 @@ button {
   border-radius: 4px;
   cursor: pointer;
   font-size: 14px;
+  font-family: 'Grenze', sans-serif;
 }
 
 button:hover { 
@@ -222,7 +266,14 @@ button:disabled {
 
 .progress-fill {
   height: 100%;
-  background: var(--select-bg);
+  background: linear-gradient(
+    90deg,
+    var(--select-bg) 0%,
+    rgba(255, 255, 255, 0.3) 50%,
+    var(--select-bg) 100%
+  );
+  background-size: 200% 100%;
+  animation: progressFlow 2s ease-in-out infinite;
   transition: width 0.3s;
   width: 0%;
 }
@@ -300,6 +351,11 @@ button:disabled {
   align-items: center;
   justify-content: center;
   z-index: 10000;
+  animation: fadeIn 0.2s ease;
+}
+
+#settings-modal.fade-out {
+  animation: fadeOut 0.2s ease forwards;
 }
 
 .settings-content {
@@ -309,6 +365,11 @@ button:disabled {
   width: 450px;
   max-width: 90%;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  animation: slideIn 0.2s ease;
+}
+
+#settings-modal.fade-out .settings-content {
+  animation: slideOut 0.2s ease forwards;
 }
 
 .settings-header {
@@ -376,6 +437,11 @@ button:disabled {
   align-items: center;
   justify-content: center;
   z-index: 10000;
+  animation: fadeIn 0.2s ease;
+}
+
+#about-modal.fade-out {
+  animation: fadeOut 0.2s ease forwards;
 }
 
 .about-content {
@@ -387,6 +453,11 @@ button:disabled {
   max-height: 90vh;
   overflow-y: auto;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  animation: slideIn 0.2s ease;
+}
+
+#about-modal.fade-out .about-content {
+  animation: slideOut 0.2s ease forwards;
 }
 
 .about-header {
@@ -418,4 +489,55 @@ button:disabled {
 
 .about-body a:hover {
   text-decoration: underline;
+}
+
+/* Modal Animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes fadeOut {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes slideIn {
+  from {
+    transform: scale(0.95) translateY(-20px);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1) translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideOut {
+  from {
+    transform: scale(1) translateY(0);
+    opacity: 1;
+  }
+  to {
+    transform: scale(0.95) translateY(-20px);
+    opacity: 0;
+  }
+}
+
+/* Progress Bar Animation */
+@keyframes progressFlow {
+  0% {
+    background-position: 0% 0%;
+  }
+  100% {
+    background-position: 200% 0%;
+  }
 }
