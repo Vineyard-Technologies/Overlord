@@ -7,9 +7,10 @@
     "start": "electron overlord.js",
     "dev": "electron overlord.js --dev",
     "clean": "node -e \"const fs = require('fs'); const path = require('path'); const distPath = path.join(__dirname, 'dist'); if (fs.existsSync(distPath)) { fs.rmSync(distPath, { recursive: true, force: true }); console.log('Cleaned dist folder'); }\"",
-    "prebuild": "npm run clean",
-    "build": "electron-builder --win --x64",
-    "postbuild": "node -e \"const fs = require('fs'); const path = require('path'); const pkg = require('./package.json'); const version = pkg.version.replace(/\\./g, '-'); const distPath = path.join(__dirname, 'dist'); const oldPath = path.join(distPath, `OverlordInstaller${pkg.version}.exe`); const newPath = path.join(distPath, `OverlordInstaller${version}.exe`); if (fs.existsSync(oldPath)) { fs.renameSync(oldPath, newPath); console.log(`Renamed to OverlordInstaller${version}.exe`); } const items = fs.readdirSync(distPath); items.forEach(item => { const itemPath = path.join(distPath, item); if (item !== `OverlordInstaller${version}.exe`) { const stat = fs.statSync(itemPath); if (stat.isDirectory()) { fs.rmSync(itemPath, { recursive: true, force: true }); } else { fs.unlinkSync(itemPath); } console.log(`Deleted: ${item}`); } }); console.log('Build complete! Installer ready.')\"",
+    "minify": "node minify-build.js",
+    "prebuild": "npm run clean && npm run minify",
+    "build": "electron-builder --win --x64 --config.directories.app=build-temp",
+    "postbuild": "node -e \"const fs = require('fs'); const path = require('path'); const pkg = require('./package.json'); const version = pkg.version.replace(/\\./g, '-'); const distPath = path.join(__dirname, 'dist'); const tempPath = path.join(__dirname, 'build-temp'); const oldPath = path.join(distPath, `OverlordInstaller${pkg.version}.exe`); const newPath = path.join(distPath, `OverlordInstaller${version}.exe`); if (fs.existsSync(oldPath)) { fs.renameSync(oldPath, newPath); console.log(`Renamed to OverlordInstaller${version}.exe`); } const items = fs.readdirSync(distPath); items.forEach(item => { const itemPath = path.join(distPath, item); if (item !== `OverlordInstaller${version}.exe`) { const stat = fs.statSync(itemPath); if (stat.isDirectory()) { fs.rmSync(itemPath, { recursive: true, force: true }); } else { fs.unlinkSync(itemPath); } console.log(`Deleted: ${item}`); } }); if (fs.existsSync(tempPath)) { fs.rmSync(tempPath, { recursive: true, force: true }); console.log('Cleaned build-temp folder'); } console.log('Build complete! Installer ready.')\"",
     "build:dir": "electron-builder --win --x64 --dir",
     "postbuild:dir": "node set-icon.js",
     "zip": "node scripts/constructZipper.js"
@@ -59,6 +60,9 @@
     },
     "files": [
       "overlord.js",
+      "index.html",
+      "styles.css",
+      "renderer.js",
       "images/**/*",
       "scripts/**/*",
       "templates/**/*",
@@ -68,7 +72,8 @@
   },
   "devDependencies": {
     "electron": "^38.3.0",
-    "electron-builder": "^26.0.12"
+    "electron-builder": "^26.0.12",
+    "terser": "^5.44.0"
   },
   "dependencies": {
     "archiver": "^7.0.1",

@@ -18,6 +18,7 @@ dist/
 out/
 release/
 build/
+build-temp/
 
 # Electron build artifacts
 *.exe

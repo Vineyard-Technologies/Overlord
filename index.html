@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Overlord</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="menu-bar">
+    <div class="menu-item" onclick="toggleMenu('file-menu')">
+      File
+      <div id="file-menu" class="dropdown-menu">
+        <div class="dropdown-item" onclick="event.stopPropagation(); browseSubject(); closeAllMenus();">Choose Subject</div>
+        <div class="dropdown-item" onclick="event.stopPropagation(); browseAnimations(); closeAllMenus();">Choose Animations</div>
+        <div class="dropdown-item" onclick="event.stopPropagation(); browsePropAnimations(); closeAllMenus();">Choose Prop Animations</div>
+        <div class="dropdown-item" onclick="event.stopPropagation(); browseGear(); closeAllMenus();">Choose Gear</div>
+        <div class="dropdown-item" onclick="event.stopPropagation(); browseGearAnimations(); closeAllMenus();">Choose Gear Animations</div>
+        <div class="dropdown-item" onclick="event.stopPropagation(); browseOutputDir(); closeAllMenus();">Choose Output Directory</div>
+        <div class="dropdown-separator"></div>
+        <div class="dropdown-item" onclick="event.stopPropagation(); showSettings(); closeAllMenus();">Settings</div>
+        <div class="dropdown-separator"></div>
+        <div class="dropdown-item" onclick="event.stopPropagation(); exitOverlord(); closeAllMenus();">Exit Overlord</div>
+      </div>
+    </div>
+    <div class="menu-item" onclick="toggleMenu('edit-menu')">
+      Edit
+      <div id="edit-menu" class="dropdown-menu">
+        <div class="dropdown-item" onclick="event.stopPropagation(); clearAllFields(); closeAllMenus();">Clear All Input Fields</div>
+        <div class="dropdown-item" onclick="event.stopPropagation(); restoreDefaults(); closeAllMenus();">Restore Default Settings</div>
+      </div>
+    </div>
+    <div class="menu-item" onclick="toggleMenu('help-menu')">
+      Help
+      <div id="help-menu" class="dropdown-menu">
+        <div class="dropdown-item" onclick="event.stopPropagation(); showOverlordLog(); closeAllMenus();">Show Overlord Log</div>
+        <div class="dropdown-item" onclick="event.stopPropagation(); showIrayServerLog(); closeAllMenus();">Show Iray Server Log</div>
+        <div class="dropdown-item" onclick="event.stopPropagation(); showDazStudioLog(); closeAllMenus();">Show DAZ Studio Log</div>
+        <div class="dropdown-separator"></div>
+        <div class="dropdown-item" onclick="event.stopPropagation(); showAbout(); closeAllMenus();">About Overlord</div>
+      </div>
+    </div>
+  </div>
+  
+  <div class="container">
+    <div class="left-panel">
+      <h2>Options</h2>
+      
+      <div class="form-group">
+        <label>Subject:</label>
+        <div class="input-row">
+          <input type="text" id="subject" placeholder="Path to subject .duf file" spellcheck="false">
+          <button onclick="browseSubject()">Browse</button>
+        </div>
+      </div>
+      
+      <div class="form-group">
+        <label>Animations:</label>
+        <div class="input-row">
+          <textarea id="animations" rows="3" placeholder="Paths to animation .duf files (one per line)" spellcheck="false"></textarea>
+          <button onclick="browseAnimations()">Browse</button>
+        </div>
+      </div>
+      
+      <div class="form-group">
+        <label>Prop Animations:</label>
+        <div class="input-row">
+          <textarea id="prop-animations" rows="3" placeholder="Paths to prop animation .duf files (one per line)" spellcheck="false"></textarea>
+          <button onclick="browsePropAnimations()">Browse</button>
+        </div>
+      </div>
+      
+      <div class="form-group">
+        <label>Gear:</label>
+        <div class="input-row">
+          <textarea id="gear" rows="3" placeholder="Paths to gear .duf files (one per line)" spellcheck="false"></textarea>
+          <button onclick="browseGear()">Browse</button>
+        </div>
+      </div>
+      
+      <div class="form-group">
+        <label>Gear Animations:</label>
+        <div class="input-row">
+          <textarea id="gear-animations" rows="3" placeholder="Paths to gear animation .duf files (one per line)" spellcheck="false"></textarea>
+          <button onclick="browseGearAnimations()">Browse</button>
+        </div>
+      </div>
+      
+      <div class="form-group">
+        <label>Output Directory:</label>
+        <div class="input-row">
+          <input type="text" id="output-dir" placeholder="Output directory for rendered images" spellcheck="false">
+          <button onclick="browseOutputDir()">Browse</button>
+        </div>
+      </div>
+      
+      <div class="form-group">
+        <div class="input-row" style="align-items: flex-end; gap: 16px;">
+          <div style="flex: 0 0 auto;">
+            <label>Instances:</label>
+            <input type="number" id="instances" min="1" max="99" value="1" style="width: 60px;">
+          </div>
+          <div style="flex: 0 0 auto;">
+            <label>Frame Rate:</label>
+            <input type="number" id="frame-rate" min="1" max="999" value="30" style="width: 70px;">
+          </div>
+          <div style="flex: 0 0 auto;">
+            <label>Cache (GB):</label>
+            <input type="number" id="cache-threshold" min="10" max="999" value="10" style="width: 70px;">
+          </div>
+          <div style="flex: 0 0 auto;">
+            <label style="display: flex; align-items: center; margin-bottom: 0;"><input type="checkbox" id="render-shadows" checked style="margin-right: 4px;"> Render Shadows</label>
+          </div>
+          <div style="flex: 0 0 auto;">
+            <label style="display: flex; align-items: center; margin-bottom: 0;"><input type="checkbox" id="shutdown-on-finish" checked style="margin-right: 4px;"> Shutdown on Finish</label>
+          </div>
+        </div>
+      </div>
+      
+      <div class="button-group">
+        <button id="start-btn" class="btn-primary" onclick="startRender()">Start Render</button>
+        <button id="stop-btn" class="btn-danger" onclick="stopRender()">Stop Render</button>
+      </div>
+      
+      <div class="progress-section">
+        <div class="progress-bar">
+          <div class="progress-fill" id="progress-fill"></div>
+        </div>
+      </div>
+      
+      <div style="display: flex; gap: 16px; margin-top: 24px;">
+        <div style="flex: 1;">
+          <h3 style="margin-bottom: 12px;">Output Details</h3>
+          <div class="info-box">
+            <div class="info-row">
+              <span class="info-label">Images Completed:</span>
+              <span id="total-images">-</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">Images Remaining:</span>
+              <span id="images-remaining">-</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">Estimated Completion at:</span>
+              <span id="est-completion">-</span>
+            </div>
+          </div>
+        </div>
+        
+        <div style="flex: 1;">
+          <h3 style="margin-bottom: 12px;">Last Rendered Image Details</h3>
+          <div class="info-box">
+            <div class="info-row">
+              <span class="info-label">File:</span>
+              <span id="info-file">-</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">Size:</span>
+              <span id="info-size">-</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">Modified:</span>
+              <span id="info-modified">-</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="right-panel">
+      <h2>Last Rendered Image</h2>
+      
+      <div class="image-preview" id="image-preview">
+        <div class="no-image">No image rendered yet</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>

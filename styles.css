@@ -1,0 +1,420 @@
+* { 
+  margin: 0; 
+  padding: 0; 
+  box-sizing: border-box; 
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 14px;
+  overflow: hidden;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Theme Variables */
+body.theme-light {
+  --bg: #f0f0f0; 
+  --fg: #000; 
+  --entry-bg: #fff; 
+  --entry-fg: #000;
+  --button-bg: #e1e1e1; 
+  --button-fg: #000; 
+  --border: #ccc;
+  --select-bg: #0078d4; 
+  --select-fg: #fff;
+}
+
+body.theme-dark {
+  --bg: #2d2d30; 
+  --fg: #fff; 
+  --entry-bg: #3c3c3c; 
+  --entry-fg: #fff;
+  --button-bg: #404040; 
+  --button-fg: #fff; 
+  --border: #555;
+  --select-bg: #0078d4; 
+  --select-fg: #fff;
+}
+
+body { 
+  background: var(--bg); 
+  color: var(--fg); 
+}
+
+/* Menu Bar */
+.menu-bar {
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  padding: 0 8px;
+  user-select: none;
+}
+
+.menu-item {
+  padding: 6px 12px;
+  cursor: pointer;
+  position: relative;
+}
+
+.menu-item:hover { 
+  background: var(--button-bg); 
+}
+
+.dropdown-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  background: var(--entry-bg);
+  border: 1px solid var(--border);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  min-width: 220px;
+  z-index: 1000;
+  display: none;
+}
+
+.dropdown-menu.show {
+  display: block;
+}
+
+.dropdown-item {
+  padding: 8px 16px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.dropdown-item:hover {
+  background: var(--button-bg);
+}
+
+.dropdown-separator {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
+}
+
+/* Layout */
+.container {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.left-panel, .right-panel {
+  padding: 20px;
+}
+
+.left-panel {
+  flex: 1;
+  border-right: 1px solid var(--border);
+  min-width: 500px;
+}
+
+.right-panel {
+  flex: 1;
+  min-width: 400px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Typography */
+h2 {
+  margin-bottom: 16px;
+  font-size: 18px;
+}
+
+/* Forms */
+.form-group {
+  margin-bottom: 16px;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 4px;
+  font-weight: 500;
+}
+
+input[type="text"], 
+input[type="number"], 
+textarea {
+  width: 100%;
+  padding: 8px;
+  background: var(--entry-bg);
+  color: var(--entry-fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: "Consolas", "Courier New", monospace;
+  font-size: 13px;
+}
+
+textarea {
+  resize: vertical;
+  min-height: 60px;
+}
+
+.input-row {
+  display: flex;
+  gap: 8px;
+}
+
+.input-row input {
+  flex: 1;
+}
+
+/* Buttons */
+button {
+  padding: 8px 16px;
+  background: var(--button-bg);
+  color: var(--button-fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+button:hover { 
+  opacity: 0.9; 
+}
+
+button:disabled { 
+  opacity: 0.5; 
+  cursor: not-allowed; 
+}
+
+.btn-primary {
+  background: var(--select-bg);
+  color: var(--select-fg);
+}
+
+.btn-danger {
+  background: #dc3545;
+  color: #fff;
+}
+
+.button-group {
+  display: flex;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.button-group button {
+  flex: 1;
+  padding: 12px;
+  font-weight: 600;
+}
+
+/* Progress */
+.progress-section {
+  margin-top: 20px;
+}
+
+.progress-bar {
+  width: 100%;
+  height: 24px;
+  background: var(--entry-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+}
+
+.progress-fill {
+  height: 100%;
+  background: var(--select-bg);
+  transition: width 0.3s;
+  width: 0%;
+}
+
+/* Image Preview */
+.image-preview {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  background: var(--entry-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 16px;
+  overflow: hidden;
+}
+
+.image-preview img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.no-image {
+  opacity: 0.5;
+}
+
+/* Info Boxes */
+.info-box {
+  background: var(--entry-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 0;
+}
+
+.info-label {
+  font-weight: 500;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { 
+  width: 12px; 
+}
+
+::-webkit-scrollbar-track { 
+  background: var(--bg); 
+}
+
+::-webkit-scrollbar-thumb { 
+  background: var(--border); 
+  border-radius: 6px; 
+}
+
+::-webkit-scrollbar-thumb:hover { 
+  background: var(--button-bg); 
+}
+
+/* Settings Modal */
+#settings-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+}
+
+.settings-content {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  width: 450px;
+  max-width: 90%;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+}
+
+.settings-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-header h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.close-btn {
+  background: none;
+  border: none;
+  color: var(--fg);
+  font-size: 24px;
+  cursor: pointer;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+}
+
+.close-btn:hover {
+  background: var(--button-bg);
+}
+
+.settings-body {
+  padding: 20px;
+}
+
+.setting-item {
+  margin-bottom: 16px;
+}
+
+.setting-item label {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+}
+
+.setting-item input[type="checkbox"] {
+  margin-right: 10px;
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+}
+
+/* About Modal */
+#about-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+}
+
+.about-content {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  width: 650px;
+  max-width: 90%;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+}
+
+.about-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.about-header h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.about-body {
+  padding: 20px;
+}
+
+.about-logo {
+  text-align: center;
+  margin-bottom: 10px;
+}
+
+.about-body a {
+  color: #0078d4;
+  text-decoration: none;
+}
+
+.about-body a:hover {
+  text-decoration: underline;
+}
