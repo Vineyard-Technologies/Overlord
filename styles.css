@@ -109,6 +109,7 @@ body {
   flex: 1;
   border-right: 1px solid var(--border);
   min-width: 500px;
+  overflow-y: auto;
 }
 
 .right-panel {

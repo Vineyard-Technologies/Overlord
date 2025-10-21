@@ -74,14 +74,24 @@ function clampNumberInputs() {
   const frameRate = document.getElementById('frame-rate');
   const cacheThreshold = document.getElementById('cache-threshold');
   
-  // Clamp instances (min: 1)
-  if (instances.value && parseInt(instances.value) < 1) {
-    instances.value = '1';
+  // Clamp instances (min: 1, max: 99)
+  if (instances.value) {
+    let val = parseInt(instances.value);
+    if (val < 1) {
+      instances.value = '1';
+    } else if (val > 99) {
+      instances.value = '99';
+    }
   }
   
-  // Clamp frame rate (min: 1)
-  if (frameRate.value && parseInt(frameRate.value) < 1) {
-    frameRate.value = '1';
+  // Clamp frame rate (min: 1, max: 999)
+  if (frameRate.value) {
+    let val = parseInt(frameRate.value);
+    if (val < 1) {
+      frameRate.value = '1';
+    } else if (val > 999) {
+      frameRate.value = '999';
+    }
   }
   
   // Clamp cache threshold (min: 10, max: 999)
@@ -214,6 +224,31 @@ async function stopRender() {
 function copyPath() {
   if (currentImagePath) {
     ipcRenderer.invoke('copy-to-clipboard', currentImagePath);
+  }
+}
+
+async function showOutputFolder() {
+  const outputDir = document.getElementById('output-dir').value;
+  if (outputDir) {
+    await ipcRenderer.invoke('show-folder', outputDir);
+  } else {
+    alert('No output directory specified');
+  }
+}
+
+async function showImageInFolder() {
+  if (currentImagePath) {
+    await ipcRenderer.invoke('show-folder', currentImagePath);
+  } else {
+    alert('No image has been rendered yet');
+  }
+}
+
+async function openImageFile() {
+  if (currentImagePath) {
+    await ipcRenderer.invoke('open-file', currentImagePath);
+  } else {
+    alert('No image has been rendered yet');
   }
 }
 
@@ -388,6 +423,11 @@ async function showDazStudioLog() {
   } else {
     alert('DAZ Studio log file not found. DAZ Studio may not have been run yet.');
   }
+}
+
+function showIrayServerInterface() {
+  const { shell } = require('electron');
+  shell.openExternal('http://127.0.0.1:9090/');
 }
 
 async function showAbout() {
@@ -583,6 +623,25 @@ function autoStartRender() {
   startRender();
 }
 
+// Format date with day of week and ordinal suffix
+function formatDateWithDay(date) {
+  const dayOfWeek = date.toLocaleDateString('en-US', { weekday: 'long' });
+  
+  const timeStr = date.toLocaleTimeString('en-US', { 
+    hour: 'numeric', 
+    minute: '2-digit',
+    hour12: true 
+  });
+  
+  const day = date.getDate();
+  const daySuffix = ['th', 'st', 'nd', 'rd'][(day % 10 > 3 || Math.floor(day / 10) === 1) ? 0 : day % 10];
+  
+  const monthStr = date.toLocaleDateString('en-US', { month: 'long' });
+  const yearStr = date.getFullYear();
+  
+  return `${dayOfWeek}, ${timeStr}, ${monthStr} ${day}${daySuffix}, ${yearStr}`;
+}
+
 // Listen for image updates
 ipcRenderer.on('image-updated', (event, imageData) => {
   currentImagePath = imageData.path;
@@ -603,8 +662,8 @@ ipcRenderer.on('image-updated', (event, imageData) => {
   
   document.getElementById('info-file').textContent = imageData.filename || '-';
   document.getElementById('info-size').textContent = formatSize(imageData.size) || '-';
-  document.getElementById('info-modified').textContent = imageData.modified ? 
-    new Date(imageData.modified).toLocaleString() : '-';
+  document.getElementById('info-created').textContent = imageData.created ? 
+    formatDateWithDay(new Date(imageData.created)) : '-';
   
   if (document.getElementById('copy-btn')) {
     document.getElementById('copy-btn').disabled = false;

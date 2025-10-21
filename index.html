@@ -36,6 +36,8 @@
         <div class="dropdown-item" onclick="event.stopPropagation(); showIrayServerLog(); closeAllMenus();">Show Iray Server Log</div>
         <div class="dropdown-item" onclick="event.stopPropagation(); showDazStudioLog(); closeAllMenus();">Show DAZ Studio Log</div>
         <div class="dropdown-separator"></div>
+        <div class="dropdown-item" onclick="event.stopPropagation(); showIrayServerInterface(); closeAllMenus();">Show Iray Server Interface</div>
+        <div class="dropdown-separator"></div>
         <div class="dropdown-item" onclick="event.stopPropagation(); showAbout(); closeAllMenus();">About Overlord</div>
       </div>
     </div>
@@ -129,7 +131,10 @@
       
       <div style="display: flex; gap: 16px; margin-top: 24px;">
         <div style="flex: 1;">
-          <h3 style="margin-bottom: 12px;">Output Details</h3>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <h3 style="margin: 0;">Output Details</h3>
+            <button onclick="showOutputFolder()" style="padding: 4px 12px; font-size: 13px;">Show Output Folder</button>
+          </div>
           <div class="info-box">
             <div class="info-row">
               <span class="info-label">Images Completed:</span>
@@ -147,19 +152,22 @@
         </div>
         
         <div style="flex: 1;">
-          <h3 style="margin-bottom: 12px;">Last Rendered Image Details</h3>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <h3 style="margin: 0;">Last Rendered Image Details</h3>
+            <button onclick="showImageInFolder()" style="padding: 4px 12px; font-size: 13px;">Show in Folder</button>
+          </div>
           <div class="info-box">
             <div class="info-row">
               <span class="info-label">File:</span>
-              <span id="info-file">-</span>
+              <span id="info-file" style="cursor: pointer; text-decoration: underline; color: var(--select-bg);" onclick="openImageFile()">-</span>
             </div>
             <div class="info-row">
               <span class="info-label">Size:</span>
               <span id="info-size">-</span>
             </div>
             <div class="info-row">
-              <span class="info-label">Modified:</span>
-              <span id="info-modified">-</span>
+              <span class="info-label">Created at:</span>
+              <span id="info-created">-</span>
             </div>
           </div>
         </div>

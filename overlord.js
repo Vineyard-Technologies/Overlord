@@ -748,7 +748,7 @@ function startFileMonitoring(directory) {
             path: latestImage,
             filename: path.basename(latestImage),
             size: stats.size,
-            modified: stats.mtime
+            created: stats.birthtime
           };
           
           if (mainWindow) {
@@ -774,7 +774,9 @@ function startFileMonitoring(directory) {
           const totalSecondsRemaining = remaining * avgRenderTime;
           const completionTime = new Date(Date.now() + (totalSecondsRemaining * 1000));
           
-          // Format as "3:14 PM, February 15th, 2025"
+          // Format as "Monday, 3:14 PM, February 15th, 2025"
+          const dayOfWeek = completionTime.toLocaleDateString('en-US', { weekday: 'long' });
+          
           const timeStr = completionTime.toLocaleTimeString('en-US', { 
             hour: 'numeric', 
             minute: '2-digit',
@@ -787,7 +789,7 @@ function startFileMonitoring(directory) {
           const monthStr = completionTime.toLocaleDateString('en-US', { month: 'long' });
           const yearStr = completionTime.getFullYear();
           
-          estimatedCompletion = `${timeStr}, ${monthStr} ${day}${daySuffix}, ${yearStr}`;
+          estimatedCompletion = `${dayOfWeek}, ${timeStr}, ${monthStr} ${day}${daySuffix}, ${yearStr}`;
         } else {
           estimatedCompletion = 'Calculating...';
         }
@@ -834,7 +836,7 @@ function startContinuousImageMonitoring(outputDirectory) {
             path: latestImage,
             filename: path.basename(latestImage),
             size: stats.size,
-            modified: stats.mtime
+            created: stats.birthtime
           };
           
           if (mainWindow) {
@@ -1284,6 +1286,38 @@ ipcMain.handle('stop-render', async () => {
 
 ipcMain.handle('copy-to-clipboard', (event, text) => {
   clipboard.writeText(text);
+});
+
+ipcMain.handle('show-folder', async (event, folderPath) => {
+  const { shell } = require('electron');
+  try {
+    // Check if folder exists
+    if (fs.existsSync(folderPath)) {
+      // Open parent folder and select the output folder
+      shell.showItemInFolder(folderPath);
+    } else {
+      dialog.showErrorBox('Folder Not Found', `The folder does not exist:\n${folderPath}`);
+    }
+  } catch (error) {
+    console.error('Error opening folder:', error);
+    dialog.showErrorBox('Error', `Failed to open folder: ${error.message}`);
+  }
+});
+
+ipcMain.handle('open-file', async (event, filePath) => {
+  const { shell } = require('electron');
+  try {
+    // Check if file exists
+    if (fs.existsSync(filePath)) {
+      // Open the file with default application
+      shell.openPath(filePath);
+    } else {
+      dialog.showErrorBox('File Not Found', `The file does not exist:\n${filePath}`);
+    }
+  } catch (error) {
+    console.error('Error opening file:', error);
+    dialog.showErrorBox('Error', `Failed to open file: ${error.message}`);
+  }
 });
 
 ipcMain.handle('get-version', () => {
