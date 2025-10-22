@@ -40,15 +40,11 @@ var sScriptFileName = getScriptFileName();
 var oScriptFileInfo = new DzFileInfo(sScriptFileName);
 var oScriptDirectory = oScriptFileInfo.dir(); // DzDir object
 var oIrayServerProcess = new DzProcess();
-var oTaskkillIrayServerProcess = new DzProcess();
-var oTaskkillIrayWorkerProcess = new DzProcess();
-var oCleanupIrayServerDirProcess = new DzProcess();
+var oKillIrayServerAndCleanupProcess = new DzProcess();
 var oImageMagickProcess = new DzProcess();
 var aProcesses = [
 	oIrayServerProcess,
-	oTaskkillIrayServerProcess,
-	oTaskkillIrayWorkerProcess,
-	oCleanupIrayServerDirProcess,
+	oKillIrayServerAndCleanupProcess,
 	oImageMagickProcess
 ];
 var nAUTODETECT_EXPORTER_PARAMETER = -1;
@@ -71,14 +67,10 @@ oHttpHelper.setPort(sPort);
 oHttpHelper.setPath('/');
 oHttpHelper.setRequestMethod('GET');
 oIrayServerProcess.name = 'Iray Server';
-oTaskkillIrayServerProcess.name = 'Taskkill Iray Server';
-oTaskkillIrayWorkerProcess.name = 'Taskkill Iray Worker';
-oCleanupIrayServerDirProcess.name = 'Cleanup Iray Server Directory';
+oKillIrayServerAndCleanupProcess.name = 'Kill Iray Server and Cleanup';
 oImageMagickProcess.name = 'ImageMagick';
 oIrayServerProcess.logging = false;
-oTaskkillIrayServerProcess.logging = true;
-oTaskkillIrayWorkerProcess.logging = true;
-oCleanupIrayServerDirProcess.logging = true;
+oKillIrayServerAndCleanupProcess.logging = true;
 oImageMagickProcess.logging = true;
 oIrayServerProcess.workingDirectory = sIrayServerDirectory;
 oIrayServerProcess.arguments = [
@@ -87,20 +79,12 @@ oIrayServerProcess.arguments = [
 	'C:/Program Files/NVIDIA Corporation/Iray Server',
 	'--start-queue'
 ];
-oTaskkillIrayServerProcess.arguments = [
+oKillIrayServerAndCleanupProcess.arguments = [
 	'powershell.exe',
 	'-Command',
-	'Stop-Process -Name "iray_server" -Force -ErrorAction SilentlyContinue'
-];
-oTaskkillIrayWorkerProcess.arguments = [
-	'powershell.exe',
-	'-Command',
-	'Stop-Process -Name "iray_server_worker" -Force -ErrorAction SilentlyContinue'
-];
-oCleanupIrayServerDirProcess.arguments = [
-	'powershell.exe',
-	'-Command',
-	'Remove-Item -Path "' + sIrayServerDirectory + '" -Recurse -Force'
+	'Stop-Process -Name "iray_server" -Force -ErrorAction SilentlyContinue; ' +
+	'Stop-Process -Name "iray_server_worker" -Force -ErrorAction SilentlyContinue; ' +
+	'Remove-Item -Path "' + sIrayServerDirectory + '" -Recurse -Force -ErrorAction SilentlyContinue'
 ];
 oSettings.setIntValue('Connection', 0);
 oSettings.setStringValue('Server', sAddress);
@@ -155,20 +139,15 @@ function startProcess(oProcess, sProcessName, bIsContinuous) {
 
 function killIrayServer() {
 
-	log('Terminating Iray Server processes...');
+	log('Terminating Iray Server processes and cleaning up directory...');
 	
-	startProcess(oTaskkillIrayServerProcess, 'Taskkill Iray Server', false);
+	startProcess(oKillIrayServerAndCleanupProcess, 'Kill Iray Server and Cleanup', false);
 	
-	startProcess(oTaskkillIrayWorkerProcess, 'Taskkill Iray Worker', false);
-	
-	log('Iray Server processes terminated.');
+	log('Iray Server processes terminated and directory cleaned.');
 
 	while (new DzDir(sIrayServerDirectory).exists()) {
 
-		log('Cleaning Iray Server directory: ' + sIrayServerDirectory);
-
-		// Delete the entire folder
-		startProcess(oCleanupIrayServerDirProcess, 'Cleanup Iray Server Directory', false);
+		log('Waiting for Iray Server directory to be fully removed: ' + sIrayServerDirectory);
 
 		wait(1);	
 	}
