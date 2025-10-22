@@ -11,7 +11,7 @@ const execPromise = util.promisify(exec);
 // CONSTANTS AND CONFIGURATION
 // ============================================================================
 
-const APP_VERSION = '3.0.1';
+const APP_VERSION = '3.0.3';
 const LOG_SIZE_MB = 10;
 const LOG_SIZE_DAZ = '10m';
 
@@ -1416,8 +1416,9 @@ nativeTheme.on('updated', () => {
   try {
     currentTheme = detectWindowsTheme();
     if (mainWindow) {
-      const htmlContent = generateHTML();
-      mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
+      // Reload the page and apply the new theme
+      const themeClass = currentTheme === 'light' ? 'theme-light' : 'theme-dark';
+      mainWindow.webContents.executeJavaScript(`document.body.className = '${themeClass}';`);
     }
   } catch (error) {
     console.error('Error updating theme:', error);

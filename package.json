@@ -1,6 +1,6 @@
 {
   "name": "overlord",
-  "version": "3.0.1",
+  "version": "3.0.3",
   "description": "An Asset Creation Pipeline Management Tool for Daz Studio",
   "main": "overlord.js",
   "scripts": {
@@ -48,9 +48,9 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": "always",
-      "createStartMenuShortcut": "always",
-      "perMachineEnvironment": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "perMachine": true,
       "installerIcon": "images/favicon.ico",
       "uninstallerIcon": "images/favicon.ico",
       "license": "LICENSE",

@@ -85,7 +85,7 @@ async function main() {
   console.log('✓ Copied package.json (without build config)');
   
   // Copy directories
-  const dirsToCopy = ['images', 'scripts', 'templates'];
+  const dirsToCopy = ['images', 'fonts', 'scripts', 'templates'];
   for (const dir of dirsToCopy) {
     const srcDir = path.join(__dirname, dir);
     const destDir = path.join(tempDir, dir);

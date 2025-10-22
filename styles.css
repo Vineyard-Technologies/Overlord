@@ -21,7 +21,8 @@
 
 body {
   font-family: 'Grenze', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  font-size: 14px;
+  font-size: 16px;
+  line-height: 1.2; /* Tighter line height to compensate for larger font */
   overflow: hidden;
   height: 100vh;
   display: flex;
@@ -120,6 +121,7 @@ body::before {
   padding: 8px 16px;
   cursor: pointer;
   white-space: nowrap;
+  line-height: 1.2;
 }
 
 .dropdown-item:hover {
@@ -177,6 +179,7 @@ h2 {
   display: block;
   margin-bottom: 4px;
   font-weight: 500;
+  line-height: 1.2;
 }
 
 input[type="text"], 
@@ -216,6 +219,7 @@ button {
   cursor: pointer;
   font-size: 14px;
   font-family: 'Grenze', sans-serif;
+  line-height: 1;
 }
 
 button:hover { 
@@ -247,6 +251,7 @@ button:disabled {
   flex: 1;
   padding: 12px;
   font-weight: 600;
+  font-family: 'Cinzel', serif;
 }
 
 /* Progress */
