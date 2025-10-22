@@ -425,44 +425,49 @@ async function killProcessesByName(processNames) {
 
 async function stopIrayServer() {
   try {
-    const scriptPath = app.isPackaged
-      ? path.join(process.resourcesPath, 'app', 'scripts', 'stopIrayServer.ps1')
-      : path.join(__dirname, 'scripts', 'stopIrayServer.ps1');
+    console.log('Stopping Iray Server using Node.js native process management');
     
-    if (!fs.existsSync(scriptPath)) {
-      console.error(`stopIrayServer.ps1 not found at: ${normalizePathForLogging(scriptPath)}`);
-      return 0;
+    // Kill Iray Server processes
+    const irayProcessNames = ['iray_server.exe', 'iray_server_worker.exe'];
+    let killedCount = 0;
+    
+    for (const processName of irayProcessNames) {
+      try {
+        await execPromise(`taskkill /F /IM ${processName}`);
+        console.log(`Killed Iray Server process: ${processName}`);
+        killedCount++;
+      } catch (error) {
+        // Process might not be running (taskkill returns error if process not found)
+        console.log(`No ${processName} process found`);
+      }
     }
     
-    console.log('Stopping Iray Server using stopIrayServer.ps1');
+    // Clean up Iray Server directory
+    const irayServerDir = path.join(getLocalAppDataPath(), 'IrayServer');
     
-    return new Promise((resolve) => {
-      const ps = spawn('powershell.exe', [
-        '-ExecutionPolicy', 'Bypass',
-        '-File', scriptPath
-      ]);
+    if (fs.existsSync(irayServerDir)) {
+      console.log(`Cleaning Iray Server directory: ${normalizePathForLogging(irayServerDir)}`);
       
-      ps.on('close', (code) => {
-        if (code === 0) {
-          console.log('Iray Server stopped successfully via PowerShell script');
-          resolve(1);
-        } else {
-          console.warn(`stopIrayServer.ps1 returned non-zero exit code: ${code}`);
-          resolve(0);
-        }
-      });
-      
-      ps.on('error', (error) => {
-        console.error('Failed to run stopIrayServer.ps1:', error);
-        resolve(0);
-      });
-      
-      setTimeout(() => {
-        ps.kill();
-        console.error('stopIrayServer.ps1 timed out after 30 seconds');
-        resolve(0);
-      }, 30000);
-    });
+      try {
+        // Use Node.js built-in recursive removal with retry logic
+        fs.rmSync(irayServerDir, { 
+          recursive: true, 
+          force: true, 
+          maxRetries: 10, 
+          retryDelay: 1000 
+        });
+        console.log('Iray Server directory cleaned successfully');
+      } catch (error) {
+        console.warn(`Failed to clean Iray Server directory: ${error.message}`);
+        // Non-fatal - continue anyway
+      }
+    } else {
+      console.log('Iray Server directory does not exist, nothing to clean');
+    }
+    
+    console.log(`Iray Server stopped successfully (${killedCount} processes terminated)`);
+    return killedCount > 0 ? 1 : 0;
+    
   } catch (error) {
     console.error('Error stopping Iray Server:', error);
     return 0;

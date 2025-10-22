@@ -203,10 +203,17 @@ textarea {
 .input-row {
   display: flex;
   gap: 8px;
+  align-items: center;
 }
 
 .input-row input {
   flex: 1;
+}
+
+.input-row button {
+  flex-shrink: 0;
+  height: 33px;
+  min-width: 80px;
 }
 
 /* Buttons */
@@ -217,7 +224,7 @@ button {
   border: 1px solid var(--border);
   border-radius: 4px;
   cursor: pointer;
-  font-size: 14px;
+  font-size: 16px;
   font-family: 'Grenze', sans-serif;
   line-height: 1;
 }
@@ -252,6 +259,13 @@ button:disabled {
   padding: 12px;
   font-weight: 600;
   font-family: 'Cinzel', serif;
+}
+
+.btn-small {
+  height: 33px;
+  padding: 4px 12px;
+  font-size: 16px;
+  line-height: 1;
 }
 
 /* Progress */
