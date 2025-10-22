@@ -271,12 +271,12 @@ function calculateTotalImages(subjectFilepath, animationFilepaths, gearFilepaths
       const frames = 1;
       const imagesForThisAnimation = angles * frames * gearCount;
       totalImages += imagesForThisAnimation;
-      console.log(`Static render: ${angles} angles × ${frames} frame × ${gearCount} gear = ${imagesForThisAnimation} images`);
+      console.log(`Static render: ${angles} angles x ${frames} frame x ${gearCount} gear = ${imagesForThisAnimation} images`);
     } else {
       const frames = getFramesFromAnimationFile(animationFilepath.trim());
       const imagesForThisAnimation = angles * frames * gearCount;
       totalImages += imagesForThisAnimation;
-      console.log(`Animation ${normalizePathForLogging(animationFilepath)}: ${angles} angles × ${frames} frames × ${gearCount} gear = ${imagesForThisAnimation} images`);
+      console.log(`Animation ${normalizePathForLogging(animationFilepath)}: ${angles} angles x ${frames} frames x ${gearCount} gear = ${imagesForThisAnimation} images`);
     }
   }
   
@@ -442,6 +442,12 @@ async function stopIrayServer() {
       }
     }
     
+    // Wait a moment for processes to fully terminate
+    if (killedCount > 0) {
+      console.log('Waiting for processes to fully terminate...');
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+    
     // Clean up Iray Server directory
     const irayServerDir = path.join(getLocalAppDataPath(), 'IrayServer');
     
@@ -458,8 +464,8 @@ async function stopIrayServer() {
         });
         console.log('Iray Server directory cleaned successfully');
       } catch (error) {
-        console.warn(`Failed to clean Iray Server directory: ${error.message}`);
-        // Non-fatal - continue anyway
+        console.error(`Failed to clean Iray Server directory: ${error.message}`);
+        // Try to continue anyway
       }
     } else {
       console.log('Iray Server directory does not exist, nothing to clean');
@@ -572,7 +578,7 @@ class SettingsManager {
     }
     
     const cacheThreshold = parseFloat(settings.cache_db_size_threshold_gb);
-    if (isNaN(cacheThreshold) || cacheThreshold < 0.1 || cacheThreshold > 1000) {
+    if (isNaN(cacheThreshold) || cacheThreshold < 5 || cacheThreshold > 1000) {
       issues.push('Invalid cache size threshold');
     }
     

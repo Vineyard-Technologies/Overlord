@@ -94,11 +94,11 @@ function clampNumberInputs() {
     }
   }
   
-  // Clamp cache threshold (min: 10, max: 999)
+  // Clamp cache threshold (min: 5, max: 999)
   if (cacheThreshold.value) {
     let val = parseInt(cacheThreshold.value);
-    if (val < 10) {
-      cacheThreshold.value = '10';
+    if (val < 5) {
+      cacheThreshold.value = '5';
     } else if (val > 999) {
       cacheThreshold.value = '999';
     }

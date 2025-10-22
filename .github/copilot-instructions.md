@@ -183,7 +183,6 @@ All use same modal pattern with monospace text display.
 
 ### Daz Studio
 
-- Launched via PowerShell script (`scripts/stopIrayServer.ps1` for cleanup)
 - Uses DAZ Script (.dsa files in `scripts/`)
 - Headless mode when `hide_daz_instances` enabled
 - Communication via file system (no direct API)

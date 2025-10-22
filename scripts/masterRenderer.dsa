@@ -33,18 +33,22 @@ var oSettings = new DzSettings();
 var nCacheDbSizeThreshold = oScriptArgs['cache_db_size_threshold_gb'];
 var sUserName = App.getAppDataPath().split('/')[2];
 var sIrayServerDirectory = 'C:/Users/' + sUserName + '/AppData/Local/Overlord/IrayServer';
+var sIrayServerDirectoryWindowsSlashes = sIrayServerDirectory.replace(/\//g, '\\');
 var oIrayServerDirectory = new DzDir(sIrayServerDirectory);
 var sCacheFolderPath = sIrayServerDirectory + '/cache';
 var sScriptFileName = getScriptFileName();
 var oScriptFileInfo = new DzFileInfo(sScriptFileName);
 var oScriptDirectory = oScriptFileInfo.dir(); // DzDir object
-var sIrayServerStopperScript = oScriptDirectory.absoluteFilePath('stopIrayServer.ps1');
 var oIrayServerProcess = new DzProcess();
-var oIrayServerStopperProcess = new DzProcess();
+var oTaskkillIrayServerProcess = new DzProcess();
+var oTaskkillIrayWorkerProcess = new DzProcess();
+var oCleanupIrayServerDirProcess = new DzProcess();
 var oImageMagickProcess = new DzProcess();
 var aProcesses = [
 	oIrayServerProcess,
-	oIrayServerStopperProcess,
+	oTaskkillIrayServerProcess,
+	oTaskkillIrayWorkerProcess,
+	oCleanupIrayServerDirProcess,
 	oImageMagickProcess
 ];
 var nAUTODETECT_EXPORTER_PARAMETER = -1;
@@ -60,17 +64,21 @@ var sAddress = '127.0.0.1';
 var sPort = 9090;
 var sSecurity = 'http';
 var sSecureProtocol = 'https';
+
 oHttpHelper.setConnectionMode(sSecurity);
 oHttpHelper.setHost(sAddress);
 oHttpHelper.setPort(sPort);
 oHttpHelper.setPath('/');
 oHttpHelper.setRequestMethod('GET');
-
 oIrayServerProcess.name = 'Iray Server';
-oIrayServerStopperProcess.name = 'Iray Server Stopper';
+oTaskkillIrayServerProcess.name = 'Taskkill Iray Server';
+oTaskkillIrayWorkerProcess.name = 'Taskkill Iray Worker';
+oCleanupIrayServerDirProcess.name = 'Cleanup Iray Server Directory';
 oImageMagickProcess.name = 'ImageMagick';
 oIrayServerProcess.logging = false;
-oIrayServerStopperProcess.logging = true;
+oTaskkillIrayServerProcess.logging = true;
+oTaskkillIrayWorkerProcess.logging = true;
+oCleanupIrayServerDirProcess.logging = true;
 oImageMagickProcess.logging = true;
 oIrayServerProcess.workingDirectory = sIrayServerDirectory;
 oIrayServerProcess.arguments = [
@@ -79,12 +87,20 @@ oIrayServerProcess.arguments = [
 	'C:/Program Files/NVIDIA Corporation/Iray Server',
 	'--start-queue'
 ];
-oIrayServerStopperProcess.arguments = [
+oTaskkillIrayServerProcess.arguments = [
 	'powershell.exe',
-	'-ExecutionPolicy',
-	'Bypass',
-	'-File',
-	sIrayServerStopperScript
+	'-Command',
+	'Stop-Process -Name "iray_server" -Force -ErrorAction SilentlyContinue'
+];
+oTaskkillIrayWorkerProcess.arguments = [
+	'powershell.exe',
+	'-Command',
+	'Stop-Process -Name "iray_server_worker" -Force -ErrorAction SilentlyContinue'
+];
+oCleanupIrayServerDirProcess.arguments = [
+	'powershell.exe',
+	'-Command',
+	'Remove-Item -Path "' + sIrayServerDirectory + '" -Recurse -Force'
 ];
 oSettings.setIntValue('Connection', 0);
 oSettings.setStringValue('Server', sAddress);
@@ -136,10 +152,44 @@ function startProcess(oProcess, sProcessName, bIsContinuous) {
 		log('Could not start ' + sProcessName + '.');
 	}
 }
+
+function killIrayServer() {
+
+	log('Terminating Iray Server processes...');
+	
+	startProcess(oTaskkillIrayServerProcess, 'Taskkill Iray Server', false);
+	
+	startProcess(oTaskkillIrayWorkerProcess, 'Taskkill Iray Worker', false);
+	
+	log('Iray Server processes terminated.');
+
+	while (new DzDir(sIrayServerDirectory).exists()) {
+
+		log('Cleaning Iray Server directory: ' + sIrayServerDirectory);
+
+		// Delete the entire folder
+		startProcess(oCleanupIrayServerDirProcess, 'Cleanup Iray Server Directory', false);
+
+		wait(1);	
+	}
+	log('Iray Server directory has been removed: ' + sIrayServerDirectory);		
+}
 // Kill Iray server if it's running, remove the server files, then restart it
 function restartIrayServer() {
 
-	startProcess(oIrayServerStopperProcess, 'Iray Server Stopper', false);
+	killIrayServer();
+
+	// Make an empty Iray Server directory if one doesn't exist
+	if(!(new DzDir(sIrayServerDirectory).exists())) {
+
+		log('Iray Server directory does not exist. Creating: ' + sIrayServerDirectory + '...');
+		oIrayServerDirectory.mkdir(sIrayServerDirectory);
+		log('Created Iray Server directory: ' + sIrayServerDirectory);
+
+	} else {
+
+		log('Iray Server directory already exists: ' + sIrayServerDirectory);
+	}
 
 	startProcess(oIrayServerProcess, 'Iray Server', true);
 
@@ -503,17 +553,7 @@ if(!oOutputDirectory.exists()) {
 
 	log('Output directory already exists: ' + sOutputDirectory);
 }
-// Make the Iray Server directory if it doesn't exist
-if(!oIrayServerDirectory.exists()) {
 
-	log('Iray Server directory does not exist. Creating: ' + sIrayServerDirectory + '...');
-	oIrayServerDirectory.mkdir(sIrayServerDirectory);
-	log('Created Iray Server directory: ' + sIrayServerDirectory);
-
-} else {
-
-	log('Iray Server directory already exists: ' + sIrayServerDirectory);
-}
 
 var sSubjectName = getName(sSubjectFilepath);
 
@@ -629,6 +669,8 @@ if (thereAre(aAnimationFilepaths)) {
 	renderCore(sSubjectName, 'static', false, false);
 }
 
-startProcess(oIrayServerStopperProcess, 'Iray Server Stopper (final cleanup)', false);
+log('Final cleanup: stopping Iray Server...');
+
+killIrayServer();
 
 App.delayedExit();
