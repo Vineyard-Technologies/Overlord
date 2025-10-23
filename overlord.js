@@ -763,7 +763,7 @@ function startFileMonitoring(directory) {
             path: latestImage,
             filename: path.basename(latestImage),
             size: stats.size,
-            created: stats.birthtime
+            created: stats.mtime
           };
           
           if (mainWindow) {
@@ -861,7 +861,7 @@ function startContinuousImageMonitoring(outputDirectory) {
             path: latestImage,
             filename: path.basename(latestImage),
             size: stats.size,
-            created: stats.birthtime
+            created: stats.mtime
           };
           
           if (mainWindow) {
