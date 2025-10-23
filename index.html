@@ -25,7 +25,7 @@
     <div class="menu-item" onclick="toggleMenu('edit-menu')">
       Edit
       <div id="edit-menu" class="dropdown-menu">
-        <div class="dropdown-item" onclick="event.stopPropagation(); clearAllFields(); closeAllMenus();">Clear Inputs</div>
+        <div class="dropdown-item" onclick="event.stopPropagation(); clearAllFields(); closeAllMenus();">Clear All Inputs</div>
         <div class="dropdown-item" onclick="event.stopPropagation(); restoreDefaults(); closeAllMenus();">Restore Default Settings</div>
       </div>
     </div>
@@ -47,7 +47,7 @@
     <div class="left-panel">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
         <h2 style="margin: 0;">Options</h2>
-        <button onclick="clearAllFields()" class="btn-small">Clear Inputs</button>
+        <button onclick="clearAllFields()" class="btn-small">Clear All Inputs</button>
       </div>
       
       <div class="form-group">
@@ -61,32 +61,44 @@
       <div class="form-group">
         <label>Animations:</label>
         <div class="input-row">
-          <textarea id="animations" rows="3" placeholder="Paths to animation .duf files (one per line)" spellcheck="false"></textarea>
-          <button onclick="browseAnimations()">Browse</button>
+          <textarea id="animations" rows="3" placeholder="Paths to animation .duf files (one per line)" spellcheck="false" style="height: 70px; resize: vertical;"></textarea>
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <button onclick="browseAnimations()">Browse</button>
+            <button onclick="clearAnimations()">Clear</button>
+          </div>
         </div>
       </div>
       
       <div class="form-group">
         <label>Prop Animations:</label>
         <div class="input-row">
-          <textarea id="prop-animations" rows="3" placeholder="Paths to prop animation .duf files (one per line)" spellcheck="false"></textarea>
-          <button onclick="browsePropAnimations()">Browse</button>
+          <textarea id="prop-animations" rows="3" placeholder="Paths to prop animation .duf files (one per line)" spellcheck="false" style="height: 70px; resize: vertical;"></textarea>
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <button onclick="browsePropAnimations()">Browse</button>
+            <button onclick="clearPropAnimations()">Clear</button>
+          </div>
         </div>
       </div>
       
       <div class="form-group">
         <label>Gear:</label>
         <div class="input-row">
-          <textarea id="gear" rows="3" placeholder="Paths to gear .duf files (one per line)" spellcheck="false"></textarea>
-          <button onclick="browseGear()">Browse</button>
+          <textarea id="gear" rows="3" placeholder="Paths to gear .duf files (one per line)" spellcheck="false" style="height: 70px; resize: vertical;"></textarea>
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <button onclick="browseGear()">Browse</button>
+            <button onclick="clearGear()">Clear</button>
+          </div>
         </div>
       </div>
       
       <div class="form-group">
         <label>Gear Animations:</label>
         <div class="input-row">
-          <textarea id="gear-animations" rows="3" placeholder="Paths to gear animation .duf files (one per line)" spellcheck="false"></textarea>
-          <button onclick="browseGearAnimations()">Browse</button>
+          <textarea id="gear-animations" rows="3" placeholder="Paths to gear animation .duf files (one per line)" spellcheck="false" style="height: 70px; resize: vertical;"></textarea>
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <button onclick="browseGearAnimations()">Browse</button>
+            <button onclick="clearGearAnimations()">Clear</button>
+          </div>
         </div>
       </div>
       
@@ -112,18 +124,11 @@
             <label>Cache (GB):</label>
             <input type="number" id="cache-threshold" min="5" max="999" value="10" style="width: 70px;">
           </div>
-          <div style="flex: 0 0 auto;">
-            <label style="display: flex; align-items: center; margin-bottom: 0;"><input type="checkbox" id="render-shadows" checked style="margin-right: 4px;"> Render Shadows</label>
-          </div>
-          <div style="flex: 0 0 auto;">
-            <label style="display: flex; align-items: center; margin-bottom: 0;"><input type="checkbox" id="shutdown-on-finish" checked style="margin-right: 4px;"> Shutdown on Finish</label>
+          <div style="flex: 1; display: flex; gap: 12px; align-items: flex-end;">
+            <button id="start-btn" class="btn-primary" onclick="startRender()" style="flex: 1; padding: 8px 16px; font-weight: 600; font-family: 'Cinzel', serif;">Start Render</button>
+            <button id="stop-btn" class="btn-danger" onclick="stopRender()" style="flex: 1; padding: 8px 16px; font-weight: 600; font-family: 'Cinzel', serif;">Stop Render</button>
           </div>
         </div>
-      </div>
-      
-      <div class="button-group">
-        <button id="start-btn" class="btn-primary" onclick="startRender()">Start Render</button>
-        <button id="stop-btn" class="btn-danger" onclick="stopRender()">Stop Render</button>
       </div>
       
       <div class="progress-section">

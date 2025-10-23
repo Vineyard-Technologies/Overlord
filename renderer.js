@@ -25,8 +25,6 @@ function applySettings(settings) {
   document.getElementById('instances').value = settings.number_of_instances || '1';
   document.getElementById('frame-rate').value = settings.frame_rate || '30';
   document.getElementById('cache-threshold').value = settings.cache_db_size_threshold_gb || '10';
-  document.getElementById('render-shadows').checked = settings.render_shadows !== false;
-  document.getElementById('shutdown-on-finish').checked = settings.shutdown_on_finish !== false;
   console.log('Settings applied to UI');
 }
 
@@ -144,7 +142,9 @@ async function browseSubject() {
 async function browseAnimations() {
   const result = await ipcRenderer.invoke('browse-files', { filters: [{ name: 'DAZ Files', extensions: ['duf'] }] });
   if (result && result.length) {
-    document.getElementById('animations').value = result.join('\n');
+    const currentValue = document.getElementById('animations').value.trim();
+    const newFiles = currentValue ? currentValue + '\n' + result.join('\n') : result.join('\n');
+    document.getElementById('animations').value = newFiles;
     autoSave();
   }
 }
@@ -152,7 +152,9 @@ async function browseAnimations() {
 async function browsePropAnimations() {
   const result = await ipcRenderer.invoke('browse-files', { filters: [{ name: 'DAZ Files', extensions: ['duf'] }] });
   if (result && result.length) {
-    document.getElementById('prop-animations').value = result.join('\n');
+    const currentValue = document.getElementById('prop-animations').value.trim();
+    const newFiles = currentValue ? currentValue + '\n' + result.join('\n') : result.join('\n');
+    document.getElementById('prop-animations').value = newFiles;
     autoSave();
   }
 }
@@ -160,7 +162,9 @@ async function browsePropAnimations() {
 async function browseGear() {
   const result = await ipcRenderer.invoke('browse-files', { filters: [{ name: 'DAZ Files', extensions: ['duf'] }] });
   if (result && result.length) {
-    document.getElementById('gear').value = result.join('\n');
+    const currentValue = document.getElementById('gear').value.trim();
+    const newFiles = currentValue ? currentValue + '\n' + result.join('\n') : result.join('\n');
+    document.getElementById('gear').value = newFiles;
     autoSave();
   }
 }
@@ -168,7 +172,9 @@ async function browseGear() {
 async function browseGearAnimations() {
   const result = await ipcRenderer.invoke('browse-files', { filters: [{ name: 'DAZ Files', extensions: ['duf'] }] });
   if (result && result.length) {
-    document.getElementById('gear-animations').value = result.join('\n');
+    const currentValue = document.getElementById('gear-animations').value.trim();
+    const newFiles = currentValue ? currentValue + '\n' + result.join('\n') : result.join('\n');
+    document.getElementById('gear-animations').value = newFiles;
     autoSave();
   }
 }
@@ -179,6 +185,26 @@ async function browseOutputDir() {
     document.getElementById('output-dir').value = result;
     autoSave();
   }
+}
+
+function clearAnimations() {
+  document.getElementById('animations').value = '';
+  autoSave();
+}
+
+function clearPropAnimations() {
+  document.getElementById('prop-animations').value = '';
+  autoSave();
+}
+
+function clearGear() {
+  document.getElementById('gear').value = '';
+  autoSave();
+}
+
+function clearGearAnimations() {
+  document.getElementById('gear-animations').value = '';
+  autoSave();
 }
 
 async function startRender() {
@@ -293,8 +319,6 @@ function restoreDefaults() {
   document.getElementById('instances').value = '1';
   document.getElementById('frame-rate').value = '30';
   document.getElementById('cache-threshold').value = '10';
-  document.getElementById('render-shadows').checked = true;
-  document.getElementById('shutdown-on-finish').checked = true;
   autoSave();
 }
 
@@ -327,6 +351,18 @@ async function showSettings() {
             Hide Daz Studio Instance(s) when rendering
           </label>
         </div>
+        <div class="setting-item">
+          <label>
+            <input type="checkbox" id="render-shadows" onchange="onSettingChange('render_shadows', this.checked)">
+            Render Shadows
+          </label>
+        </div>
+        <div class="setting-item">
+          <label>
+            <input type="checkbox" id="shutdown-on-finish" onchange="onSettingChange('shutdown_on_finish', this.checked)">
+            Shut Down on Finish
+          </label>
+        </div>
       </div>
     </div>
   `;
@@ -340,6 +376,8 @@ async function showSettings() {
   document.getElementById('minimize-to-tray').checked = settings.minimize_to_tray || false;
   document.getElementById('start-on-startup').checked = settings.start_on_startup || false;
   document.getElementById('hide-daz-instances').checked = settings.hide_daz_instances || false;
+  document.getElementById('render-shadows').checked = settings.render_shadows !== false;
+  document.getElementById('shutdown-on-finish').checked = settings.shutdown_on_finish !== false;
 }
 
 function closeSettings() {
