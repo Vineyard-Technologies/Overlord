@@ -547,6 +547,16 @@ for (var i = 0; i != aFiles.length; i++) {
 
 print('The most recent render is ' + sMostRecentRender + ', which was created at ' +sMostRecentRenderDate);
 
+var oMostRecentRenderFileInfo = new DzFileInfo(sMostRecentRender);
+var sMostRecentRenderBaseName = oMostRecentRenderFileInfo.completeBaseName();
+var sMostRecentRenderSubjectName = sMostRecentRenderBaseName.split('_').shift();
+var bMostRecentRenderIsGear = sMostRecentRenderBaseName.search('_gear_') !== -1;
+var sMostRecentRenderGearName = bMostRecentRenderIsGear ? sMostRecentRenderBaseName.split('_')[1] : '';
+var bMostRecentRenderIsShadow = sMostRecentRenderBaseName.search('_shadow-') !== -1;
+var sMostRecentRenderAnimationName = sMostRecentRenderBaseName.split('-').shift().split('_').pop();
+var sMostRecentRenderAngle = sMostRecentRenderBaseName.split('_').pop().split('-').shift();
+var sMostRecentRenderFrame = sMostRecentRenderBaseName.split('-').pop();
+
 // Make the output directory if it doesn't exist
 if(!oOutputDirectory.exists()) {
 
