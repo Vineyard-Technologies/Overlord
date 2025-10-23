@@ -7,10 +7,6 @@ var sScriptPath = oScriptFileInfo.path();
 var nInstanceNumber = App.instanceName();
 var sOutputDirectory = oScriptArgs['image_output_dir'];
 var oOutputDirectory = new DzDir(sOutputDirectory);
-var aOutputDirectoryContents = oOutputDirectory.getFilesFromDir(['*.png'], false);
-var sMostRecentRender;
-var sMostRecentRenderDate;
-var nMostRecentRenderMilliseconds = 0;
 var sResultsDirectory = oScriptArgs['results_directory_path'];
 var oResultsDirectory = new DzDir(sResultsDirectory);
 var sSubjectFilepath = oScriptArgs['subject_file'];
@@ -37,7 +33,6 @@ var oSettings = new DzSettings();
 var nCacheDbSizeThreshold = oScriptArgs['cache_db_size_threshold_gb'];
 var sUserName = App.getAppDataPath().split('/')[2];
 var sIrayServerDirectory = 'C:/Users/' + sUserName + '/AppData/Local/Overlord/IrayServer';
-var sIrayServerDirectoryWindowsSlashes = sIrayServerDirectory.replace(/\//g, '\\');
 var oIrayServerDirectory = new DzDir(sIrayServerDirectory);
 var sCacheFolderPath = sIrayServerDirectory + '/cache';
 var sScriptFileName = getScriptFileName();
@@ -525,37 +520,9 @@ for (var nProcessCounter = 0; nProcessCounter < aProcesses.length; nProcessCount
 // Clean up any previous Iray Server instance, and start with a clean slate
 restartIrayServer();
 
-// Find the most recent render in the output directory
 
-for (var i = 0; i != aFiles.length; i++) {
-	
-	var sThisRender = aFiles[i];
-	var oThisRenderFileInfo = new DzFileInfo(sThisRender);
-	var oThisRenderDate = oThisRenderFileInfo.lastModified();
-	var sThisRenderDate = oThisRenderDate.toString();
-	var nThisRenderDateMilliseconds = oThisRenderDate.getTime();
-	
-	if (nThisRenderDateMilliseconds > nMostRecentRenderMilliseconds) {
-	
-		nMostRecentRenderMilliseconds = nThisRenderDateMilliseconds;
-		
-		sMostRecentRender = aFiles[i];
-		
-		sMostRecentRenderDate = sThisRenderDate;
-	}
-}
 
-print('The most recent render is ' + sMostRecentRender + ', which was created at ' +sMostRecentRenderDate);
 
-var oMostRecentRenderFileInfo = new DzFileInfo(sMostRecentRender);
-var sMostRecentRenderBaseName = oMostRecentRenderFileInfo.completeBaseName();
-var sMostRecentRenderSubjectName = sMostRecentRenderBaseName.split('_').shift();
-var bMostRecentRenderIsGear = sMostRecentRenderBaseName.search('_gear_') !== -1;
-var sMostRecentRenderGearName = bMostRecentRenderIsGear ? sMostRecentRenderBaseName.split('_')[1] : '';
-var bMostRecentRenderIsShadow = sMostRecentRenderBaseName.search('_shadow-') !== -1;
-var sMostRecentRenderAnimationName = sMostRecentRenderBaseName.split('-').shift().split('_').pop();
-var sMostRecentRenderAngle = sMostRecentRenderBaseName.split('_').pop().split('-').shift();
-var sMostRecentRenderFrame = sMostRecentRenderBaseName.split('-').pop();
 
 // Make the output directory if it doesn't exist
 if(!oOutputDirectory.exists()) {
@@ -569,11 +536,18 @@ if(!oOutputDirectory.exists()) {
 	log('Output directory already exists: ' + sOutputDirectory);
 }
 
-
 var sSubjectName = getName(sSubjectFilepath);
 
 if (thereAre(aAnimationFilepaths)) {
+
 	for (var nAnimationFilepathsCounter = 0; nAnimationFilepathsCounter != aAnimationFilepaths.length; nAnimationFilepathsCounter++) {
+
+		// Here, check if all X images exist for this subject and animation
+		// Find X by multiplying the number of angles by the number of frames in the animation
+		// if true, continue to the next animation
+		// if false, proceed... we know we at least need this animation loaded.
+		// Do this same check later in the frame loop and angle loop
+
 		var sAnimationFilepath = aAnimationFilepaths[nAnimationFilepathsCounter];
 		var sAnimationName = getName(sAnimationFilepath);
 
