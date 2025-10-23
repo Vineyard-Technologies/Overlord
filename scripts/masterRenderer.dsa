@@ -7,6 +7,10 @@ var sScriptPath = oScriptFileInfo.path();
 var nInstanceNumber = App.instanceName();
 var sOutputDirectory = oScriptArgs['image_output_dir'];
 var oOutputDirectory = new DzDir(sOutputDirectory);
+var aOutputDirectoryContents = oOutputDirectory.getFilesFromDir(['*.png'], false);
+var sMostRecentRender;
+var sMostRecentRenderDate;
+var nMostRecentRenderMilliseconds = 0;
 var sResultsDirectory = oScriptArgs['results_directory_path'];
 var oResultsDirectory = new DzDir(sResultsDirectory);
 var sSubjectFilepath = oScriptArgs['subject_file'];
@@ -174,7 +178,7 @@ function restartIrayServer() {
 
 	// https://github.com/Vineyard-Technologies/Overlord/issues/31
 	wait(5);
-	
+
 }
 // Check if an image exists and isn't truncated
 function isValidImage(sFilePath) {
@@ -490,6 +494,8 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 	}
 }
 
+App.enableMultiThreading(true);
+
 // Setup process logging for all processes
 for (var nProcessCounter = 0; nProcessCounter < aProcesses.length; nProcessCounter++) {
 
@@ -516,10 +522,30 @@ for (var nProcessCounter = 0; nProcessCounter < aProcesses.length; nProcessCount
 	}
 }
 
-App.enableMultiThreading(true);
-
 // Clean up any previous Iray Server instance, and start with a clean slate
 restartIrayServer();
+
+// Find the most recent render in the output directory
+
+for (var i = 0; i != aFiles.length; i++) {
+	
+	var sThisRender = aFiles[i];
+	var oThisRenderFileInfo = new DzFileInfo(sThisRender);
+	var oThisRenderDate = oThisRenderFileInfo.lastModified();
+	var sThisRenderDate = oThisRenderDate.toString();
+	var nThisRenderDateMilliseconds = oThisRenderDate.getTime();
+	
+	if (nThisRenderDateMilliseconds > nMostRecentRenderMilliseconds) {
+	
+		nMostRecentRenderMilliseconds = nThisRenderDateMilliseconds;
+		
+		sMostRecentRender = aFiles[i];
+		
+		sMostRecentRenderDate = sThisRenderDate;
+	}
+}
+
+print('The most recent render is ' + sMostRecentRender + ', which was created at ' +sMostRecentRenderDate);
 
 // Make the output directory if it doesn't exist
 if(!oOutputDirectory.exists()) {
