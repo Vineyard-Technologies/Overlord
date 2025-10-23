@@ -29,6 +29,9 @@ function applySettings(settings) {
 }
 
 function getSettings() {
+  const renderShadowsEl = document.getElementById('render-shadows');
+  const shutdownOnFinishEl = document.getElementById('shutdown-on-finish');
+  
   return {
     subject: document.getElementById('subject').value,
     animations: document.getElementById('animations').value.split('\n').filter(s => s.trim()),
@@ -39,8 +42,8 @@ function getSettings() {
     number_of_instances: document.getElementById('instances').value,
     frame_rate: document.getElementById('frame-rate').value,
     cache_db_size_threshold_gb: document.getElementById('cache-threshold').value,
-    render_shadows: document.getElementById('render-shadows').checked,
-    shutdown_on_finish: document.getElementById('shutdown-on-finish').checked,
+    render_shadows: renderShadowsEl ? renderShadowsEl.checked : (currentSettings.render_shadows !== false),
+    shutdown_on_finish: shutdownOnFinishEl ? shutdownOnFinishEl.checked : (currentSettings.shutdown_on_finish !== false),
     hide_daz_instances: currentSettings.hide_daz_instances !== false,
     minimize_to_tray: currentSettings.minimize_to_tray !== false,
     start_on_startup: currentSettings.start_on_startup !== false,
@@ -62,6 +65,7 @@ async function saveSettings() {
 // Auto-save debounced
 let saveTimeout;
 function autoSave() {
+  console.log('autoSave() called - will save in 500ms');
   clearTimeout(saveTimeout);
   saveTimeout = setTimeout(saveSettings, 500);
 }
@@ -111,10 +115,13 @@ window.addEventListener('DOMContentLoaded', () => {
   loadSettings();
   
   // Attach auto-save event listeners
-  document.querySelectorAll('input, textarea').forEach(el => {
+  const inputs = document.querySelectorAll('input, textarea');
+  console.log(`Found ${inputs.length} input/textarea elements to attach listeners to`);
+  inputs.forEach(el => {
     el.addEventListener('change', autoSave);
     el.addEventListener('input', autoSave);
     el.addEventListener('blur', autoSave);
+    console.log(`Attached listeners to: ${el.id || el.name || el.tagName}`);
   });
   
   // Add clamping for number inputs
@@ -128,7 +135,7 @@ window.addEventListener('DOMContentLoaded', () => {
     }
   });
   
-  console.log('Event listeners attached');
+  console.log('Event listeners attached successfully');
 });
 
 async function browseSubject() {
@@ -394,7 +401,7 @@ async function onSettingChange(key, value) {
   // Save setting immediately
   const settings = await window.ipcRenderer.invoke('load-settings');
   settings[key] = value;
-  window.ipcRenderer.send('save-settings', settings);
+  await window.ipcRenderer.invoke('save-settings', settings);
   
   // If it's the startup setting, also update Windows registry
   if (key === 'start_on_startup') {
