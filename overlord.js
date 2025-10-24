@@ -593,10 +593,6 @@ const settingsManager = new SettingsManager();
 // ============================================================================
 
 async function startRender(settings) {
-  if (isRendering) {
-    throw new Error('Render already in progress');
-  }
-  
   // Validate input files exist
   const filesToValidate = [];
   
@@ -1367,6 +1363,13 @@ ipcMain.handle('browse-directory', async () => {
 
 ipcMain.handle('start-render', async (event, settings) => {
   try {
+    // If already rendering, stop first then start new render
+    if (isRendering) {
+      console.log('Render in progress, stopping current render before starting new one...');
+      await stopRender();
+      // Give a brief moment for cleanup
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
     return await startRender(settings);
   } catch (error) {
     console.error('Render error:', error);
