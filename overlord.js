@@ -11,7 +11,7 @@ const execPromise = util.promisify(exec);
 // CONSTANTS AND CONFIGURATION
 // ============================================================================
 
-const APP_VERSION = '3.0.3';
+const APP_VERSION = '3.0.4';
 const LOG_SIZE_MB = 10;
 const LOG_SIZE_DAZ = '10m';
 
@@ -596,6 +596,69 @@ async function startRender(settings) {
   if (isRendering) {
     throw new Error('Render already in progress');
   }
+  
+  // Validate input files exist
+  const filesToValidate = [];
+  
+  // Subject file (required)
+  if (!settings.subject || !settings.subject.trim()) {
+    throw new Error('Subject file is required');
+  }
+  filesToValidate.push({ path: settings.subject, name: 'Subject file' });
+  
+  // Animation files (at least one required)
+  if (!settings.animations || settings.animations.length === 0) {
+    throw new Error('At least one animation file is required');
+  }
+  settings.animations.forEach((anim, idx) => {
+    if (anim && anim.trim() && anim !== 'static') {
+      filesToValidate.push({ path: anim, name: `Animation file ${idx + 1}` });
+    }
+  });
+  
+  // Optional prop animations
+  if (settings.prop_animations) {
+    settings.prop_animations.forEach((propAnim, idx) => {
+      if (propAnim && propAnim.trim()) {
+        filesToValidate.push({ path: propAnim, name: `Prop animation file ${idx + 1}` });
+      }
+    });
+  }
+  
+  // Optional gear files
+  if (settings.gear) {
+    settings.gear.forEach((gear, idx) => {
+      if (gear && gear.trim()) {
+        filesToValidate.push({ path: gear, name: `Gear file ${idx + 1}` });
+      }
+    });
+  }
+  
+  // Optional gear animations
+  if (settings.gear_animations) {
+    settings.gear_animations.forEach((gearAnim, idx) => {
+      if (gearAnim && gearAnim.trim()) {
+        filesToValidate.push({ path: gearAnim, name: `Gear animation file ${idx + 1}` });
+      }
+    });
+  }
+  
+  // Check all files exist
+  const missingFiles = [];
+  for (const file of filesToValidate) {
+    if (!fs.existsSync(file.path)) {
+      missingFiles.push(`${file.name}: ${file.path}`);
+      console.warn(`Missing file: ${file.name} at ${normalizePathForLogging(file.path)}`);
+    }
+  }
+  
+  if (missingFiles.length > 0) {
+    const errorMsg = `The following input files do not exist:\n\n${missingFiles.join('\n')}`;
+    console.error('Input file validation failed:', errorMsg);
+    throw new Error(errorMsg);
+  }
+  
+  console.log(`Input file validation passed: ${filesToValidate.length} file(s) verified`);
   
   isRendering = true;
   renderStartTime = Date.now();
