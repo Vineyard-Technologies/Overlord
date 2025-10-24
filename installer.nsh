@@ -1,6 +1,13 @@
 ; Custom NSIS installer script for Overlord
 ; This script adds checkboxes for desktop shortcut and PATH environment variable
 
+!undef MUI_WELCOMEFINISHPAGE_BITMAP
+!define MUI_WELCOMEFINISHPAGE_BITMAP "${__FILEDIR__}\images\welcomeFinishImage.bmp"
+
+!define MUI_HEADERIMAGE
+!define MUI_HEADERIMAGE_BITMAP "${__FILEDIR__}\images\headerInstallImage.bmp"
+!define MUI_HEADERIMAGE_RIGHT
+
 !macro customHeader
   !system "echo Overlord Custom NSIS Script"
 !macroend
