@@ -2,7 +2,6 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const archiver = require('archiver');
-const { Worker } = require('worker_threads');
 
 /**
  * Parse a filename to extract the components needed for organization.
@@ -67,7 +66,7 @@ async function createZipArchive(baseName, files, outputPath) {
     // Create a write stream for the zip file
     const output = fs.createWriteStream(zipPath);
     const archive = archiver('zip', {
-      zlib: { level: 9 } // Maximum compression
+      store: true // No compression - maximum speed
     });
     
     output.on('close', () => {
@@ -102,8 +101,7 @@ async function organizeFiles(sourceDir, outputBaseDir, maxConcurrent = null) {
   const outputPath = path.join(path.resolve(outputBaseDir), 'ConstructZips');
   
   if (!fs.existsSync(sourcePath)) {
-    console.log(`Source directory does not exist: ${sourceDir}`);
-    return;
+    throw new Error(`Source directory does not exist: ${sourceDir}`);
   }
   
   // Group files by their base name (without sequence number)
@@ -181,15 +179,34 @@ async function organizeFiles(sourceDir, outputBaseDir, maxConcurrent = null) {
  * Main function to organize files.
  */
 async function main() {
-  // Get the current user's Downloads folder dynamically
-  const downloadsPath = path.join(os.homedir(), 'Downloads');
-  const sourceDirectory = path.join(downloadsPath, 'output');
+  // Get source directory from command line argument or environment variable
+  let sourceDirectory = process.argv[2] || process.env.OUTPUT_DIR;
+  
+  // Get destination directory from command line argument (if different from source)
+  let destinationDirectory = process.argv[3];
+  
+  // Fallback to Downloads/output if no source directory specified
+  if (!sourceDirectory) {
+    const downloadsPath = path.join(os.homedir(), 'Downloads');
+    sourceDirectory = path.join(downloadsPath, 'output');
+  }
+  
+  // Resolve to absolute paths
+  sourceDirectory = path.resolve(sourceDirectory);
+  
+  // If no destination specified, use source directory
+  if (!destinationDirectory) {
+    destinationDirectory = sourceDirectory;
+  } else {
+    destinationDirectory = path.resolve(destinationDirectory);
+  }
   
   console.log('Starting file organization...');
   console.log(`Source directory: ${sourceDirectory}`);
+  console.log(`Destination directory: ${destinationDirectory}`);
   
   try {
-    await organizeFiles(sourceDirectory, sourceDirectory);
+    await organizeFiles(sourceDirectory, destinationDirectory);
     console.log('File organization complete!');
   } catch (error) {
     console.error('Error during file organization:', error);

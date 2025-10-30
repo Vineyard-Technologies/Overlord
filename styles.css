@@ -227,6 +227,7 @@ button {
   font-size: 16px;
   font-family: 'Grenze', sans-serif;
   line-height: 1;
+  white-space: nowrap;
 }
 
 button:hover { 

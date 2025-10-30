@@ -18,7 +18,7 @@
 
 ; Welcome page customization
 !define MUI_WELCOMEPAGE_TITLE "Welcome to Overlord Setup"
-!define MUI_WELCOMEPAGE_TEXT "This wizard will guide you through the installation of Overlord.$\r$\n$\r$\nOverlord is an asset creation pipeline management tool for DAZ Studio, designed to streamline your rendering workflows.$\r$\n$\r$\nIt is recommended that you close all other applications before starting Setup. This will make it possible to update relevant system files without having to reboot your computer.$\r$\n$\r$\nClick Next to continue."
+!define MUI_WELCOMEPAGE_TEXT "This wizard will guide you through the uninstallation of Overlord.$\r$\n$\r$\nIt is recommended that you close all other applications. This will make it possible to update relevant system files without having to reboot your computer.$\r$\n$\r$\nClick Next to continue."
 
 ; License page customization
 !define MUI_LICENSEPAGE_TEXT_TOP "Please review the license agreement before installing Overlord. Press Page Down to see the rest of the agreement."

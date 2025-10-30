@@ -749,6 +749,11 @@ ipcRenderer.on('render-progress', (event, progressData) => {
   document.getElementById('total-images').textContent = progressData.renderedCount;
   document.getElementById('images-remaining').textContent = progressData.remaining;
   document.getElementById('est-completion').textContent = progressData.estimatedCompletion;
+  
+  // Re-enable Start Render button when render is complete
+  if (progressData.isComplete) {
+    document.getElementById('start-btn').disabled = false;
+  }
 });
 
 // Listen for no images found event
@@ -777,5 +782,149 @@ function formatSize(bytes) {
     return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
   } else {
     return (bytes / (1024 * 1024 * 1024)).toFixed(1) + ' GB';
+  }
+}
+
+// ============================================================================
+// CONSTRUCT EXPORTER
+// ============================================================================
+
+function showConstructExporter() {
+  const modal = document.createElement('div');
+  modal.id = 'construct-exporter-modal';
+  modal.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+  `;
+  
+  modal.innerHTML = `
+    <div style="background: var(--bg); border: 1px solid var(--border); border-radius: 8px; width: 700px; max-width: 90%; max-height: 80vh; display: flex; flex-direction: column; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);">
+      <div style="padding: 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center;">
+        <h2 style="margin: 0;">Construct Exporter</h2>
+        <button class="close-btn" onclick="closeConstructExporter()" style="font-size: 28px; border: none; background: none; color: var(--fg); cursor: pointer; padding: 0; width: 32px; height: 32px; line-height: 28px;">&times;</button>
+      </div>
+      
+      <div id="exporter-content" style="padding: 20px; flex: 1; overflow-y: auto;">
+        <p style="margin: 0 0 20px 0; font-size: 16px;">Run the Construct Exporter on all files in the output folder?</p>
+        <p style="margin: 0 0 12px 0; font-size: 14px; opacity: 0.8; font-family: 'Consolas', 'Courier New', monospace;">Source folder: <span id="exporter-output-path"></span></p>
+        
+        <div style="margin-bottom: 20px;">
+          <label style="display: block; margin-bottom: 6px; font-size: 14px;">Export Destination:</label>
+          <div style="display: flex; gap: 8px;">
+            <input type="text" id="exporter-destination-path" placeholder="Choose export destination folder" spellcheck="false" style="flex: 1; padding: 8px; background: var(--entry-bg); color: var(--entry-fg); border: 1px solid var(--border); border-radius: 4px; font-family: 'Consolas', 'Courier New', monospace; font-size: 13px;">
+            <button onclick="browseExportDestination()" style="padding: 8px 16px; white-space: nowrap;">Browse</button>
+          </div>
+        </div>
+        
+        <div id="exporter-log-container" style="display: none; margin-top: 20px; padding: 12px; background: var(--entry-bg); border: 1px solid var(--border); border-radius: 4px; font-family: 'Consolas', 'Courier New', monospace; font-size: 13px; max-height: 400px; overflow-y: auto; white-space: pre-wrap; word-break: break-word;"></div>
+        
+        <div id="exporter-progress" style="display: none; margin-top: 20px; text-align: center; font-style: italic; opacity: 0.8; font-size: 15px;">Running exporter...</div>
+      </div>
+      
+      <div style="padding: 20px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 12px;">
+        <button id="exporter-yes-btn" onclick="runConstructExporter()" class="btn-primary" style="padding: 10px 24px;">Yes</button>
+      </div>
+    </div>
+  `;
+  
+  document.body.appendChild(modal);
+  
+  // Populate output path
+  const settings = getSettings();
+  const outputDir = settings.output_directory || '-';
+  document.getElementById('exporter-output-path').textContent = outputDir;
+  
+  // Set default destination to same as source
+  document.getElementById('exporter-destination-path').value = outputDir;
+  
+  // Close on background click
+  modal.onclick = (e) => {
+    if (e.target === modal) {
+      closeConstructExporter();
+    }
+  };
+}
+
+async function browseExportDestination() {
+  try {
+    const directory = await ipcRenderer.invoke('browse-directory');
+    if (directory) {
+      document.getElementById('exporter-destination-path').value = directory;
+    }
+  } catch (error) {
+    console.error('Error browsing for export destination:', error);
+  }
+}
+
+function closeConstructExporter() {
+  const modal = document.getElementById('construct-exporter-modal');
+  if (modal) {
+    modal.remove();
+  }
+}
+
+async function runConstructExporter() {
+  const yesBtn = document.getElementById('exporter-yes-btn');
+  const logContainer = document.getElementById('exporter-log-container');
+  const progressDiv = document.getElementById('exporter-progress');
+  const destinationPath = document.getElementById('exporter-destination-path').value;
+  
+  // Validate destination path
+  if (!destinationPath || !destinationPath.trim()) {
+    alert('Please select an export destination folder.');
+    return;
+  }
+  
+  // Disable the Yes button and show progress
+  yesBtn.disabled = true;
+  yesBtn.textContent = 'Running...';
+  logContainer.style.display = 'block';
+  progressDiv.style.display = 'block';
+  logContainer.textContent = 'Starting Construct Exporter...\n\n';
+  
+  try {
+    // Listen for output updates
+    const outputListener = (event, text) => {
+      logContainer.textContent += text;
+      // Auto-scroll to bottom
+      logContainer.scrollTop = logContainer.scrollHeight;
+    };
+    
+    ipcRenderer.on('construct-exporter-output', outputListener);
+    
+    // Run the exporter with destination path
+    const result = await ipcRenderer.invoke('run-construct-exporter', destinationPath);
+    
+    // Remove the listener
+    ipcRenderer.removeListener('construct-exporter-output', outputListener);
+    
+    // Update UI
+    progressDiv.style.display = 'none';
+    logContainer.textContent += '\n\n✓ Export completed successfully!';
+    yesBtn.textContent = 'Done';
+    yesBtn.disabled = false;
+    yesBtn.onclick = closeConstructExporter;
+    
+    // Change button text to "Close"
+    setTimeout(() => {
+      yesBtn.textContent = 'Close';
+    }, 100);
+    
+  } catch (error) {
+    console.error('Construct Exporter error:', error);
+    
+    progressDiv.style.display = 'none';
+    logContainer.textContent += '\n\n✗ Export failed: ' + error.message;
+    yesBtn.textContent = 'Close';
+    yesBtn.disabled = false;
+    yesBtn.onclick = closeConstructExporter;
   }
 }

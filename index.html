@@ -29,6 +29,12 @@
         <div class="dropdown-item" onclick="event.stopPropagation(); restoreDefaults(); closeAllMenus();">Restore Default Settings</div>
       </div>
     </div>
+    <div class="menu-item" onclick="toggleMenu('exporters-menu')">
+      Exporters
+      <div id="exporters-menu" class="dropdown-menu">
+        <div class="dropdown-item" onclick="event.stopPropagation(); showConstructExporter(); closeAllMenus();">Run Construct Exporter...</div>
+      </div>
+    </div>
     <div class="menu-item" onclick="toggleMenu('help-menu')">
       Help
       <div id="help-menu" class="dropdown-menu">
@@ -125,8 +131,8 @@
             <input type="number" id="cache-threshold" min="5" max="999" value="10" style="width: 70px;">
           </div>
           <div style="flex: 1; display: flex; gap: 12px; align-items: flex-end;">
-            <button id="start-btn" class="btn-primary" onclick="startRender()" style="flex: 1; padding: 8px 16px; font-weight: 600; font-family: 'Cinzel', serif;">Start Render</button>
-            <button id="stop-btn" class="btn-danger" onclick="stopRender()" style="flex: 1; padding: 8px 16px; font-weight: 600; font-family: 'Cinzel', serif;">Stop Render</button>
+            <button id="start-btn" class="btn-primary" onclick="startRender()" style="flex: 1; padding: 8px 16px; font-weight: 600; font-family: 'Cinzel', serif; white-space: nowrap; min-width: 120px;">Start Render</button>
+            <button id="stop-btn" class="btn-danger" onclick="stopRender()" style="flex: 1; padding: 8px 16px; font-weight: 600; font-family: 'Cinzel', serif; white-space: nowrap; min-width: 120px;">Stop Render</button>
           </div>
         </div>
       </div>

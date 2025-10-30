@@ -877,7 +877,8 @@ function startFileMonitoring(directory) {
         sessionCount: Math.max(0, renderedCount - sessionStartImageCount),
         remaining: remaining,
         progressPercent: progressPercent,
-        estimatedCompletion: estimatedCompletion
+        estimatedCompletion: estimatedCompletion,
+        isComplete: remaining === 0 && renderedCount >= initialTotalImages
       });
     }
   }, 2000);
@@ -1419,6 +1420,105 @@ ipcMain.handle('open-file', async (event, filePath) => {
 
 ipcMain.handle('get-version', () => {
   return getDisplayVersion();
+});
+
+ipcMain.handle('run-construct-exporter', async (event, destinationPath) => {
+  return new Promise((resolve, reject) => {
+    try {
+      const settings = settingsManager.loadSettings();
+      const outputDirectory = settings.output_directory || getDefaultOutputDirectory();
+      
+      // Use provided destination path, or default to output directory
+      const exportDestination = destinationPath || outputDirectory;
+      
+      // Path to constructZipper.js
+      const zipperScriptPath = resourcePath(path.join('scripts', 'constructZipper.js'));
+      
+      if (!fs.existsSync(zipperScriptPath)) {
+        reject(new Error(`Construct Zipper script not found: ${zipperScriptPath}`));
+        return;
+      }
+      
+      console.log(`Running Construct Exporter on source directory: ${normalizePathForLogging(outputDirectory)}`);
+      console.log(`Export destination: ${normalizePathForLogging(exportDestination)}`);
+      console.log(`Script path: ${normalizePathForLogging(zipperScriptPath)}`);
+      
+      // Use Node.js executable instead of Electron
+      // In production, use the node.exe bundled with Electron
+      const nodeExecutable = process.platform === 'win32' 
+        ? path.join(path.dirname(process.execPath), 'node.exe')
+        : process.execPath.replace(/electron$/i, 'node');
+      
+      // Check if bundled node exists, otherwise use system node
+      const nodePath = fs.existsSync(nodeExecutable) ? nodeExecutable : 'node';
+      
+      console.log(`Using Node executable: ${nodePath}`);
+      
+      // Spawn Node.js process to run the script
+      // Build command string with properly quoted paths for Windows
+      const command = `"${nodePath}" "${zipperScriptPath}" "${outputDirectory}" "${exportDestination}"`;
+      
+      console.log(`Running command: ${command}`);
+      
+      const nodeProcess = spawn(command, [], {
+        cwd: path.dirname(zipperScriptPath),
+        env: { ...process.env },
+        shell: true
+      });
+      
+      let output = '';
+      let errorOutput = '';
+      
+      // Capture stdout
+      nodeProcess.stdout.on('data', (data) => {
+        const text = data.toString();
+        output += text;
+        console.log('[Construct Exporter]', text.trim());
+        
+        // Send progress updates to renderer
+        if (mainWindow) {
+          mainWindow.webContents.send('construct-exporter-output', text);
+        }
+      });
+      
+      // Capture stderr
+      nodeProcess.stderr.on('data', (data) => {
+        const text = data.toString();
+        errorOutput += text;
+        console.error('[Construct Exporter Error]', text.trim());
+        
+        // Send error output to renderer as well
+        if (mainWindow) {
+          mainWindow.webContents.send('construct-exporter-output', text);
+        }
+      });
+      
+      // Handle process exit
+      nodeProcess.on('close', (code) => {
+        if (code === 0) {
+          console.log('Construct Exporter completed successfully');
+          resolve({
+            success: true,
+            output: output,
+            message: 'Construct Exporter completed successfully'
+          });
+        } else {
+          console.error(`Construct Exporter exited with code ${code}`);
+          reject(new Error(`Construct Exporter failed with exit code ${code}\n\n${errorOutput || output}`));
+        }
+      });
+      
+      // Handle process errors
+      nodeProcess.on('error', (error) => {
+        console.error('Failed to start Construct Exporter:', error);
+        reject(new Error(`Failed to start Construct Exporter: ${error.message}`));
+      });
+      
+    } catch (error) {
+      console.error('Error running Construct Exporter:', error);
+      reject(error);
+    }
+  });
 });
 
 // ============================================================================
