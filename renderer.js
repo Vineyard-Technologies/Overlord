@@ -1,4 +1,5 @@
 const { ipcRenderer } = require('electron');
+const path = require('path');
 
 let currentImagePath = null;
 let currentSettings = {};
@@ -842,8 +843,9 @@ function showConstructExporter() {
   const outputDir = settings.output_directory || '-';
   document.getElementById('exporter-output-path').textContent = outputDir;
   
-  // Set default destination to same as source
-  document.getElementById('exporter-destination-path').value = outputDir;
+  // Set destination to saved export_destination or default to output directory
+  const exportDest = currentSettings.export_destination || outputDir;
+  document.getElementById('exporter-destination-path').value = exportDest;
   
   // Close on background click
   modal.onclick = (e) => {
@@ -858,6 +860,11 @@ async function browseExportDestination() {
     const directory = await ipcRenderer.invoke('browse-directory');
     if (directory) {
       document.getElementById('exporter-destination-path').value = directory;
+      
+      // Save the export destination to settings
+      currentSettings.export_destination = directory;
+      currentSettings.last_directories.export_destination = path.dirname(directory);
+      await ipcRenderer.invoke('save-settings', currentSettings);
     }
   } catch (error) {
     console.error('Error browsing for export destination:', error);

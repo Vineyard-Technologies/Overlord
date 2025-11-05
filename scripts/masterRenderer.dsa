@@ -172,7 +172,7 @@ function restartIrayServer() {
 	startProcess(oIrayServerProcess, 'Iray Server', true);
 
 	// https://github.com/Vineyard-Technologies/Overlord/issues/31
-	wait(5);
+	wait(10);
 
 }
 // Check if an image exists and isn't truncated
@@ -359,7 +359,7 @@ function renderCore(sSubjectName, sAnimationName, bIsGear, bIsShadow) {
 				if (bIsGear) oIrayOptions.renderToCanvases = true;
 			}
 			// Wait for everything else to finish first, specifically the mesh smoother
-			// while (backgroundProgressIsActive()) processEvents();
+			while (backgroundProgressIsActive()) processEvents();
 
 			var oCacheDbFile = new DzFileInfo(sCacheFolderPath + '/cache.db');
 			var nCacheDbSize = oCacheDbFile.size();

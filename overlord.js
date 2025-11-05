@@ -11,7 +11,7 @@ const execPromise = util.promisify(exec);
 // CONSTANTS AND CONFIGURATION
 // ============================================================================
 
-const APP_VERSION = '3.0.4';
+const APP_VERSION = '3.0.5';
 const LOG_SIZE_MB = 10;
 const LOG_SIZE_DAZ = '10m';
 
@@ -510,6 +510,7 @@ class SettingsManager {
       gear: [],
       gear_animations: [],
       output_directory: getDefaultOutputDirectory(),
+      export_destination: getDefaultOutputDirectory(),
       number_of_instances: '1',
       frame_rate: '30',
       render_shadows: true,
@@ -521,6 +522,7 @@ class SettingsManager {
       last_directories: {
         subject: '', animations: '', prop_animations: '',
         gear: '', gear_animations: '', output_directory: '',
+        export_destination: '',
         template: '', general_file: '', general_folder: ''
       }
     };

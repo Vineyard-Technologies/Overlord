@@ -1,6 +1,6 @@
 {
   "name": "overlord",
-  "version": "3.0.4",
+  "version": "3.0.5",
   "description": "An Asset Creation Pipeline Management Tool for Daz Studio",
   "main": "overlord.js",
   "scripts": {
