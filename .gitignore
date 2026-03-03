@@ -20,6 +20,12 @@ release/
 build/
 build-temp/
 
+# TypeScript compiled output (source is in src/)
+/overlord.js
+/renderer.js
+/minify-build.js
+/scripts/constructZipper.js
+
 # Electron build artifacts
 *.exe
 *.dmg

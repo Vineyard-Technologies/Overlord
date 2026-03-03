@@ -7,25 +7,35 @@ Overlord is an Electron-based desktop application that manages automated renderi
 ### Technology Stack
 
 - **Framework**: Electron 38.3.0
-- **Language**: JavaScript (Node.js)
-- **Architecture**: Single-file application (`overlord.js`)
-- **UI**: HTML/CSS embedded via template literals and data URLs
+- **Language**: TypeScript (compiled to JavaScript for Node.js)
+- **Architecture**: Single-file application (`src/overlord.ts` → `overlord.js`)
+- **UI**: HTML/CSS with separate renderer (`src/renderer.ts` → `renderer.js`)
 - **IPC**: Electron's ipcMain/ipcRenderer for main-renderer communication
 - **External Tools**: Daz Studio 4.x, NVIDIA Iray Server, PowerShell scripts
-- **Build**: electron-builder for Windows executables
+- **Build**: TypeScript compiler + electron-builder for Windows executables
 
 ### Key Dependencies
 
 - `electron`: Desktop application framework
+- `typescript`: TypeScript compiler (dev)
+- `@types/node`, `@types/archiver`: Type definitions (dev)
 - `winreg`: Windows registry access for startup configuration
 - `archiver`: Creating zip archives for rendered assets
 - `fs`, `path`, `child_process`: Node.js core modules for file/process management
+
+### TypeScript Compilation
+
+- Source files live in `src/` directory
+- TypeScript compiles to root-level `.js` files (matching Electron's expected paths)
+- Compiled `.js` files are gitignored — only `.ts` sources are committed
+- Run `npm run compile` to build, or `npm run compile:watch` for development
+- `npm start` and `npm run dev` automatically compile before launching
 
 ## Architecture Principles
 
 ### Single-File Design
 
-**CRITICAL**: The main application (`overlord.js`) is intentionally a single file (~2500 lines). This is a design choice for simplicity and portability.
+**CRITICAL**: The main application (`src/overlord.ts`) is intentionally a single file. This is a design choice for simplicity and portability.
 
 - **Never** suggest splitting into multiple modules
 - All HTML, CSS, and renderer JavaScript must be inline using template literals
@@ -63,13 +73,17 @@ const result = await ipcRenderer.invoke('channel-name', arg1, arg2);
 
 ## Coding Guidelines
 
-### JavaScript Style
+### TypeScript Style
 
-- Use modern ES6+ syntax (async/await, arrow functions, destructuring)
+- Use modern ES2022+ syntax (async/await, arrow functions, destructuring)
 - Prefer `const` over `let`, avoid `var`
 - Use template literals for string concatenation
 - Use async/await instead of Promise chains where appropriate
 - Keep functions focused and modular despite single-file architecture
+- Use proper type annotations on function parameters and return types
+- Define interfaces for data structures and IPC payloads
+- Use `as` type assertions sparingly — prefer type guards
+- Use `import`/`export` syntax (compiled to CommonJS `require`)
 
 ### Error Handling
 

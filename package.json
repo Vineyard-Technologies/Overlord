@@ -4,11 +4,15 @@
   "description": "An Asset Creation Pipeline Management Tool for Daz Studio",
   "main": "overlord.js",
   "scripts": {
+    "compile": "tsc",
+    "compile:watch": "tsc --watch",
+    "prestart": "tsc",
     "start": "electron overlord.js",
+    "predev": "tsc",
     "dev": "electron overlord.js --dev",
     "clean": "node -e \"const fs = require('fs'); const path = require('path'); const distPath = path.join(__dirname, 'dist'); if (fs.existsSync(distPath)) { fs.rmSync(distPath, { recursive: true, force: true }); console.log('Cleaned dist folder'); }\"",
     "minify": "node minify-build.js",
-    "prebuild": "npm run clean && npm run minify",
+    "prebuild": "npm run clean && npm run compile && npm run minify",
     "build": "electron-builder --win --x64 --config.directories.app=build-temp",
     "postbuild": "node -e \"const fs = require('fs'); const path = require('path'); const pkg = require('./package.json'); const version = pkg.version.replace(/\\./g, '-'); const distPath = path.join(__dirname, 'dist'); const tempPath = path.join(__dirname, 'build-temp'); const oldPath = path.join(distPath, `OverlordInstaller${pkg.version}.exe`); const newPath = path.join(distPath, `OverlordInstaller${version}.exe`); if (fs.existsSync(oldPath)) { fs.renameSync(oldPath, newPath); console.log(`Renamed to OverlordInstaller${version}.exe`); } const items = fs.readdirSync(distPath); items.forEach(item => { const itemPath = path.join(distPath, item); if (item !== `OverlordInstaller${version}.exe`) { const stat = fs.statSync(itemPath); if (stat.isDirectory()) { fs.rmSync(itemPath, { recursive: true, force: true }); } else { fs.unlinkSync(itemPath); } console.log(`Deleted: ${item}`); } }); if (fs.existsSync(tempPath)) { fs.rmSync(tempPath, { recursive: true, force: true }); console.log('Cleaned build-temp folder'); } console.log('Build complete! Installer ready.')\"",
     "build:dir": "electron-builder --win --x64 --dir",
@@ -73,9 +77,12 @@
     ]
   },
   "devDependencies": {
+    "@types/archiver": "^6.0.3",
+    "@types/node": "^22.13.0",
     "electron": "^38.3.0",
     "electron-builder": "^26.0.12",
-    "terser": "^5.44.0"
+    "terser": "^5.44.0",
+    "typescript": "^5.7.3"
   },
   "dependencies": {
     "archiver": "^7.0.1",
