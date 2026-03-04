@@ -77,12 +77,12 @@
     ]
   },
   "devDependencies": {
-    "@types/archiver": "^6.0.3",
-    "@types/node": "^22.13.0",
-    "electron": "^38.3.0",
-    "electron-builder": "^26.0.12",
-    "terser": "^5.44.0",
-    "typescript": "^5.7.3"
+    "@types/archiver": "^7.0.0",
+    "@types/node": "^25.3.3",
+    "electron": "^40.6.1",
+    "electron-builder": "^26.8.1",
+    "terser": "^5.46.0",
+    "typescript": "^5.9.3"
   },
   "dependencies": {
     "archiver": "^7.0.1",
