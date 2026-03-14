@@ -295,10 +295,6 @@ async function startRender(): Promise<void> {
     alert('Please select a subject file');
     return;
   }
-  if (!settings.animations.length) {
-    alert('Please select at least one animation');
-    return;
-  }
   if (!settings.output_directory) {
     alert('Please select an output directory');
     return;

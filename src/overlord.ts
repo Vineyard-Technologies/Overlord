@@ -739,15 +739,14 @@ async function startRender(settings: AppSettings): Promise<RenderResult> {
   }
   filesToValidate.push({ path: settings.subject, name: 'Subject file' });
   
-  // Animation files (at least one required)
-  if (!settings.animations || settings.animations.length === 0) {
-    throw new Error('At least one animation file is required');
+  // Animation files (optional - renders as static if none provided)
+  if (settings.animations) {
+    settings.animations.forEach((anim, idx) => {
+      if (anim && anim.trim() && anim !== 'static') {
+        filesToValidate.push({ path: anim, name: `Animation file ${idx + 1}` });
+      }
+    });
   }
-  settings.animations.forEach((anim, idx) => {
-    if (anim && anim.trim() && anim !== 'static') {
-      filesToValidate.push({ path: anim, name: `Animation file ${idx + 1}` });
-    }
-  });
   
   // Optional prop animations
   if (settings.prop_animations) {
